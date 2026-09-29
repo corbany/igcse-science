@@ -1,0 +1,92 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role (student or instructor), tier, and details.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Unique user ID matching auth.uid" },
+        "name": { "type": "string", "description": "Display name of the user" },
+        "email": { "type": "string", "format": "email", "description": "Google email address" },
+        "role": { "type": "string", "enum": ["student", "instructor"], "description": "User role: student or instructor" },
+        "tier": { "type": "string", "enum": ["Core", "Extended"], "description": "Curriculum tier" },
+        "targetGrade": { "type": "string", "description": "Target exam grade" },
+        "examDate": { "type": "string", "description": "Scheduled exam date" },
+        "enrolledClassIds": { "type": "array", "description": "List of class IDs joined by the student" },
+        "createdAt": { "type": "string", "description": "Account creation timestamp" },
+        "lastActive": { "type": "string", "description": "Last active timestamp" }
+      },
+      "required": ["uid", "name", "email", "role"]
+    },
+    "InstructorInvite": {
+      "title": "InstructorInvite",
+      "description": "Invitation record granting instructor access to a specific email address.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email", "description": "Invited instructor Google email" },
+        "invitedByUid": { "type": "string", "description": "UID of the inviting instructor" },
+        "invitedByName": { "type": "string", "description": "Name of the inviting instructor" },
+        "invitedByEmail": { "type": "string", "description": "Email of the inviting instructor" },
+        "invitedAt": { "type": "string", "description": "Timestamp of invitation" },
+        "status": { "type": "string", "enum": ["pending", "accepted"], "description": "Invite status" }
+      },
+      "required": ["email", "invitedByUid", "invitedAt", "status"]
+    },
+    "Class": {
+      "title": "Class",
+      "description": "A class created by an instructor with a specific join code.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique class identifier" },
+        "classCode": { "type": "string", "description": "Unique alphanumeric join code (e.g. SCI-8492)" },
+        "name": { "type": "string", "description": "Name of the class" },
+        "subject": { "type": "string", "enum": ["all", "biology", "chemistry", "physics"], "description": "Subject focus" },
+        "description": { "type": "string", "description": "Optional class description" },
+        "instructorId": { "type": "string", "description": "UID of the instructor who created this class" },
+        "instructorName": { "type": "string", "description": "Name of the creator instructor" },
+        "instructorEmail": { "type": "string", "description": "Email of the creator instructor" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "studentCount": { "type": "number", "description": "Current number of enrolled students" }
+      },
+      "required": ["id", "classCode", "name", "instructorId", "instructorName", "createdAt"]
+    },
+    "ClassStudentEnrollment": {
+      "title": "ClassStudentEnrollment",
+      "description": "Enrollment record linking a student to a class and holding their progress snapshot.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "description": "Student auth UID" },
+        "name": { "type": "string", "description": "Student display name" },
+        "email": { "type": "string", "description": "Student Google email" },
+        "tier": { "type": "string", "description": "Student tier" },
+        "joinedAt": { "type": "string", "description": "When the student joined the class" },
+        "lastActive": { "type": "string", "description": "Timestamp of latest progress update" },
+        "completedLessonsCount": { "type": "number", "description": "Number of completed lessons" },
+        "quizScores": { "type": "object", "description": "Map of subject quiz scores" },
+        "subtopicQuizScores": { "type": "object", "description": "Map of subtopic quiz scores" },
+        "topicConfidence": { "type": "object", "description": "Confidence ratings 1-5 per topic" },
+        "trafficLights": { "type": "object", "description": "Traffic light status per subtopic" },
+        "weakTopics": { "type": "array", "description": "List of weak topic codes" }
+      },
+      "required": ["studentId", "name", "email", "joinedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles with assigned roles (student or instructor)."
+    },
+    "/instructor_invites/{inviteId}": {
+      "schema": { "$ref": "#/entities/InstructorInvite" },
+      "description": "Records instructor invitations issued by existing instructors."
+    },
+    "/classes/{classId}": {
+      "schema": { "$ref": "#/entities/Class" },
+      "description": "Classes created by instructors with class codes."
+    },
+    "/classes/{classId}/students/{studentId}": {
+      "schema": { "$ref": "#/entities/ClassStudentEnrollment" },
+      "description": "Students enrolled in a specific class and their progress tracked by the instructor."
+    }
+  }
+}

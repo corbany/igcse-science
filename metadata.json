@@ -1,0 +1,6 @@
+{
+  "name": "IGCSE Combined Science 0653 Hub",
+  "description": "Comprehensive Cambridge IGCSE Combined Science (0653) revision platform with lesson slide decks, syllabus notebook, past papers, interactive quizzes, progress tracking, instructor analytics, and adaptive AI tutor.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

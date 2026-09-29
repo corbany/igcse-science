@@ -1,0 +1,217 @@
+import React, { useState } from 'react';
+import { 
+  GraduationCap, 
+  LogIn, 
+  Sparkles, 
+  BookOpen, 
+  Award, 
+  Users, 
+  ShieldCheck, 
+  AlertCircle,
+  CheckCircle2,
+  Atom,
+  Dna,
+  Zap
+} from 'lucide-react';
+import { googleSignIn } from '../services/firebaseAuth';
+import { getOrCreateUserProfile } from '../services/firestoreService';
+import { UserProfile } from '../types';
+
+interface GoogleSignInGateProps {
+  onSignInSuccess: (user: UserProfile, token: string) => void;
+  theme: 'dark' | 'light';
+}
+
+export const GoogleSignInGate: React.FC<GoogleSignInGateProps> = ({
+  onSignInSuccess,
+  theme
+}) => {
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    setErrorMessage(null);
+    try {
+      const res = await googleSignIn();
+      if (!res) {
+        setLoading(false);
+        return;
+      }
+      const { user: firebaseUser, accessToken } = res;
+      // Get or create profile in Firestore with role evaluation
+      const profile = await getOrCreateUserProfile(
+        firebaseUser.uid,
+        firebaseUser.displayName || 'Student',
+        firebaseUser.email || ''
+      );
+      onSignInSuccess(profile, accessToken);
+    } catch (err: any) {
+      console.error('Google Sign In error:', err);
+      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
+        setErrorMessage('Sign-in popup was closed before completing. Please try again.');
+      } else {
+        setErrorMessage(err?.message || 'Unable to sign in with Google. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className={`min-h-screen flex flex-col justify-center items-center px-4 sm:px-6 lg:px-8 py-12 transition-colors duration-200 ${
+      theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'
+    }`}>
+      {/* Background Decorative Glows */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -left-40 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl"></div>
+        <div className="absolute top-1/3 -right-40 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl"></div>
+        <div className="absolute -bottom-40 left-1/3 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl"></div>
+      </div>
+
+      <div className="relative max-w-xl w-full space-y-8">
+        {/* Header Branding */}
+        <div className="text-center space-y-3">
+          <div className="inline-flex items-center justify-center p-3 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 shadow-lg shadow-emerald-500/20 mb-2">
+            <GraduationCap className="w-10 h-10 stroke-[2.5]" />
+          </div>
+
+          <div className="flex items-center justify-center gap-2">
+            <span className="text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+              Cambridge IGCSE 0653
+            </span>
+            <span className="text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider bg-purple-500/15 text-purple-400 border border-purple-500/30">
+              Science Learning Hub
+            </span>
+          </div>
+
+          <h1 className="text-2xl sm:text-4xl font-black tracking-tight">
+            Combined Science Revision & Teaching Portal
+          </h1>
+
+          <p className="text-sm sm:text-base text-slate-400 max-w-md mx-auto">
+            Please sign in with your Google account to access interactive lesson slide decks, practice quizzes, and connect with your instructor's classes.
+          </p>
+        </div>
+
+        {/* Error Alert if any */}
+        {errorMessage && (
+          <div className="p-4 rounded-xl bg-red-950/40 border border-red-500/40 text-red-300 text-sm flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <span className="font-semibold">Sign In Notice:</span> {errorMessage}
+            </div>
+          </div>
+        )}
+
+        {/* Main Sign-In Card */}
+        <div className={`p-8 rounded-3xl border shadow-xl backdrop-blur-sm transition ${
+          theme === 'dark' 
+            ? 'bg-slate-900/90 border-slate-800' 
+            : 'bg-white border-slate-200'
+        }`}>
+          <div className="space-y-6">
+            <div className="text-center space-y-1">
+              <h2 className="text-lg font-bold">Sign In to Continue</h2>
+              <p className="text-xs text-slate-400">
+                New accounts automatically join as <span className="font-semibold text-emerald-400">Students</span>. Instructors receive educator access upon invitation.
+              </p>
+            </div>
+
+            {/* Google Sign-in Button */}
+            <button
+              onClick={handleGoogleSignIn}
+              disabled={loading}
+              className={`w-full flex items-center justify-center gap-3 py-3.5 px-6 rounded-2xl font-bold text-sm sm:text-base transition-all transform active:scale-[0.98] shadow-lg ${
+                loading
+                  ? 'bg-slate-800 text-slate-400 cursor-wait'
+                  : 'bg-white hover:bg-slate-100 text-slate-900 border border-slate-300 shadow-slate-200/50 hover:shadow-xl'
+              }`}
+            >
+              {loading ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                  <span>Connecting to Google Account...</span>
+                </div>
+              ) : (
+                <>
+                  <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                    <path
+                      fill="#4285F4"
+                      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.03h3.88c2.27-2.09 3.665-5.17 3.665-9.12z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.03c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.13C3.28 21.43 7.35 24 12 24z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.28 14.29c-.25-.72-.38-1.49-.38-2.29s.13-1.57.38-2.29V6.57H1.25C.45 8.16 0 9.98 0 12s.45 3.84 1.25 5.43l4.03-3.14z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.28 2.57 1.25 6.57l4.03 3.14c.95-2.83 3.6-4.96 6.72-4.96z"
+                    />
+                  </svg>
+                  <span>Sign in with Google Account</span>
+                </>
+              )}
+            </button>
+
+            {/* Role Expectations Explanation */}
+            <div className={`p-4 rounded-2xl text-xs space-y-2 ${
+              theme === 'dark' ? 'bg-slate-950/60 border border-slate-800' : 'bg-slate-50 border border-slate-200'
+            }`}>
+              <div className="flex items-center gap-2 font-bold text-slate-300">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>Account Access Rules:</span>
+              </div>
+              <ul className="space-y-1.5 text-slate-400 pl-6 list-disc">
+                <li><strong className="text-slate-300">Students:</strong> Automatic access to all lesson slides, quizzes, past exam papers, and class enrollment via teacher codes. No instructor view access.</li>
+                <li><strong className="text-slate-300">Instructors:</strong> Granted when invited by another educator. Gain full cohort analytics, class creation, and Google Drive lesson synchronization.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        {/* Feature Highlights Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+          <div className={`p-4 rounded-2xl border text-center space-y-1 ${
+            theme === 'dark' ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'
+          }`}>
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mx-auto">
+              <Dna className="w-4 h-4" />
+            </div>
+            <h3 className="text-xs font-bold">Biology B1–B16</h3>
+            <p className="text-[11px] text-slate-400">Cells, enzymes, respiration, plant and human systems.</p>
+          </div>
+
+          <div className={`p-4 rounded-2xl border text-center space-y-1 ${
+            theme === 'dark' ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'
+          }`}>
+            <div className="w-8 h-8 rounded-xl bg-sky-500/10 text-sky-400 flex items-center justify-center mx-auto">
+              <Atom className="w-4 h-4" />
+            </div>
+            <h3 className="text-xs font-bold">Chemistry C1–C12</h3>
+            <p className="text-[11px] text-slate-400">Atoms, bonding, stoichiometry, acids, metals & organics.</p>
+          </div>
+
+          <div className={`p-4 rounded-2xl border text-center space-y-1 ${
+            theme === 'dark' ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-200'
+          }`}>
+            <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto">
+              <Zap className="w-4 h-4" />
+            </div>
+            <h3 className="text-xs font-bold">Physics P1–P5</h3>
+            <p className="text-[11px] text-slate-400">Motion, forces, energy, thermal, waves & electricity.</p>
+          </div>
+        </div>
+
+        {/* Cambridge Disclaimer */}
+        <div className="text-center text-[11px] text-slate-400">
+          Designed specifically for Cambridge Assessment International Education IGCSE™ Combined Science (0653).
+        </div>
+      </div>
+    </div>
+  );
+};
