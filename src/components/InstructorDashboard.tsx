@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   BarChart3, 
   Users, 
@@ -87,17 +87,6 @@ interface InstructorDashboardProps {
   onSwitchToStudentMode?: () => void;
   onNavigateToLessons?: () => void;
 }
-
-const mockClassData: StudentRosterItem[] = [
-  { id: 'std-1', name: 'Alex Thompson', tier: 'Extended', progressPct: 88, bioScore: 92, chemScore: 85, physScore: 89, weakArea: 'P4 Circuits', status: 'Excelling' },
-  { id: 'std-2', name: 'Zara Chen', tier: 'Extended', progressPct: 79, bioScore: 84, chemScore: 78, physScore: 81, weakArea: 'C4 Electrolysis', status: 'On Track' },
-  { id: 'std-3', name: 'Marcus Patel', tier: 'Core', progressPct: 45, bioScore: 58, chemScore: 49, physScore: 52, weakArea: 'C9 Blast Furnace', status: 'Intervention Required' },
-  { id: 'std-4', name: 'Elena Rostova', tier: 'Extended', progressPct: 94, bioScore: 95, chemScore: 90, physScore: 93, weakArea: 'C12 Qualitative', status: 'Excelling' },
-  { id: 'std-5', name: 'Tariq Al-Mansoor', tier: 'Core', progressPct: 62, bioScore: 68, chemScore: 61, physScore: 65, weakArea: 'P1 Density', status: 'On Track' },
-  { id: 'std-6', name: 'Chloe Dubois', tier: 'Extended', progressPct: 53, bioScore: 62, chemScore: 55, physScore: 59, weakArea: 'B9 Heart Circulation', status: 'Intervention Required' },
-  { id: 'std-7', name: 'Devon Vance', tier: 'Extended', progressPct: 82, bioScore: 86, chemScore: 80, physScore: 84, weakArea: 'P5 Space Physics', status: 'On Track' },
-  { id: 'std-8', name: 'Hana Takahashi', tier: 'Core', progressPct: 75, bioScore: 78, chemScore: 72, physScore: 76, weakArea: 'B5 Enzymes', status: 'On Track' }
-];
 
 export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({ 
   currentUser,
@@ -391,7 +380,41 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
     setSlidesSubtopics(getActiveGoogleSlideSubtopics());
   };
 
-  const filteredStudents = mockClassData.filter(student => {
+  // Convert real enrolled class students into StudentRosterItem
+  const rosterStudents: StudentRosterItem[] = useMemo(() => {
+    return classStudents.map(std => {
+      const bioQuiz = std.quizScores?.['biology'];
+      const chemQuiz = std.quizScores?.['chemistry'];
+      const physQuiz = std.quizScores?.['physics'];
+      const bioScore = bioQuiz && bioQuiz.total > 0 ? Math.round((bioQuiz.score / bioQuiz.total) * 100) : 0;
+      const chemScore = chemQuiz && chemQuiz.total > 0 ? Math.round((chemQuiz.score / chemQuiz.total) * 100) : 0;
+      const physScore = physQuiz && physQuiz.total > 0 ? Math.round((physQuiz.score / physQuiz.total) * 100) : 0;
+      
+      const progressPct = Math.min(100, Math.round(((std.completedLessonsCount || 0) / 33) * 100));
+      const weakArea = std.weakTopics && std.weakTopics.length > 0 ? std.weakTopics.join(', ') : 'None identified';
+      
+      let status: 'Excelling' | 'On Track' | 'Intervention Required' = 'On Track';
+      if (progressPct >= 80) {
+        status = 'Excelling';
+      } else if (progressPct < 40 || (std.weakTopics && std.weakTopics.length >= 3)) {
+        status = 'Intervention Required';
+      }
+
+      return {
+        id: std.studentId,
+        name: std.name || 'Student',
+        tier: std.tier || 'Extended',
+        progressPct,
+        bioScore,
+        chemScore,
+        physScore,
+        weakArea,
+        status
+      };
+    });
+  }, [classStudents]);
+
+  const filteredStudents = rosterStudents.filter(student => {
     const matchSearch = student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       student.weakArea.toLowerCase().includes(searchTerm.toLowerCase());
     const matchTier = tierFilter === 'all' || student.tier === tierFilter;
@@ -405,15 +428,24 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
     return s.title.toLowerCase().includes(q) || s.topicCode.toLowerCase().includes(q) || s.subject.toLowerCase().includes(q);
   });
 
-  const avgProgress = Math.round(mockClassData.reduce((acc, s) => acc + s.progressPct, 0) / mockClassData.length);
-  const avgBio = Math.round(mockClassData.reduce((acc, s) => acc + s.bioScore, 0) / mockClassData.length);
-  const avgChem = Math.round(mockClassData.reduce((acc, s) => acc + s.chemScore, 0) / mockClassData.length);
-  const avgPhys = Math.round(mockClassData.reduce((acc, s) => acc + s.physScore, 0) / mockClassData.length);
-  const interventionCount = mockClassData.filter(s => s.status === 'Intervention Required').length;
+  const avgProgress = rosterStudents.length > 0
+    ? Math.round(rosterStudents.reduce((acc, s) => acc + s.progressPct, 0) / rosterStudents.length)
+    : 0;
+  const avgBio = rosterStudents.length > 0
+    ? Math.round(rosterStudents.reduce((acc, s) => acc + s.bioScore, 0) / rosterStudents.length)
+    : 0;
+  const avgChem = rosterStudents.length > 0
+    ? Math.round(rosterStudents.reduce((acc, s) => acc + s.chemScore, 0) / rosterStudents.length)
+    : 0;
+  const avgPhys = rosterStudents.length > 0
+    ? Math.round(rosterStudents.reduce((acc, s) => acc + s.physScore, 0) / rosterStudents.length)
+    : 0;
+  const interventionCount = rosterStudents.filter(s => s.status === 'Intervention Required').length;
 
   const handleExportCSV = () => {
+    if (rosterStudents.length === 0) return;
     const headers = ['ID,Name,Tier,Progress%,BioScore,ChemScore,PhysScore,WeakArea,Status'];
-    const rows = mockClassData.map(s => 
+    const rows = rosterStudents.map(s => 
       `${s.id},"${s.name}",${s.tier},${s.progressPct},${s.bioScore},${s.chemScore},${s.physScore},"${s.weakArea}",${s.status}`
     );
     const csvContent = headers.concat(rows).join('\n');
@@ -421,7 +453,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `IGCSE-0653-Class-Roster-Report.csv`;
+    link.download = `${selectedClass?.name ? selectedClass.name.replace(/[^a-zA-Z0-9]/g, '_') : 'Class'}-Student-Roster.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -1000,37 +1032,61 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm">
               <span className="text-xs text-slate-400 font-medium">Cohort Syllabus Mastery</span>
               <div className="text-2xl font-black text-white mt-1 font-mono">{avgProgress}%</div>
-              <div className="text-xs text-emerald-400 mt-1 flex items-center gap-1 font-medium">
-                <TrendingUp className="w-3.5 h-3.5" />
-                <span>+4% this week</span>
+              <div className="text-xs text-slate-400 mt-1 flex items-center gap-1 font-medium">
+                <Users className="w-3.5 h-3.5 text-purple-400" />
+                <span>{rosterStudents.length} student{rosterStudents.length === 1 ? '' : 's'} enrolled</span>
               </div>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm">
               <span className="text-xs text-slate-400 font-medium">Biology Average (B1–B16)</span>
               <div className="text-2xl font-black text-emerald-400 mt-1 font-mono">{avgBio}%</div>
-              <div className="text-xs text-slate-400 mt-1">High mastery on Cell Structure</div>
+              <div className="text-xs text-slate-400 mt-1">Based on student quiz scores</div>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm">
               <span className="text-xs text-slate-400 font-medium">Chemistry Average (C1–C12)</span>
               <div className="text-2xl font-black text-sky-400 mt-1 font-mono">{avgChem}%</div>
-              <div className="text-xs text-slate-400 mt-1">Intervention on Electrolysis</div>
+              <div className="text-xs text-slate-400 mt-1">Based on student quiz scores</div>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm">
               <span className="text-xs text-slate-400 font-medium">Physics Average (P1–P5)</span>
               <div className="text-2xl font-black text-amber-400 mt-1 font-mono">{avgPhys}%</div>
-              <div className="text-xs text-slate-400 mt-1">Strong on Density & Forces</div>
+              <div className="text-xs text-slate-400 mt-1">Based on student quiz scores</div>
             </div>
           </div>
 
-          {/* Mock Cohort Breakdown */}
+          {/* Student Mastery Breakdown */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <h2 className="text-lg font-bold text-white">Student Mastery Breakdown</h2>
+              <div>
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <span>Student Mastery Breakdown</span>
+                  {selectedClass && (
+                    <span className="text-xs font-normal text-slate-400">
+                      — {selectedClass.name} ({rosterStudents.length} student{rosterStudents.length === 1 ? '' : 's'})
+                    </span>
+                  )}
+                </h2>
+              </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                {classes.length > 1 && (
+                  <select
+                    value={selectedClass?.id || ''}
+                    onChange={e => {
+                      const found = classes.find(c => c.id === e.target.value);
+                      if (found) setSelectedClass(found);
+                    }}
+                    className="bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none"
+                  >
+                    {classes.map(c => (
+                      <option key={c.id} value={c.id}>{c.name} ({c.classCode})</option>
+                    ))}
+                  </select>
+                )}
+
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
@@ -1062,67 +1118,99 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                   <option value="On Track">On Track</option>
                   <option value="Intervention Required">Intervention Required</option>
                 </select>
+
+                {rosterStudents.length > 0 && (
+                  <button
+                    onClick={handleExportCSV}
+                    className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+                    title="Export CSV"
+                  >
+                    <FileDown className="w-3.5 h-3.5 text-purple-400" />
+                    <span>CSV</span>
+                  </button>
+                )}
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-xs text-left text-slate-200 border border-slate-800 rounded-xl overflow-hidden">
-                <thead className="bg-slate-950 text-slate-400 uppercase font-semibold">
-                  <tr>
-                    <th className="p-3 border-b border-slate-800">Student Name</th>
-                    <th className="p-3 border-b border-slate-800">Tier</th>
-                    <th className="p-3 border-b border-slate-800">Syllabus %</th>
-                    <th className="p-3 border-b border-slate-800">Biology</th>
-                    <th className="p-3 border-b border-slate-800">Chemistry</th>
-                    <th className="p-3 border-b border-slate-800">Physics</th>
-                    <th className="p-3 border-b border-slate-800">Priority Weak Topic</th>
-                    <th className="p-3 border-b border-slate-800">Status</th>
-                    <th className="p-3 border-b border-slate-800">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800 bg-slate-900/60">
-                  {filteredStudents.map(std => {
-                    let statusClass = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
-                    if (std.status === 'Intervention Required') {
-                      statusClass = 'bg-rose-500/20 text-rose-300 border-rose-500/30';
-                    } else if (std.status === 'On Track') {
-                      statusClass = 'bg-blue-500/20 text-blue-300 border-blue-500/30';
-                    }
+            {rosterStudents.length === 0 ? (
+              <div className="p-12 text-center bg-slate-950/40 border border-dashed border-slate-800 rounded-2xl space-y-3">
+                <Users className="w-12 h-12 text-slate-600 mx-auto" />
+                <h3 className="text-base font-bold text-slate-200">No Enrolled Students</h3>
+                <p className="text-xs text-slate-400 max-w-md mx-auto">
+                  {selectedClass ? (
+                    <>
+                      No students have joined <span className="text-purple-300 font-semibold">{selectedClass.name}</span> yet. Share your Class Code <span className="font-mono font-bold text-purple-400 bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800/60">{selectedClass.classCode}</span> with students so they can join.
+                    </>
+                  ) : (
+                    'Create a class in the Classes tab and share your Class Code with students to view their live syllabus mastery and quiz analytics.'
+                  )}
+                </p>
+              </div>
+            ) : filteredStudents.length === 0 ? (
+              <div className="p-8 text-center bg-slate-950/30 border border-slate-800/80 rounded-2xl space-y-1">
+                <p className="text-sm font-semibold text-slate-300">No students match filter</p>
+                <p className="text-xs text-slate-500">Try adjusting your search query, tier filter, or status filter.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs text-left text-slate-200 border border-slate-800 rounded-xl overflow-hidden">
+                  <thead className="bg-slate-950 text-slate-400 uppercase font-semibold">
+                    <tr>
+                      <th className="p-3 border-b border-slate-800">Student Name</th>
+                      <th className="p-3 border-b border-slate-800">Tier</th>
+                      <th className="p-3 border-b border-slate-800">Syllabus %</th>
+                      <th className="p-3 border-b border-slate-800">Biology</th>
+                      <th className="p-3 border-b border-slate-800">Chemistry</th>
+                      <th className="p-3 border-b border-slate-800">Physics</th>
+                      <th className="p-3 border-b border-slate-800">Priority Weak Topic</th>
+                      <th className="p-3 border-b border-slate-800">Status</th>
+                      <th className="p-3 border-b border-slate-800">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800 bg-slate-900/60">
+                    {filteredStudents.map(std => {
+                      let statusClass = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
+                      if (std.status === 'Intervention Required') {
+                        statusClass = 'bg-rose-500/20 text-rose-300 border-rose-500/30';
+                      } else if (std.status === 'On Track') {
+                        statusClass = 'bg-blue-500/20 text-blue-300 border-blue-500/30';
+                      }
 
-                    return (
-                      <tr key={std.id} className="hover:bg-slate-800/40 transition">
-                        <td className="p-3 font-semibold text-white">{std.name}</td>
-                        <td className="p-3">
-                          <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
-                            std.tier === 'Extended' ? 'bg-amber-500/20 text-amber-300' : 'bg-blue-500/20 text-blue-300'
-                          }`}>
-                            {std.tier}
-                          </span>
-                        </td>
-                        <td className="p-3 font-mono font-bold text-emerald-400">{std.progressPct}%</td>
-                        <td className="p-3 font-mono">{std.bioScore}%</td>
-                        <td className="p-3 font-mono">{std.chemScore}%</td>
-                        <td className="p-3 font-mono">{std.physScore}%</td>
-                        <td className="p-3 font-medium text-amber-300">{std.weakArea}</td>
-                        <td className="p-3">
-                          <span className={`px-2 py-0.5 rounded border text-[10px] font-semibold ${statusClass}`}>
-                            {std.status}
-                          </span>
-                        </td>
-                        <td className="p-3">
-                          <button
-                            onClick={() => handleSendReminder(std.name)}
-                            className="text-[11px] px-2.5 py-1 bg-purple-600/30 text-purple-300 border border-purple-500/40 rounded hover:bg-purple-600/50 transition font-medium"
-                          >
-                            Nudge / Assign
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                      return (
+                        <tr key={std.id} className="hover:bg-slate-800/40 transition">
+                          <td className="p-3 font-semibold text-white">{std.name}</td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
+                              std.tier === 'Extended' ? 'bg-amber-500/20 text-amber-300' : 'bg-blue-500/20 text-blue-300'
+                            }`}>
+                              {std.tier}
+                            </span>
+                          </td>
+                          <td className="p-3 font-mono font-bold text-emerald-400">{std.progressPct}%</td>
+                          <td className="p-3 font-mono">{std.bioScore}%</td>
+                          <td className="p-3 font-mono">{std.chemScore}%</td>
+                          <td className="p-3 font-mono">{std.physScore}%</td>
+                          <td className="p-3 font-medium text-amber-300">{std.weakArea}</td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded border text-[10px] font-semibold ${statusClass}`}>
+                              {std.status}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <button
+                              onClick={() => handleSendReminder(std.name)}
+                              className="text-[11px] px-2.5 py-1 bg-purple-600/30 text-purple-300 border border-purple-500/40 rounded hover:bg-purple-600/50 transition font-medium"
+                            >
+                              Nudge / Assign
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
