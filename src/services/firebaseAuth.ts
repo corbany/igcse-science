@@ -24,10 +24,9 @@ export const db = (() => {
 })();
 
 const provider = new GoogleAuthProvider();
-// Required Google Drive & Slides scopes to organize lessons into subfolders and view presentations
-provider.addScope('https://www.googleapis.com/auth/drive');
-provider.addScope('https://www.googleapis.com/auth/drive.readonly');
-provider.addScope('https://www.googleapis.com/auth/presentations.readonly');
+// Only request standard login scopes (email and profile)
+provider.addScope('email');
+provider.addScope('profile');
 provider.setCustomParameters({
   prompt: 'select_account'
 });
@@ -61,11 +60,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     isSigningIn = true;
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Failed to get access token from Google Auth');
-    }
-
-    cachedAccessToken = credential.accessToken;
+    cachedAccessToken = credential?.accessToken || '';
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Sign in error:', error);
