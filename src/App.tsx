@@ -32,37 +32,12 @@ const STORAGE_KEY_PROGRESS = 'igcse_0653_student_progress';
 const STORAGE_KEY_THEME = 'igcse_0653_theme';
 
 const defaultProgress: StudentProgress = {
-  completedLessons: ['deck-b2-cells', 'deck-c2-atoms', 'deck-p1-motion'],
-  topicConfidence: {
-    'B1': 5,
-    'B2': 4,
-    'B5': 2,
-    'C2': 4,
-    'C4': 2,
-    'P1': 4,
-    'P4': 2
-  },
-  trafficLights: {
-    'B1.1': 'green',
-    'B2.1': 'orange',
-    'B10.1': 'red',
-    'C11.4': 'orange',
-    'P1.2': 'green'
-  },
-  subtopicQuizScores: {
-    'B1.1': { score: 9, total: 10, percentage: 90, passed: true, date: '2026-03-20' },
-    'P1.2': { score: 8, total: 10, percentage: 80, passed: true, date: '2026-03-21' }
-  },
-  savedNotes: {
-    'B2': 'Magnification formula: M = Image Size / Actual Size. Always convert units to micrometres (μm) before dividing (1 mm = 1000 μm).',
-    'C2': 'Simple molecular substances have low melting points because weak intermolecular forces between molecules require little energy to break, even though covalent bonds inside the molecule are strong.',
-    'P1': 'Weight = mass × g. Remember Cambridge 0653 uses g = 9.8 N/kg.'
-  },
-  quizScores: {
-    'biology': { score: 5, total: 6, date: '2026-03-20' },
-    'chemistry': { score: 3, total: 5, date: '2026-03-21' },
-    'physics': { score: 4, total: 5, date: '2026-03-22' }
-  },
+  completedLessons: [],
+  topicConfidence: {},
+  trafficLights: {},
+  subtopicQuizScores: {},
+  savedNotes: {},
+  quizScores: {},
   lastActive: new Date().toISOString()
 };
 
