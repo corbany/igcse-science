@@ -31,7 +31,12 @@ import {
   Plus,
   Play,
   Share2,
-  Presentation
+  Presentation,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelLeft,
+  ChevronDown,
+  FlaskConical
 } from 'lucide-react';
 import { ScienceSubject, TrafficLightStatus, SubtopicQuizResult, StudentProgress } from '../types';
 import { 
@@ -107,6 +112,75 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   const [activeSlideIndex, setActiveSlideIndex] = useState<number>(0);
   const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
   const [copiedNote, setCopiedNote] = useState<boolean>(false);
+
+  // Sidebar expanded / minimized state (allows hiding sidebar to focus on slides)
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(true);
+
+  // Subtopic accordion expanded state: subtopicCode -> boolean
+  const [expandedSubtopics, setExpandedSubtopics] = useState<Record<string, boolean>>(() => ({
+    'B1.1': true
+  }));
+
+  // Auto-expand subtopic when selected
+  useEffect(() => {
+    if (selectedSubtopicCode) {
+      setExpandedSubtopics(prev => ({
+        ...prev,
+        [selectedSubtopicCode]: true
+      }));
+    }
+  }, [selectedSubtopicCode]);
+
+  const toggleSubtopicExpanded = (code: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setExpandedSubtopics(prev => ({
+      ...prev,
+      [code]: !prev[code]
+    }));
+  };
+
+  const handleExpandAllSubtopics = () => {
+    const allExp: Record<string, boolean> = {};
+    filteredSubtopics.forEach(s => {
+      allExp[s.subtopicCode] = true;
+    });
+    setExpandedSubtopics(allExp);
+  };
+
+  const handleCollapseAllSubtopics = () => {
+    setExpandedSubtopics({});
+  };
+
+  // Helper to categorize lesson deck type cleanly
+  const getDeckCategoryInfo = (deckTitle: string) => {
+    const t = (deckTitle || '').toLowerCase();
+    if (t.includes('practical') || t.includes('experiment') || t.includes('investigat') || t.includes('testing') || t.includes('method')) {
+      return { 
+        label: 'Practical', 
+        badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
+        icon: '🔬'
+      };
+    }
+    if (t.includes('calculation') || t.includes('formula') || t.includes('math') || t.includes('magnif') || t.includes('rate') || t.includes('stoichio')) {
+      return { 
+        label: 'Calculations', 
+        badge: 'bg-blue-500/15 text-blue-400 border border-blue-500/30',
+        icon: '🔢'
+      };
+    }
+    if (t.includes('planning') || t.includes('design') || t.includes('evaluation')) {
+      return { 
+        label: 'Planning', 
+        badge: 'bg-purple-500/15 text-purple-400 border border-purple-500/30',
+        icon: '📋'
+      };
+    }
+    return { 
+      label: 'Theory', 
+      badge: 'bg-slate-700/50 text-slate-300 border border-slate-600/40',
+      icon: '📖'
+    };
+  };
 
   // Status Filter for subtopics (all, red, orange, green, unranked)
   const [statusFilter, setStatusFilter] = useState<'all' | 'red' | 'orange' | 'green' | 'unranked'>('all');
@@ -807,145 +881,255 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
       {/* Main Grid: Left Subtopics Navigator | Right Slide Presentation & Traffic Light Controls */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* LEFT COLUMN: Subtopics Accordion/List (lg:col-span-4) */}
-        <div className={`lg:col-span-4 rounded-2xl border p-4 space-y-4 max-h-[850px] overflow-y-auto ${
-          theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
-        }`}>
-          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-            <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-emerald-400" />
-              <h2 className="font-bold text-sm">Subtopics Directory</h2>
-            </div>
-            <span className="text-xs text-slate-400 font-mono">
-              {filteredSubtopics.length} Available
-            </span>
-          </div>
-
-          {/* Grouped Subtopics by main topic */}
-          <div className="space-y-4">
-            {groupedSubtopics.map(group => (
-              <div key={group.topicCode} className="space-y-1.5">
-                <div className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider flex items-center justify-between ${
-                  theme === 'dark' ? 'bg-slate-950/70 text-slate-400' : 'bg-slate-100 text-slate-600'
-                }`}>
-                  <span>{group.topicCode}: {group.topicName}</span>
-                  <span className="font-mono text-[10px]">
-                    {group.items.length} units • {group.items.reduce((acc, it) => acc + (it.decks?.length || 1), 0)} lessons
-                  </span>
-                </div>
-
-                <div className="space-y-1">
-                  {group.items.map(sub => {
-                    const isSelected = sub.subtopicCode === selectedSubtopicCode;
-                    const light = trafficLights[sub.subtopicCode];
-                    const quizResult = subtopicQuizScores[sub.subtopicCode];
-                    const subLessonCount = sub.decks?.length || 1;
-
-                    return (
-                      <button
-                        key={sub.subtopicCode}
-                        onClick={() => {
-                          setSelectedSubtopicCode(sub.subtopicCode);
-                          setActiveDeckIndex(0);
-                          setActiveSlideIndex(0);
-                        }}
-                        className={`w-full text-left p-2.5 rounded-xl transition flex items-center justify-between gap-2 border ${
-                          isSelected
-                            ? theme === 'dark'
-                              ? 'bg-slate-800 border-emerald-500/50 shadow-sm'
-                              : 'bg-emerald-50 border-emerald-400 shadow-xs'
-                            : theme === 'dark'
-                              ? 'bg-slate-950/40 border-slate-800/80 hover:bg-slate-800/60'
-                              : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        <div className="space-y-0.5 min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-mono text-xs font-bold text-emerald-400">
-                              [{sub.subtopicCode}]
-                            </span>
-                            <span className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
-                              sub.tier.includes('Supplement') 
-                                ? 'bg-amber-500/20 text-amber-300' 
-                                : 'bg-blue-500/20 text-blue-300'
-                            }`}>
-                              {sub.tier}
-                            </span>
-                            {/* Clear number of lessons badge */}
-                            <span 
-                              className={`text-[10px] px-1.5 py-0.2 rounded font-black border ${
-                                subLessonCount > 1
-                                  ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
-                                  : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25'
-                              }`} 
-                              title={`${subLessonCount} lessons in this subtopic`}
-                            >
-                              {subLessonCount} {subLessonCount === 1 ? 'Lesson' : 'Lessons'}
-                            </span>
-                            {isInstructor && subtopicsWithDriveSlides.has(sub.subtopicCode.toUpperCase()) && (
-                              <span className="text-[10px] px-1.5 py-0.2 rounded font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-0.5" title="Instructor: Exact Google Drive slide linked">
-                                <Cloud className="w-2.5 h-2.5" />
-                                <span>Drive</span>
-                              </span>
-                            )}
-                            {quizResult && quizResult.passed && (
-                              <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono">
-                                {quizResult.score}/10 (Quiz)
-                              </span>
-                            )}
-                          </div>
-                          <p className={`text-xs font-semibold truncate ${
-                            isSelected 
-                              ? theme === 'dark' ? 'text-white' : 'text-slate-900' 
-                              : theme === 'dark' ? 'text-slate-300' : 'text-slate-700'
-                          }`}>
-                            {sub.title}
-                            <span className="ml-1.5 opacity-65 font-normal text-[11px]">
-                              ({subLessonCount} {subLessonCount === 1 ? 'lesson' : 'lessons'})
-                            </span>
-                          </p>
-                        </div>
-
-                        {/* Traffic Light Dot Indicator */}
-                        <div className="shrink-0 flex items-center gap-1">
-                          {light === 'green' && (
-                            <span 
-                              title="Mastered (Quiz ≥ 80%)" 
-                              className="w-3.5 h-3.5 rounded-full bg-emerald-500 shadow-xs shadow-emerald-500/50 flex items-center justify-center text-[8px] text-slate-950 font-bold"
-                            >
-                              ✓
-                            </span>
-                          )}
-                          {light === 'orange' && (
-                            <span 
-                              title="Needs some revision" 
-                              className="w-3.5 h-3.5 rounded-full bg-amber-500 shadow-xs shadow-amber-500/50"
-                            />
-                          )}
-                          {light === 'red' && (
-                            <span 
-                              title="Needs a lot of revision" 
-                              className="w-3.5 h-3.5 rounded-full bg-rose-500 shadow-xs shadow-rose-500/50"
-                            />
-                          )}
-                          {!light && (
-                            <span 
-                              title="Unranked - Click to rank knowledge" 
-                              className="w-3 h-3 rounded-full border border-dashed border-slate-500"
-                            />
-                          )}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+        {/* LEFT COLUMN: Subtopics Accordion/List (lg:col-span-4) - Collapsible via button */}
+        {isSidebarExpanded && (
+          <div className={`lg:col-span-4 rounded-2xl border p-4 space-y-3 max-h-[850px] overflow-y-auto transition-all ${
+            theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
+          }`}>
+            {/* Sidebar Header with Minimise Button and Expand/Collapse All */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-emerald-400" />
+                <h2 className="font-bold text-sm">Subtopics</h2>
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-300 border border-slate-700/60">
+                  {filteredSubtopics.length}
+                </span>
               </div>
-            ))}
-          </div>
-        </div>
+              
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const anyExpanded = filteredSubtopics.some(s => expandedSubtopics[s.subtopicCode]);
+                    if (anyExpanded) {
+                      handleCollapseAllSubtopics();
+                    } else {
+                      handleExpandAllSubtopics();
+                    }
+                  }}
+                  className={`text-[10px] font-medium px-2 py-1 rounded-lg transition border ${
+                    theme === 'dark'
+                      ? 'bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-700'
+                      : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
+                  }`}
+                  title="Toggle expand or collapse all subtopic lessons"
+                >
+                  {filteredSubtopics.some(s => expandedSubtopics[s.subtopicCode]) ? 'Collapse All' : 'Expand All'}
+                </button>
 
-        {/* RIGHT COLUMN: Active Subtopic Slide Viewer & Traffic Light Panel (lg:col-span-8) */}
-        <div className="lg:col-span-8 space-y-6">
+                <button
+                  type="button"
+                  onClick={() => setIsSidebarExpanded(false)}
+                  className={`p-1.5 rounded-lg transition border flex items-center gap-1 text-[11px] font-medium ${
+                    theme === 'dark'
+                      ? 'bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white'
+                      : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+                  }`}
+                  title="Minimise sidebar to expand slides view"
+                >
+                  <PanelLeftClose className="w-4 h-4 text-slate-400" />
+                  <span className="text-[10px] hidden sm:inline">Minimise</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Simple list of Subtopics grouped by topic */}
+            <div className="space-y-3">
+              {groupedSubtopics.map(group => (
+                <div key={group.topicCode} className="space-y-1">
+                  {/* Clean, minimal Topic Divider */}
+                  <div className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider flex items-center justify-between ${
+                    theme === 'dark' ? 'bg-slate-950/60 text-slate-400' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    <span className="truncate">{group.topicCode}: {group.topicName}</span>
+                    <span className="font-mono text-[9px] opacity-75 shrink-0 ml-1">
+                      {group.items.length} {group.items.length === 1 ? 'subtopic' : 'subtopics'}
+                    </span>
+                  </div>
+
+                  {/* Clean Subtopics List */}
+                  <div className="space-y-1">
+                    {group.items.map(sub => {
+                      const isSelected = sub.subtopicCode === selectedSubtopicCode;
+                      const isExpanded = !!expandedSubtopics[sub.subtopicCode];
+                      const light = trafficLights[sub.subtopicCode];
+                      const subDecks = sub.decks || [];
+                      const lessonCount = subDecks.length || 1;
+
+                      return (
+                        <div
+                          key={sub.subtopicCode}
+                          className={`rounded-xl border transition-all overflow-hidden ${
+                            isSelected
+                              ? theme === 'dark'
+                                ? 'border-emerald-500/60 bg-slate-800/60 shadow-xs'
+                                : 'border-emerald-500/60 bg-emerald-50/70 shadow-xs'
+                              : theme === 'dark'
+                                ? 'border-slate-800/70 bg-slate-950/40 hover:border-slate-700 hover:bg-slate-850/40'
+                                : 'border-slate-200 bg-slate-50/80 hover:border-slate-300 hover:bg-slate-100/80'
+                          }`}
+                        >
+                          {/* Subtopic Header Row: Code, Name, Traffic Light Status, Expand/Minimise Button */}
+                          <div 
+                            onClick={() => {
+                              setSelectedSubtopicCode(sub.subtopicCode);
+                              setActiveDeckIndex(0);
+                              setActiveSlideIndex(0);
+                              // Auto-expand so student immediately sees the lessons
+                              if (!isExpanded) {
+                                toggleSubtopicExpanded(sub.subtopicCode);
+                              }
+                            }}
+                            className="w-full text-left p-2.5 flex items-center justify-between gap-2.5 cursor-pointer select-none group"
+                          >
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              {/* Subtopic Code */}
+                              <span className={`font-mono text-xs font-bold px-1.5 py-0.5 rounded shrink-0 transition ${
+                                isSelected
+                                  ? 'bg-emerald-500 text-slate-950 font-black'
+                                  : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                              }`}>
+                                {sub.subtopicCode}
+                              </span>
+
+                              {/* Subtopic Name */}
+                              <span className={`text-xs font-semibold truncate ${
+                                isSelected
+                                  ? theme === 'dark' ? 'text-white' : 'text-slate-900 font-bold'
+                                  : theme === 'dark' ? 'text-slate-200 group-hover:text-white' : 'text-slate-700 group-hover:text-slate-900'
+                              }`}>
+                                {sub.title}
+                              </span>
+                            </div>
+
+                            {/* Right side: Traffic Light Status Dot + Expand/Minimise Toggle */}
+                            <div className="shrink-0 flex items-center gap-2">
+                              {/* Traffic Light Dot Indicator */}
+                              {light === 'green' && (
+                                <span 
+                                  title="Mastered (Quiz ≥ 80%)" 
+                                  className="w-3 h-3 rounded-full bg-emerald-500 shadow-xs shadow-emerald-500/50 flex items-center justify-center text-[7px] text-slate-950 font-bold"
+                                >
+                                  ✓
+                                </span>
+                              )}
+                              {light === 'orange' && (
+                                <span 
+                                  title="Needs some revision" 
+                                  className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-xs shadow-amber-500/50"
+                                />
+                              )}
+                              {light === 'red' && (
+                                <span 
+                                  title="Needs a lot of revision" 
+                                  className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-xs shadow-rose-500/50"
+                                />
+                              )}
+                              {!light && (
+                                <span 
+                                  title="Unranked knowledge" 
+                                  className="w-2.5 h-2.5 rounded-full border border-dashed border-slate-500/70"
+                                />
+                              )}
+
+                              {/* Expand/Minimise Chevron Button */}
+                              <button
+                                type="button"
+                                onClick={(e) => toggleSubtopicExpanded(sub.subtopicCode, e)}
+                                className={`p-1 rounded-md transition ${
+                                  theme === 'dark' 
+                                    ? 'hover:bg-slate-700 text-slate-400 hover:text-slate-200' 
+                                    : 'hover:bg-slate-200 text-slate-500 hover:text-slate-800'
+                                }`}
+                                title={isExpanded ? "Minimise lessons list" : `Expand ${lessonCount} categorised ${lessonCount === 1 ? 'lesson' : 'lessons'}`}
+                              >
+                                <div className="flex items-center gap-0.5">
+                                  <span className="text-[10px] font-mono opacity-60 mr-0.5">
+                                    {lessonCount}
+                                  </span>
+                                  {isExpanded ? (
+                                    <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                                  ) : (
+                                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                                  )}
+                                </div>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Categorised Lessons List (Shown when student expands subtopic) */}
+                          {isExpanded && (
+                            <div className={`px-2.5 pb-2.5 pt-1 space-y-1.5 border-t ${
+                              theme === 'dark' ? 'border-slate-800/80 bg-slate-950/30' : 'border-emerald-100 bg-emerald-50/30'
+                            }`}>
+                              <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1 pt-0.5">
+                                <span>Categorised Lessons ({subDecks.length})</span>
+                                <span className="text-[9px] font-normal normal-case opacity-70">Click to load</span>
+                              </div>
+
+                              <div className="space-y-1">
+                                {subDecks.map((deck, deckIdx) => {
+                                  const isDeckActive = isSelected && activeDeckIndex === deckIdx;
+                                  const cat = getDeckCategoryInfo(deck.title);
+
+                                  return (
+                                    <button
+                                      key={deck.id || deckIdx}
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedSubtopicCode(sub.subtopicCode);
+                                        setActiveDeckIndex(deckIdx);
+                                        setActiveSlideIndex(0);
+                                      }}
+                                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition flex items-center justify-between gap-2 border ${
+                                        isDeckActive
+                                          ? theme === 'dark'
+                                            ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300 font-semibold'
+                                            : 'bg-emerald-100 border-emerald-400 text-emerald-900 font-semibold'
+                                          : theme === 'dark'
+                                            ? 'bg-slate-900/60 border-slate-800 hover:bg-slate-800 hover:border-slate-700 text-slate-300'
+                                            : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-700'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="text-xs shrink-0">{cat.icon}</span>
+                                        <div className="min-w-0">
+                                          <p className="truncate text-[11px] leading-tight font-medium">
+                                            {deck.title}
+                                          </p>
+                                        </div>
+                                      </div>
+
+                                      <div className="shrink-0 flex items-center gap-1.5">
+                                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${cat.badge}`}>
+                                          {cat.label}
+                                        </span>
+                                        <span className="text-[10px] font-mono text-slate-400">
+                                          {deck.slides?.length || 0}s
+                                        </span>
+                                        {isDeckActive && (
+                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                        )}
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* RIGHT COLUMN: Active Subtopic Slide Viewer & Traffic Light Panel (lg:col-span-8 or 12) */}
+        <div className={`${isSidebarExpanded ? 'lg:col-span-8' : 'lg:col-span-12'} space-y-6 transition-all`}>
           {/* Subtopic Header & Traffic Light Ranking System */}
           <div className={`rounded-2xl border p-5 sm:p-6 transition shadow-sm ${
             theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
@@ -980,6 +1164,37 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                     • {currentLessonCount} {currentLessonCount === 1 ? 'Lesson' : 'Lessons'}
                   </span>
                 </div>
+              </div>
+
+              {/* Sidebar Minimise / Expand Button */}
+              <div className="shrink-0 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition shadow-xs ${
+                    !isSidebarExpanded
+                      ? 'bg-emerald-600/15 border-emerald-500/40 text-emerald-400 hover:bg-emerald-600/25'
+                      : theme === 'dark'
+                        ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-750'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                  title={isSidebarExpanded ? "Minimise curriculum sidebar to expand slides view" : "Expand curriculum sidebar"}
+                >
+                  {isSidebarExpanded ? (
+                    <>
+                      <PanelLeftClose className="w-4 h-4 text-slate-400" />
+                      <span className="hidden sm:inline">Minimise Sidebar</span>
+                    </>
+                  ) : (
+                    <>
+                      <PanelLeftOpen className="w-4 h-4 text-emerald-400" />
+                      <span>Show Subtopics Sidebar</span>
+                      <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
+                        {filteredSubtopics.length}
+                      </span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
 
