@@ -24,6 +24,21 @@ const LOCAL_CLASSES_KEY = 'igcse_0653_offline_classes';
 const LOCAL_STUDENTS_PREFIX = 'igcse_0653_offline_class_students_';
 const LOCAL_INVITES_KEY = 'igcse_0653_offline_invites';
 const LOCAL_ENROLLED_PREFIX = 'igcse_0653_offline_enrolled_';
+const LOCAL_NOTIFICATIONS_KEY = 'igcse_0653_instructor_notifications';
+
+export const DEFAULT_CLASS_CODE = 'SCI-0653';
+export const DEFAULT_CLASS_ITEM: ClassItem = {
+  id: 'class_default_0653',
+  classCode: 'SCI-0653',
+  name: 'Cambridge IGCSE Combined Science (0653)',
+  subject: 'all',
+  description: 'Official class for Cambridge IGCSE Combined Science syllabus revision.',
+  instructorId: 'corbanb_instructor',
+  instructorName: 'Mr. Corban',
+  instructorEmail: 'corbanb@gisboyshigh.net',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  studentCount: 0
+};
 
 export interface ClassItem {
   id: string;
@@ -456,7 +471,7 @@ export async function findClassByCode(rawCode: string): Promise<ClassItem | null
 
   // Check local classes first
   const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, []);
-  const match = localClasses.find(c => 
+  let match = localClasses.find(c => 
     c.classCode.toUpperCase() === cleanCode || 
     c.classCode.toUpperCase() === `SCI-${cleanCode}`
   );
@@ -484,6 +499,16 @@ export async function findClassByCode(rawCode: string): Promise<ClassItem | null
     // Offline
   }
 
+  // Fallback: If code matches default class code SCI-0653 or 0653, ensure default class is registered
+  if (cleanCode === 'SCI-0653' || cleanCode === '0653') {
+    const updated = [...localClasses, DEFAULT_CLASS_ITEM];
+    setLocalItem(LOCAL_CLASSES_KEY, updated);
+    try {
+      setDoc(doc(db, 'classes', DEFAULT_CLASS_ITEM.id), DEFAULT_CLASS_ITEM, { merge: true }).catch(() => {});
+    } catch {}
+    return DEFAULT_CLASS_ITEM;
+  }
+
   return null;
 }
 
@@ -508,13 +533,15 @@ export async function joinClassWithCode(
     .filter(([_, rating]) => rating <= 2)
     .map(([code]) => code);
 
+  const joinedTimestamp = new Date().toISOString();
+
   const enrollmentData: ClassStudentItem = {
     studentId: student.id,
     name: student.name,
     email: student.email,
     tier: student.tier,
-    joinedAt: new Date().toISOString(),
-    lastActive: new Date().toISOString(),
+    joinedAt: joinedTimestamp,
+    lastActive: joinedTimestamp,
     completedLessonsCount: (progress.completedLessons || []).length,
     quizScores: progress.quizScores || {},
     subtopicQuizScores: progress.subtopicQuizScores || {},
@@ -551,6 +578,48 @@ export async function joinClassWithCode(
     }
   }
 
+  // Record notification for the instructor
+  const notificationId = `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+  const notifPayload = {
+    id: notificationId,
+    type: 'student_joined',
+    instructorEmail: targetClass.instructorEmail || 'corbanb@gisboyshigh.net',
+    studentId: student.id,
+    studentName: student.name,
+    studentEmail: student.email,
+    studentTier: student.tier,
+    classId: targetClass.id,
+    className: targetClass.name,
+    classCode: targetClass.classCode,
+    joinedAt: joinedTimestamp,
+    read: false
+  };
+
+  const existingNotifs = getLocalItem<any[]>(LOCAL_NOTIFICATIONS_KEY, []);
+  existingNotifs.unshift(notifPayload);
+  setLocalItem(LOCAL_NOTIFICATIONS_KEY, existingNotifs);
+
+  // Send real email notification via server API
+  try {
+    fetch('/api/notify-class-join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instructorEmail: targetClass.instructorEmail || 'corbanb@gisboyshigh.net',
+        studentName: student.name,
+        studentEmail: student.email,
+        studentTier: student.tier,
+        className: targetClass.name,
+        classCode: targetClass.classCode,
+        joinedAt: joinedTimestamp
+      })
+    }).catch(err => {
+      console.warn('Class join email dispatch error:', err);
+    });
+  } catch (err) {
+    console.warn('Error invoking /api/notify-class-join:', err);
+  }
+
   // Try Firestore
   try {
     const studentEnrollmentRef = doc(db, 'classes', targetClass.id, 'students', student.id);
@@ -569,6 +638,9 @@ export async function joinClassWithCode(
         });
       }
     }
+
+    // Try storing notification in firestore
+    setDoc(doc(db, 'notifications', notificationId), notifPayload).catch(() => {});
   } catch {
     // Offline: enrolled locally
   }
@@ -576,7 +648,7 @@ export async function joinClassWithCode(
   return { 
     success: true, 
     classItem: targetClass, 
-    message: `Successfully joined ${targetClass.name} (Code: ${targetClass.classCode})!` 
+    message: `Successfully joined ${targetClass.name} (Code: ${targetClass.classCode})! Your instructor has been notified by email.` 
   };
 }
 

@@ -1,14 +1,67 @@
 import { QuizQuestion, ScienceSubject } from '../types';
-import { allSubtopicsData, getSubtopicByCode } from './subtopicSlidesData';
+import { allSubtopicsData, getSubtopicByCode, SubtopicTopicGroup } from './subtopicSlidesData';
+import { TOPIC_TEMPLATES } from './syllabusQuestionsBank';
 
-// Specific high-yield 10-question banks for syllabus subtopics
+/**
+ * Randomizes the 4 options for each question so the correct answer is
+ * distributed across A (0), B (1), C (2), and D (3) rather than all being set to A.
+ * Enforces a balanced distribution across the 10 questions.
+ */
+export function randomizeQuizQuestions(questions: QuizQuestion[]): QuizQuestion[] {
+  if (!questions || questions.length === 0) return [];
+
+  // Create a balanced target distribution of indices across the 10 questions:
+  // e.g. [0, 1, 2, 3, 0, 1, 2, 3, random, random]
+  const targetIndices = [0, 1, 2, 3, 0, 1, 2, 3, Math.floor(Math.random() * 4), Math.floor(Math.random() * 4)];
+  
+  // Shuffle targetIndices array using Fisher-Yates
+  for (let i = targetIndices.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [targetIndices[i], targetIndices[j]] = [targetIndices[j], targetIndices[i]];
+  }
+
+  return questions.map((q, idx) => {
+    const targetCorrectIdx = targetIndices[idx % targetIndices.length];
+    const correctOpt = q.options[q.correctIndex] ?? q.options[0];
+    const distractors = q.options.filter((_, i) => i !== q.correctIndex);
+
+    // Shuffle distractors
+    const shuffledDistractors = [...distractors];
+    for (let i = shuffledDistractors.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffledDistractors[i], shuffledDistractors[j]] = [shuffledDistractors[j], shuffledDistractors[i]];
+    }
+
+    // Insert correct answer at targetCorrectIdx and fill other 3 positions with distractors
+    const newOptions: string[] = [];
+    let d = 0;
+    for (let pos = 0; pos < 4; pos++) {
+      if (pos === targetCorrectIdx) {
+        newOptions.push(correctOpt);
+      } else {
+        newOptions.push(shuffledDistractors[d++] || `Alternative choice ${pos + 1}`);
+      }
+    }
+
+    return {
+      ...q,
+      options: newOptions,
+      correctIndex: targetCorrectIdx
+    };
+  });
+}
+
+// Master Predefined Bank for High-Yield Subtopics
 export const predefinedSubtopicQuizzes: Record<string, QuizQuestion[]> = {
+  // ==========================================
+  // BIOLOGY SUBTOPICS
+  // ==========================================
   'B1.1': [
     {
       id: 'b1-1-q1',
       subject: 'biology',
       topicCode: 'B1',
-      question: 'Which acronym represents the seven characteristics of all living organisms?',
+      question: 'Which acronym represents the seven characteristics of all living organisms in Cambridge IGCSE Biology?',
       options: ['MRS GREN', 'ATP DNA', 'ROYGBIV', 'PEMDAS'],
       correctIndex: 0,
       explanation: 'MRS GREN stands for Movement, Respiration, Sensitivity, Growth, Reproduction, Excretion, and Nutrition.',
@@ -21,7 +74,7 @@ export const predefinedSubtopicQuizzes: Record<string, QuizQuestion[]> = {
       question: 'Which of the following is the accurate biological definition of respiration?',
       options: [
         'Breathing air into and out of the lungs',
-        'Chemical reactions in cells that break down nutrient molecules to release energy',
+        'Chemical reactions in cells that break down nutrient molecules to release energy for metabolism',
         'The permanent increase in size and dry mass of an organism',
         'The removal of undigested food as faeces'
       ],
@@ -46,7 +99,7 @@ export const predefinedSubtopicQuizzes: Record<string, QuizQuestion[]> = {
       question: 'Why is reproduction essential for a species of living organisms?',
       options: [
         'To ensure individual organisms grow larger',
-        'To prevent the extinction of the species',
+        'To make more of the same kind of organism, preventing extinction',
         'To release toxic metabolic waste products',
         'To produce ATP directly from sunlight'
       ],
@@ -58,7 +111,7 @@ export const predefinedSubtopicQuizzes: Record<string, QuizQuestion[]> = {
       id: 'b1-1-q5',
       subject: 'biology',
       topicCode: 'B1',
-      question: 'Excretion is the removal from organisms of which of the following?',
+      question: 'Excretion is strictly defined in Cambridge science as the removal from organisms of which substances?',
       options: [
         'Toxic substances and waste products of metabolism',
         'Undigested solid food material as faeces (egestion)',
@@ -128,6 +181,292 @@ export const predefinedSubtopicQuizzes: Record<string, QuizQuestion[]> = {
       correctIndex: 1,
       explanation: 'Carbon dioxide produced by cellular respiration is transported in blood and excreted through the lungs.',
       syllabusRef: 'B1.1'
+    }
+  ],
+
+  'B2.1': [
+    {
+      id: 'b2-1-q1',
+      subject: 'biology',
+      topicCode: 'B2',
+      question: 'Which organelle is found in both plant and animal cells and is the site of aerobic cellular respiration?',
+      options: ['Mitochondria', 'Chloroplast', 'Large permanent vacuole', 'Cellulose cell wall'],
+      correctIndex: 0,
+      explanation: 'Mitochondria are the sites of aerobic respiration where glucose is oxidized to release ATP energy.',
+      syllabusRef: 'B2.1'
+    },
+    {
+      id: 'b2-1-q2',
+      subject: 'biology',
+      topicCode: 'B2',
+      question: 'Which three structures are present in plant cells but absent from animal cells?',
+      options: [
+        'Cellulose cell wall, chloroplasts, and large permanent vacuole',
+        'Cell membrane, ribosomes, and mitochondria',
+        'Nucleus, cytoplasm, and cell membrane',
+        'Ribosomes, circular DNA, and flagella'
+      ],
+      correctIndex: 0,
+      explanation: 'Plant cells have a cellulose cell wall, chloroplasts for photosynthesis, and a large central vacuole.',
+      syllabusRef: 'B2.1'
+    },
+    {
+      id: 'b2-1-q3',
+      subject: 'biology',
+      topicCode: 'B2',
+      question: 'What is the function of the cell membrane?',
+      options: [
+        'Controls what enters and exits the cell as a partially permeable barrier',
+        'Contains the green pigment chlorophyll for photosynthesis',
+        'Synthesises lipids and stores food reserves',
+        'Provides rigid mechanical support to prevent lysis'
+      ],
+      correctIndex: 0,
+      explanation: 'The cell membrane is a partially permeable barrier controlling the movement of substances in and out.',
+      syllabusRef: 'B2.1'
+    },
+    {
+      id: 'b2-1-q4',
+      subject: 'biology',
+      topicCode: 'B2',
+      question: 'How do bacterial cells (prokaryotes) differ fundamentally from plant and animal cells?',
+      options: [
+        'They have no cell membrane',
+        'They lack a true nucleus; their genetic material is a circular loop of DNA and plasmids',
+        'They do not contain ribosomes',
+        'They are multicellular organisms'
+      ],
+      correctIndex: 1,
+      explanation: 'Bacterial cells lack a membrane-bound nucleus and mitochondria; their DNA is a circular loop plus plasmids.',
+      syllabusRef: 'B2.1'
+    },
+    {
+      id: 'b2-1-q5',
+      subject: 'biology',
+      topicCode: 'B2',
+      question: 'Which adaptation enables red blood cells to transport oxygen with maximum efficiency?',
+      options: [
+        'Biconcave disc shape, no nucleus, and packed with haemoglobin',
+        'Long extensions to absorb mineral ions by active transport',
+        'High density of chloroplasts to absorb light',
+        'Cilia on their surface to sweep mucus'
+      ],
+      correctIndex: 0,
+      explanation: 'Biconcave shape increases surface area to volume ratio; lack of nucleus allows more haemoglobin.',
+      syllabusRef: 'B2.1'
+    },
+    {
+      id: 'b2-1-q6',
+      subject: 'biology',
+      topicCode: 'B2',
+      question: 'What is the correct biological hierarchy from simplest to most complex?',
+      options: [
+        'Cell -> Tissue -> Organ -> Organ system -> Organism',
+        'Organelle -> Organ -> Tissue -> Cell -> Organism',
+        'Tissue -> Cell -> Organ system -> Organ -> Organism',
+        'Organism -> Organ system -> Organ -> Tissue -> Cell'
+      ],
+      correctIndex: 0,
+      explanation: 'Cells group into tissues, tissues into organs, organs into organ systems, forming an organism.',
+      syllabusRef: 'B2.1'
+    },
+    {
+      id: 'b2-1-q7',
+      subject: 'biology',
+      topicCode: 'B2',
+      question: 'If an image of a cell is 40 mm across and the magnification is x400, what is the actual size?',
+      options: ['0.1 mm (100 μm)', '16 mm', '10 mm', '0.01 mm'],
+      correctIndex: 0,
+      explanation: 'Actual size = Image size / Magnification = 40 mm / 400 = 0.1 mm (or 100 μm).',
+      syllabusRef: 'B2.1'
+    },
+    {
+      id: 'b2-1-q8',
+      subject: 'biology',
+      topicCode: 'B2',
+      question: 'Which specialised plant cell contains the highest concentration of chloroplasts for photosynthesis?',
+      options: [
+        'Palisade mesophyll cell',
+        'Root hair cell',
+        'Xylem vessel',
+        'Epidermal cell'
+      ],
+      correctIndex: 0,
+      explanation: 'Palisade mesophyll cells in the upper leaf are column-shaped and packed with chloroplasts to absorb sunlight.',
+      syllabusRef: 'B2.1'
+    },
+    {
+      id: 'b2-1-q9',
+      subject: 'biology',
+      topicCode: 'B2',
+      question: 'Why do root hair cells not contain chloroplasts?',
+      options: [
+        'They are underground in the dark and cannot photosynthesize',
+        'They are too small to fit chloroplasts',
+        'Chloroplasts would prevent water absorption',
+        'They lack a cell wall'
+      ],
+      correctIndex: 0,
+      explanation: 'Roots are underground where light is absent; developing chloroplasts would waste metabolic energy.',
+      syllabusRef: 'B2.1'
+    },
+    {
+      id: 'b2-1-q10',
+      subject: 'biology',
+      topicCode: 'B2',
+      question: 'What is the primary function of ribosomes in all living cells?',
+      options: [
+        'Protein synthesis',
+        'Photosynthesis',
+        'Aerobic respiration',
+        'Storage of starch grains'
+      ],
+      correctIndex: 0,
+      explanation: 'Ribosomes translate mRNA to assemble amino acids into proteins.',
+      syllabusRef: 'B2.1'
+    }
+  ],
+
+  'B3.1': [
+    {
+      id: 'b3-1-q1',
+      subject: 'biology',
+      topicCode: 'B3',
+      question: 'What is the scientific definition of diffusion in Cambridge IGCSE Biology?',
+      options: [
+        'The net movement of particles from a region of higher concentration to lower concentration down a concentration gradient as a result of random motion',
+        'The movement of water through a fully permeable cell wall using ATP energy',
+        'The active pumping of mineral ions against a concentration gradient',
+        'The chemical breakdown of starch into maltose by enzymes'
+      ],
+      correctIndex: 0,
+      explanation: 'Diffusion is the passive net movement of particles down a concentration gradient due to random kinetic motion.',
+      syllabusRef: 'B3.1'
+    },
+    {
+      id: 'b3-1-q2',
+      subject: 'biology',
+      topicCode: 'B3',
+      question: 'Which combination of factors will increase the rate of diffusion most significantly?',
+      options: [
+        'Higher temperature, steeper concentration gradient, and larger surface area',
+        'Lower temperature, thicker membrane, and smaller surface area',
+        'Equal concentration on both sides and freezing temperature',
+        'Longer diffusion distance and smaller concentration gradient'
+      ],
+      correctIndex: 0,
+      explanation: 'Diffusion rate increases with temperature (more kinetic energy), steeper gradient, and larger surface area.',
+      syllabusRef: 'B3.1'
+    },
+    {
+      id: 'b3-1-q3',
+      subject: 'biology',
+      topicCode: 'B3',
+      question: 'Osmosis is specifically defined as the diffusion of which substance through a partially permeable membrane?',
+      options: ['Water molecules', 'Glucose molecules', 'Sodium ions', 'Protein chains'],
+      correctIndex: 0,
+      explanation: 'Osmosis is the net movement of water molecules from high water potential (dilute) to low water potential (concentrated) through a partially permeable membrane.',
+      syllabusRef: 'B3.1'
+    },
+    {
+      id: 'b3-1-q4',
+      subject: 'biology',
+      topicCode: 'B3',
+      question: 'What happens to plant cells placed in a concentrated sucrose solution?',
+      options: [
+        'Water leaves the cell by osmosis; cytoplasm shrinks from cell wall and cell becomes plasmolysed (flaccid)',
+        'Water enters the cell until it bursts (lysis)',
+        'The cell wall dissolves completely',
+        'Turgor pressure increases dramatically'
+      ],
+      correctIndex: 0,
+      explanation: 'In concentrated solution, water leaves the vacuole by osmosis, causing plasmolysis (flaccidity).',
+      syllabusRef: 'B3.1'
+    },
+    {
+      id: 'b3-1-q5',
+      subject: 'biology',
+      topicCode: 'B3',
+      question: 'Why do red blood cells burst when placed in pure distilled water, whereas plant cells do not?',
+      options: [
+        'Plant cells have a rigid cellulose cell wall that prevents bursting; animal cells only have a delicate cell membrane',
+        'Red blood cells actively pump water inside',
+        'Plant cell walls are impermeable to water',
+        'Animal cell membranes lack carrier proteins'
+      ],
+      correctIndex: 0,
+      explanation: 'Plant cell walls withstand turgor pressure; animal cells lack cell walls and undergo osmotic lysis.',
+      syllabusRef: 'B3.1'
+    },
+    {
+      id: 'b3-1-q6',
+      subject: 'biology',
+      topicCode: 'B3',
+      question: 'In an osmosis experiment using potato cylinders, why should cylinders be gently blotted dry before weighing?',
+      options: [
+        'To remove excess surface liquid which would artificially increase the recorded mass',
+        'To evaporate the cell sap inside the potato',
+        'To kill bacteria on the potato surface',
+        'To increase the rate of osmosis during drying'
+      ],
+      correctIndex: 0,
+      explanation: 'Excess liquid clinging to the outside would give an inaccurate, higher mass measurement.',
+      syllabusRef: 'B3.1'
+    },
+    {
+      id: 'b3-1-q7',
+      subject: 'biology',
+      topicCode: 'B3',
+      question: 'Active transport is the movement of particles through a cell membrane with which characteristics?',
+      options: [
+        'Against a concentration gradient using energy from respiration and carrier proteins',
+        'Down a concentration gradient without energy requirement',
+        'Movement of water through stomata by transpiration',
+        'Passive flow of oxygen into red blood cells'
+      ],
+      correctIndex: 0,
+      explanation: 'Active transport moves particles from low to high concentration using ATP energy and membrane carrier proteins.',
+      syllabusRef: 'B3.1'
+    },
+    {
+      id: 'b3-1-q8',
+      subject: 'biology',
+      topicCode: 'B3',
+      question: 'Where in a flowering plant does active transport primarily occur?',
+      options: [
+        'Uptake of mineral ions by root hair cells from low soil concentrations',
+        'Evaporation of water from spongy mesophyll cells',
+        'Diffusion of carbon dioxide through open stomata',
+        'Movement of sucrose in phloem sieve tubes'
+      ],
+      correctIndex: 0,
+      explanation: 'Root hairs absorb nitrates and potassium from dilute soil water using active transport.',
+      syllabusRef: 'B3.1'
+    },
+    {
+      id: 'b3-1-q9',
+      subject: 'biology',
+      topicCode: 'B3',
+      question: 'A solution with a low concentration of solute molecules has what kind of water potential?',
+      options: ['High water potential', 'Low water potential', 'Negative water potential', 'Zero water potential'],
+      correctIndex: 0,
+      explanation: 'Dilute solutions contain more free water molecules and therefore have a higher water potential.',
+      syllabusRef: 'B3.1'
+    },
+    {
+      id: 'b3-1-q10',
+      subject: 'biology',
+      topicCode: 'B3',
+      question: 'Why are potato cylinders measured for percentage change in mass rather than change in mass alone?',
+      options: [
+        'Initial potato cylinders may not have had identical starting masses; percentage change allows fair comparison',
+        'Percentage change eliminates experimental error completely',
+        'Water cannot be measured in grams',
+        'Balances only display percentage values'
+      ],
+      correctIndex: 0,
+      explanation: 'Calculating percentage change controls for slight differences in initial starting mass of tissue pieces.',
+      syllabusRef: 'B3.1'
     }
   ],
 
@@ -244,6 +583,147 @@ export const predefinedSubtopicQuizzes: Record<string, QuizQuestion[]> = {
     }
   ],
 
+  // ==========================================
+  // CHEMISTRY SUBTOPICS
+  // ==========================================
+  'C1.1': [
+    {
+      id: 'c1-1-q1',
+      subject: 'chemistry',
+      topicCode: 'C1',
+      question: 'In terms of kinetic particle theory, what describes the arrangement and motion of particles in a solid?',
+      options: [
+        'Closely packed in a regular lattice; vibrating about fixed positions',
+        'Randomly arranged with large gaps; moving rapidly in straight lines',
+        'Touching each other in random positions; able to slide past each other',
+        'Stationary with zero kinetic energy'
+      ],
+      correctIndex: 0,
+      explanation: 'Solid particles are arranged in a regular three-dimensional lattice and vibrate around fixed positions.',
+      syllabusRef: 'C1.1'
+    },
+    {
+      id: 'c1-1-q2',
+      subject: 'chemistry',
+      topicCode: 'C1',
+      question: 'Why are gases easily compressed, whereas solids and liquids cannot be compressed significantly?',
+      options: [
+        'Gas particles have large spaces between them compared to particle size',
+        'Gas particles are soft and squishy',
+        'Solids have no mass',
+        'Liquids contain air pockets'
+      ],
+      correctIndex: 0,
+      explanation: 'Gases consist mostly of empty space between widely separated particles, allowing them to be compressed.',
+      syllabusRef: 'C1.1'
+    },
+    {
+      id: 'c1-1-q3',
+      subject: 'chemistry',
+      topicCode: 'C1',
+      question: 'What phase change occurs when a substance changes directly from a solid to a gas without entering the liquid state?',
+      options: ['Sublimation', 'Evaporation', 'Condensation', 'Melting'],
+      correctIndex: 0,
+      explanation: 'Sublimation is the direct transition from solid to gas (e.g. dry ice CO2 or iodine).',
+      syllabusRef: 'C1.1'
+    },
+    {
+      id: 'c1-1-q4',
+      subject: 'chemistry',
+      topicCode: 'C1',
+      question: 'During melting of ice at 0°C, why does the temperature remain constant even though thermal energy is continually supplied?',
+      options: [
+        'Thermal energy is used to overcome intermolecular forces of attraction between water molecules rather than increasing kinetic energy',
+        'The thermometer breaks at 0°C',
+        'The water molecules are destroyed',
+        'Ice absorbs negative heat'
+      ],
+      correctIndex: 0,
+      explanation: 'Latent heat of fusion breaks intermolecular bonds during a change of state at constant temperature.',
+      syllabusRef: 'C1.1'
+    },
+    {
+      id: 'c1-1-q5',
+      subject: 'chemistry',
+      topicCode: 'C1',
+      question: 'How does increasing temperature affect the pressure of a fixed volume of gas?',
+      options: [
+        'Pressure increases because particles gain kinetic energy, move faster, and collide more frequently and forcefully with container walls',
+        'Pressure decreases because particles condense',
+        'Pressure remains completely unchanged',
+        'The gas particles stop colliding'
+      ],
+      correctIndex: 0,
+      explanation: 'Higher temperature increases average kinetic energy and velocity of gas particles, causing harder and more frequent wall collisions.',
+      syllabusRef: 'C1.1'
+    },
+    {
+      id: 'c1-1-q6',
+      subject: 'chemistry',
+      topicCode: 'C1',
+      question: 'What is the key difference between boiling and evaporation of a liquid?',
+      options: [
+        'Boiling occurs at a specific boiling point throughout the liquid; evaporation occurs at any temperature below the boiling point and only at the surface',
+        'Evaporation produces gas bubbles throughout the liquid',
+        'Boiling is a physical change while evaporation is a chemical reaction',
+        'Evaporation only happens in vacuum'
+      ],
+      correctIndex: 0,
+      explanation: 'Boiling happens at a fixed temperature with bubbles throughout; evaporation occurs at the liquid surface at any temperature.',
+      syllabusRef: 'C1.1'
+    },
+    {
+      id: 'c1-1-q7',
+      subject: 'chemistry',
+      topicCode: 'C1',
+      question: 'In the diffusion of ammonia (NH3) and hydrogen chloride (HCl) in a glass tube, where does the white ammonium chloride ring form?',
+      options: [
+        'Closer to the HCl end, because ammonia has a lower molecular mass (Mr=17) and diffuses faster than HCl (Mr=36.5)',
+        'Exactly in the center between the two cotton wool plugs',
+        'Closer to the NH3 end because HCl is lighter',
+        'At both ends simultaneously'
+      ],
+      correctIndex: 0,
+      explanation: 'Lighter gas molecules (NH3, Mr=17) have higher average velocity and diffuse faster than heavier HCl (Mr=36.5).',
+      syllabusRef: 'C1.1'
+    },
+    {
+      id: 'c1-1-q8',
+      subject: 'chemistry',
+      topicCode: 'C1',
+      question: 'A substance melts at -114°C and boils at 78°C. What state of matter is it in at 25°C?',
+      options: ['Liquid', 'Solid', 'Gas', 'Plasma'],
+      correctIndex: 0,
+      explanation: 'Since 25°C is between melting point (-114°C) and boiling point (78°C), the substance is in the liquid state.',
+      syllabusRef: 'C1.1'
+    },
+    {
+      id: 'c1-1-q9',
+      subject: 'chemistry',
+      topicCode: 'C1',
+      question: 'Which process describes the change from a gas to a liquid?',
+      options: ['Condensation', 'Evaporation', 'Freezing', 'Sublimation'],
+      correctIndex: 0,
+      explanation: 'Condensation is the physical state change from gas to liquid as thermal energy is removed.',
+      syllabusRef: 'C1.1'
+    },
+    {
+      id: 'c1-1-q10',
+      subject: 'chemistry',
+      topicCode: 'C1',
+      question: 'Brownian motion provides direct visual evidence for which fundamental theory?',
+      options: [
+        'The kinetic theory that particles in fluids are in continuous, random motion',
+        'The nuclear model of the atom',
+        'The law of conservation of mass in reactions',
+        'The periodic recurrence of chemical elements'
+      ],
+      correctIndex: 0,
+      explanation: 'Random erratic motion of smoke particles or pollen grains results from collisions with invisible fast-moving fluid molecules.',
+      syllabusRef: 'C1.1'
+    }
+  ],
+
   'C11.4': [
     {
       id: 'c11-4-q1',
@@ -352,131 +832,124 @@ export const predefinedSubtopicQuizzes: Record<string, QuizQuestion[]> = {
     }
   ],
 
-  'C9.5': [
+  // ==========================================
+  // PHYSICS SUBTOPICS
+  // ==========================================
+  'P1.1': [
     {
-      id: 'c9-5-q1',
-      subject: 'chemistry',
-      topicCode: 'C9',
-      question: 'Which two conditions are strictly required for iron to rust?',
-      options: ['Water and oxygen', 'Water and carbon dioxide', 'Oxygen and nitrogen', 'Dry air and sunlight'],
+      id: 'p1-1-q1',
+      subject: 'physics',
+      topicCode: 'P1',
+      question: 'What is the formula to calculate the average speed of a moving object?',
+      options: ['Speed = distance / time', 'Speed = acceleration × time', 'Speed = force / mass', 'Speed = distance × time'],
       correctIndex: 0,
-      explanation: 'Rusting is an oxidation process that strictly requires both oxygen gas (from air) and liquid water or moisture simultaneously.',
-      syllabusRef: 'C9.5'
+      explanation: 'Average speed is defined as the total distance travelled divided by the total time taken (v = d/t).',
+      syllabusRef: 'P1.1'
     },
     {
-      id: 'c9-5-q2',
-      subject: 'chemistry',
-      topicCode: 'C9',
-      question: 'What is the chemical name and empirical formula for rust?',
+      id: 'p1-1-q2',
+      subject: 'physics',
+      topicCode: 'P1',
+      question: 'What does the gradient (slope) of a distance-time graph represent?',
+      options: ['Speed', 'Acceleration', 'Distance', 'Force'],
+      correctIndex: 0,
+      explanation: 'The gradient of a distance-time graph = change in distance / change in time = speed.',
+      syllabusRef: 'P1.1'
+    },
+    {
+      id: 'p1-1-q3',
+      subject: 'physics',
+      topicCode: 'P1',
+      question: 'What does a horizontal (flat) line on a distance-time graph represent?',
+      options: ['The object is stationary (at rest)', 'Constant high speed', 'Constant acceleration', 'Moving backwards'],
+      correctIndex: 0,
+      explanation: 'A flat line indicates distance is not changing as time passes; the speed is 0 m/s.',
+      syllabusRef: 'P1.1'
+    },
+    {
+      id: 'p1-1-q4',
+      subject: 'physics',
+      topicCode: 'P1',
+      question: 'What does the gradient of a speed-time (or velocity-time) graph represent?',
+      options: ['Acceleration', 'Speed', 'Distance travelled', 'Resultant force'],
+      correctIndex: 0,
+      explanation: 'Gradient of velocity-time graph = change in velocity / change in time = acceleration (a = Δv/Δt).',
+      syllabusRef: 'P1.1'
+    },
+    {
+      id: 'p1-1-q5',
+      subject: 'physics',
+      topicCode: 'P1',
+      question: 'How is the distance travelled determined from a speed-time graph?',
       options: [
-        'Hydrated iron(III) oxide (Fe2O3·xH2O)',
-        'Anhydrous iron(II) oxide (FeO)',
-        'Iron(III) carbonate (Fe2(CO3)3)',
-        'Iron(II) hydroxide (Fe(OH)2)'
+        'By calculating the area under the speed-time graph',
+        'By measuring the highest speed reached',
+        'By finding the gradient of the graph',
+        'By reading the time axis intercept'
       ],
       correctIndex: 0,
-      explanation: 'Rust is chemically hydrated iron(III) oxide with variable water molecules of crystallisation (Fe2O3·xH2O).',
-      syllabusRef: 'C9.5'
+      explanation: 'The area under any speed-time graph corresponds directly to the total distance travelled.',
+      syllabusRef: 'P1.1'
     },
     {
-      id: 'c9-5-q3',
-      subject: 'chemistry',
-      topicCode: 'C9',
-      question: 'In a rust practical investigation, why is water boiled and covered with an oil layer in one test tube?',
+      id: 'p1-1-q6',
+      subject: 'physics',
+      topicCode: 'P1',
+      question: 'A car accelerates uniformly from rest to 20 m/s in 5 seconds. What is its acceleration?',
+      options: ['4 m/s²', '100 m/s²', '0.25 m/s²', '15 m/s²'],
+      correctIndex: 0,
+      explanation: 'Acceleration a = (v - u) / t = (20 - 0) / 5 = 4 m/s².',
+      syllabusRef: 'P1.1'
+    },
+    {
+      id: 'p1-1-q7',
+      subject: 'physics',
+      topicCode: 'P1',
+      question: 'What does a horizontal line on a velocity-time graph represent?',
       options: [
-        'Boiling expels dissolved oxygen, and the oil barrier prevents fresh oxygen from redissolving',
-        'Boiling speeds up rust formation tenfold',
-        'The oil reacts with iron to form an alloy',
-        'Boiling removes hydrogen from the water molecule'
+        'Constant speed (zero acceleration)',
+        'Object is at rest',
+        'Uniform acceleration',
+        'Decreasing distance'
       ],
       correctIndex: 0,
-      explanation: 'Boiling water drives out all dissolved gases including O2. The paraffin or mineral oil layer floats on top, blocking atmospheric oxygen.',
-      syllabusRef: 'C9.5'
+      explanation: 'Velocity remains unchanged over time, meaning speed is constant and acceleration is zero.',
+      syllabusRef: 'P1.1'
     },
     {
-      id: 'c9-5-q4',
-      subject: 'chemistry',
-      topicCode: 'C9',
-      question: 'What substance is placed inside a test tube with an iron nail to investigate rusting in dry air without water?',
-      options: ['Anhydrous calcium chloride', 'Sodium hydroxide pellets', 'Distilled water', 'Sodium chloride solution'],
-      correctIndex: 0,
-      explanation: 'Anhydrous calcium chloride (CaCl2) is a desiccant drying agent that absorbs water vapor, leaving completely dry air in the sealed tube.',
-      syllabusRef: 'C9.5'
-    },
-    {
-      id: 'c9-5-q5',
-      subject: 'chemistry',
-      topicCode: 'C9',
-      question: 'Why do iron structures rust significantly faster in coastal seaside towns than inland desert areas?',
+      id: 'p1-1-q8',
+      subject: 'physics',
+      topicCode: 'P1',
+      question: 'What is deceleration?',
       options: [
-        'Dissolved sodium chloride acts as an electrolyte, accelerating electron transfer in redox reactions',
-        'Seaside air contains zero oxygen',
-        'Salt lowers the air pressure around iron',
-        'Seawater contains dissolved hydrochloric acid'
+        'Negative acceleration (decrease in speed over time)',
+        'Moving in a circular orbit',
+        'Maximum constant velocity',
+        'The force of air resistance'
       ],
       correctIndex: 0,
-      explanation: 'Airborne salt spray dissolves in surface moisture forming an electrolyte solution (Na+ and Cl- ions) which increases electrical conductivity and accelerates electrochemical oxidation.',
-      syllabusRef: 'C9.5'
+      explanation: 'Deceleration (or retardation) is negative acceleration where velocity decreases over time.',
+      syllabusRef: 'P1.1'
     },
     {
-      id: 'c9-5-q6',
-      subject: 'chemistry',
-      topicCode: 'C9',
-      question: 'Which method of rust prevention provides both a physical barrier AND sacrificial protection to iron and steel?',
-      options: ['Galvanising (coating with zinc)', 'Painting', 'Greasing and oiling', 'Plastic coating'],
+      id: 'p1-1-q9',
+      subject: 'physics',
+      topicCode: 'P1',
+      question: 'What is the SI unit of acceleration?',
+      options: ['m/s²', 'm/s', 'km/h', 'N/kg'],
       correctIndex: 0,
-      explanation: 'Galvanising coats iron with zinc. Zinc forms an impermeable physical barrier and, if scratched, sacrifices itself because zinc is higher in the reactivity series.',
-      syllabusRef: 'C9.5'
+      explanation: 'Acceleration measures rate of change of velocity in metres per second squared (m/s²).',
+      syllabusRef: 'P1.1'
     },
     {
-      id: 'c9-5-q7',
-      subject: 'chemistry',
-      topicCode: 'C9',
-      question: 'Why does galvanised steel remain protected from rusting even if the outer zinc layer is scratched?',
-      options: [
-        'Zinc is more reactive than iron and oxidises preferentially (Zn -> Zn2+ + 2e-)',
-        'The scratch allows oxygen to escape',
-        'Zinc magically heals the scratched iron surface',
-        'Scratched steel turns directly into stainless steel'
-      ],
+      id: 'p1-1-q10',
+      subject: 'physics',
+      topicCode: 'P1',
+      question: 'A cyclist travels 1500 metres in 100 seconds. What is their average speed?',
+      options: ['15 m/s', '150 m/s', '1.5 m/s', '25 m/s'],
       correctIndex: 0,
-      explanation: 'Zinc is above iron in the reactivity series (Zn > Fe). Zinc loses electrons more readily than iron, so zinc oxidises sacrificially while iron remains uncorroded.',
-      syllabusRef: 'C9.5'
-    },
-    {
-      id: 'c9-5-q8',
-      subject: 'chemistry',
-      topicCode: 'C9',
-      question: 'Which rust prevention method is most suitable for moving machinery components such as bicycle chain links and gearbox cogs?',
-      options: ['Oiling and greasing', 'Heavy paint coating', 'Plastic shrink wrap', 'Tin electroplating'],
-      correctIndex: 0,
-      explanation: 'Grease and oil exclude water and oxygen while providing essential lubrication for moving mechanical parts where paint would chip or rub away.',
-      syllabusRef: 'C9.5'
-    },
-    {
-      id: 'c9-5-q9',
-      subject: 'chemistry',
-      topicCode: 'C9',
-      question: 'Why does a scratched steel food tin rust faster than unprotected iron?',
-      options: [
-        'Tin is less reactive than iron, so exposed iron sacrifices itself to tin and oxidises faster',
-        'Tin reacts with air to form concentrated nitric acid',
-        'Tin atoms absorb water molecules and push them into iron',
-        'The food becomes toxic and corrodes the metal'
-      ],
-      correctIndex: 0,
-      explanation: 'Tin (Sn) is below iron in the reactivity series (Fe > Sn). When scratched, iron is the more reactive metal in the electrochemical couple, so iron corrodes preferentially and rapidly.',
-      syllabusRef: 'C9.5'
-    },
-    {
-      id: 'c9-5-q10',
-      subject: 'chemistry',
-      topicCode: 'C9',
-      question: 'What stainless steel component gives it permanent resistance to corrosion by forming a self-healing oxide film?',
-      options: ['Chromium (~18%)', 'Copper (~50%)', 'Lead (~10%)', 'Sulfur (~5%)'],
-      correctIndex: 0,
-      explanation: 'Chromium in stainless steel reacts with atmospheric oxygen to form an invisible, self-healing, adherent layer of chromium(III) oxide (Cr2O3) that prevents rust.',
-      syllabusRef: 'C9.5'
+      explanation: 'Speed = distance / time = 1500 m / 100 s = 15 m/s.',
+      syllabusRef: 'P1.1'
     }
   ],
 
@@ -485,276 +958,408 @@ export const predefinedSubtopicQuizzes: Record<string, QuizQuestion[]> = {
       id: 'p1-2-q1',
       subject: 'physics',
       topicCode: 'P1',
-      question: 'What is the SI unit of speed?',
-      options: ['Kilometres per hour (km/h)', 'Metres per second (m/s)', 'Miles per hour (mph)', 'Newtons per second (N/s)'],
-      correctIndex: 1,
-      explanation: 'The SI unit of speed and velocity is metres per second (m/s).',
+      question: 'What is the relationship between mass, weight, and gravitational field strength?',
+      options: ['Weight = mass × gravitational field strength (W = mg)', 'Mass = weight × g', 'Weight = mass / g', 'Mass = weight / volume'],
+      correctIndex: 0,
+      explanation: 'Weight is the gravitational force acting on an object: W = mg (where g ≈ 9.8 N/kg or 10 N/kg on Earth).',
       syllabusRef: 'P1.2'
     },
     {
       id: 'p1-2-q2',
       subject: 'physics',
       topicCode: 'P1',
-      question: 'What does the gradient of a distance-time graph represent?',
-      options: ['Acceleration', 'Speed', 'Distance', 'Force'],
-      correctIndex: 1,
-      explanation: 'Gradient on a distance-time graph is rise / run = Δd / Δt = speed.',
+      question: 'What is Newton\'s Second Law relating resultant force, mass, and acceleration?',
+      options: ['Resultant force = mass × acceleration (F = ma)', 'F = m / a', 'F = a / m', 'F = mass × speed'],
+      correctIndex: 0,
+      explanation: 'Resultant force produces an acceleration proportional to force and inversely proportional to mass: F = ma.',
       syllabusRef: 'P1.2'
     },
     {
       id: 'p1-2-q3',
       subject: 'physics',
       topicCode: 'P1',
-      question: 'What does a horizontal flat line on a distance-time graph indicate?',
-      options: ['Moving at constant high speed', 'Stationary (zero speed)', 'Accelerating steadily', 'Decelerating to a stop'],
-      correctIndex: 1,
-      explanation: 'Distance does not change as time increases, so the object is stationary.',
+      question: 'An astronaut has a mass of 80 kg on Earth. What is the astronaut\'s mass on the Moon (where g ≈ 1.6 N/kg)?',
+      options: ['80 kg', '128 kg', '13.3 kg', '0 kg'],
+      correctIndex: 0,
+      explanation: 'Mass is the amount of matter in an object and remains constant anywhere in the universe; weight changes with g.',
       syllabusRef: 'P1.2'
     },
     {
       id: 'p1-2-q4',
       subject: 'physics',
       topicCode: 'P1',
-      question: 'What does the gradient of a velocity-time graph represent?',
-      options: ['Distance travelled', 'Acceleration', 'Speed', 'Mass'],
-      correctIndex: 1,
-      explanation: 'Gradient on a velocity-time graph is Δv / Δt = acceleration.',
+      question: 'What is Hooke\'s Law for an elastic spring?',
+      options: [
+        'Extension is directly proportional to load force, provided the limit of proportionality is not exceeded (F = kx)',
+        'Force is inversely proportional to spring length',
+        'Springs always return to original shape regardless of load',
+        'Extension = mass × gravitational field'
+      ],
+      correctIndex: 0,
+      explanation: 'Hooke\'s Law states F = kx (load is proportional to extension up to the limit of proportionality).',
       syllabusRef: 'P1.2'
     },
     {
       id: 'p1-2-q5',
       subject: 'physics',
       topicCode: 'P1',
-      question: 'How is the total distance travelled determined from a velocity-time graph?',
-      options: ['By finding the peak height', 'By calculating the area under the graph', 'By dividing velocity by time', 'By reading the final y-intercept'],
-      correctIndex: 1,
-      explanation: 'The area under a velocity-time graph (triangles + rectangles) equals distance travelled.',
+      question: 'What is terminal velocity for a falling object through a fluid such as air?',
+      options: [
+        'The constant maximum velocity reached when upward drag force equals downward weight (resultant force = 0)',
+        'The speed of light in vacuum',
+        'The velocity when an object hits the ground',
+        'When acceleration reaches 9.8 m/s²'
+      ],
+      correctIndex: 0,
+      explanation: 'Terminal velocity occurs when resistive drag balances gravitational weight; acceleration becomes 0.',
       syllabusRef: 'P1.2'
     },
     {
       id: 'p1-2-q6',
       subject: 'physics',
       topicCode: 'P1',
-      question: 'A car accelerates uniformly from rest (0 m/s) to 20 m/s in 5 seconds. What is its acceleration?',
-      options: ['4 m/s²', '100 m/s²', '0.25 m/s²', '15 m/s²'],
+      question: 'A resultant force of 24 N acts on an object of mass 6 kg. What is the acceleration produced?',
+      options: ['4 m/s²', '144 m/s²', '0.25 m/s²', '18 m/s²'],
       correctIndex: 0,
-      explanation: 'a = (v - u) / t = (20 - 0) / 5 = 4 m/s².',
+      explanation: 'a = F / m = 24 N / 6 kg = 4 m/s².',
       syllabusRef: 'P1.2'
     },
     {
       id: 'p1-2-q7',
       subject: 'physics',
       topicCode: 'P1',
-      question: 'A cyclist travels 150 metres in 30 seconds at a steady pace. What is the cyclist\'s speed?',
-      options: ['4500 m/s', '5 m/s', '0.2 m/s', '50 m/s'],
-      correctIndex: 1,
-      explanation: 'Speed = distance / time = 150 m / 30 s = 5 m/s.',
+      question: 'What is the effect of friction on moving surfaces in contact?',
+      options: [
+        'It opposes relative motion and converts kinetic energy into thermal energy',
+        'It always accelerates the object forward',
+        'It destroys kinetic energy without creating heat',
+        'It eliminates gravitational attraction'
+      ],
+      correctIndex: 0,
+      explanation: 'Friction opposes relative motion and dissipates mechanical energy as heat.',
       syllabusRef: 'P1.2'
     },
     {
       id: 'p1-2-q8',
       subject: 'physics',
       topicCode: 'P1',
-      question: 'What is the main difference between speed and velocity?',
-      options: [
-        'Speed is measured in m/s while velocity is in km/h',
-        'Speed is a scalar (magnitude only); velocity is a vector (magnitude and direction)',
-        'Velocity is always greater than speed',
-        'Speed applies to solids; velocity applies to liquids'
-      ],
-      correctIndex: 1,
-      explanation: 'Velocity has direction specified (vector), whereas speed does not have direction (scalar).',
+      question: 'When two opposite forces acting on a trolley are 15 N to the right and 15 N to the left, what is the resultant force?',
+      options: ['0 N (balanced forces)', '30 N to the right', '15 N to the left', '225 N'],
+      correctIndex: 0,
+      explanation: 'Opposing equal forces cancel out: 15 N - 15 N = 0 N (balanced, object maintains constant velocity).',
       syllabusRef: 'P1.2'
     },
     {
       id: 'p1-2-q9',
       subject: 'physics',
       topicCode: 'P1',
-      question: 'On a velocity-time graph, what does a horizontal straight line above zero indicate?',
-      options: ['Constant velocity (acceleration = 0 m/s²)', 'Constant acceleration', 'Object is stationary', 'Object is falling'],
+      question: 'What instrument is used in the laboratory to measure force or weight in newtons?',
+      options: ['Newton spring balance (force meter)', 'Top-pan electronic balance', 'Micrometer screw gauge', 'Graduated measuring cylinder'],
       correctIndex: 0,
-      explanation: 'A horizontal line means velocity is unchanging, so acceleration is 0 m/s².',
+      explanation: 'A spring balance calibrated in newtons measures force directly via spring extension.',
       syllabusRef: 'P1.2'
     },
     {
       id: 'p1-2-q10',
       subject: 'physics',
       topicCode: 'P1',
-      question: 'A train moves at 30 m/s for 10 s. What distance does it cover during this period?',
-      options: ['3 m', '300 m', '30 m', '100 m'],
-      correctIndex: 1,
-      explanation: 'Distance = velocity × time = 30 m/s × 10 s = 300 m (the rectangular area under the v-t graph).',
+      question: 'What happens to a spring stretched beyond its elastic limit (limit of proportionality)?',
+      options: [
+        'It undergoes permanent plastic deformation and will not return to its original length',
+        'It doubles its spring constant',
+        'Its extension becomes zero',
+        'It behaves as an ideal liquid'
+      ],
+      correctIndex: 0,
+      explanation: 'Beyond the elastic limit, plastic deformation occurs and the spring remains permanently stretched.',
       syllabusRef: 'P1.2'
     }
   ]
 };
 
-// Generates an aligned, syllabus-accurate 10-question quiz for any subtopic
-export function getQuizForSubtopic(subtopicCode: string): QuizQuestion[] {
-  const normalized = subtopicCode.trim().toUpperCase();
-  if (predefinedSubtopicQuizzes[normalized] && predefinedSubtopicQuizzes[normalized].length >= 10) {
-    return predefinedSubtopicQuizzes[normalized].slice(0, 10);
+/**
+ * Builds a dynamic, unique 10-question quiz specifically tailored to ANY subtopic
+ * by analyzing its slides, starter questions/answers, tasks, and syllabus objectives.
+ */
+function buildDynamicSubtopicQuiz(subtopic: SubtopicTopicGroup): QuizQuestion[] {
+  const code = subtopic.subtopicCode;
+  const title = subtopic.title;
+  const subject = subtopic.subject;
+  const topicCode = subtopic.topicCode;
+  const decks = subtopic.decks || [];
+  const primaryDeck = decks[0];
+
+  const questions: QuizQuestion[] = [];
+
+  // 1. Starter Look-Back Question (if present in deck)
+  if (primaryDeck?.starterLookBack?.question && primaryDeck.starterLookBack.answer) {
+    questions.push({
+      id: `${code}-q-lookback`,
+      subject,
+      topicCode,
+      question: `[Lesson Review] ${primaryDeck.starterLookBack.question}`,
+      options: [
+        primaryDeck.starterLookBack.answer,
+        'No measurable relationship could be determined from prior experimental tests',
+        'The opposite occurs due to thermal degradation in laboratory conditions',
+        'All variables remain independent of biological or physical mechanisms'
+      ],
+      correctIndex: 0,
+      explanation: `From the lesson starter: ${primaryDeck.starterLookBack.answer}`,
+      syllabusRef: code
+    });
   }
 
-  const subtopic = getSubtopicByCode(normalized) || allSubtopicsData.find(s => s.subtopicCode.toLowerCase() === normalized.toLowerCase());
-  const subject: ScienceSubject = subtopic ? subtopic.subject : (normalized.startsWith('B') ? 'biology' : normalized.startsWith('C') ? 'chemistry' : 'physics');
-  const title = subtopic ? subtopic.title : `Subtopic ${normalized}`;
-  const keywords = subtopic && subtopic.decks[0] ? subtopic.decks[0].keywords : ['investigation', 'experiment', 'formula', 'theory', 'data'];
-  const objectives = subtopic && subtopic.decks[0] ? subtopic.decks[0].objectives : ['Explain principles', 'Calculate results', 'Identify variables'];
+  // 2. Starter Look-Forward / Core Problem (if present)
+  if (primaryDeck?.starterLookForward?.question && primaryDeck.starterLookForward.answer) {
+    questions.push({
+      id: `${code}-q-lookforward`,
+      subject,
+      topicCode,
+      question: `[Concept Investigation] ${primaryDeck.starterLookForward.question}`,
+      options: [
+        primaryDeck.starterLookForward.answer,
+        'Physical processes operate purely by chance with no fixed scientific rules',
+        'The reaction cannot occur in Cambridge syllabus laboratory conditions',
+        'Only temperature dictates reactions without molecular interactions'
+      ],
+      correctIndex: 0,
+      explanation: `From the lesson starter inquiry: ${primaryDeck.starterLookForward.answer}`,
+      syllabusRef: code
+    });
+  }
 
-  // Construct rigorous 10 questions based on the subtopic's verified syllabus content
-  const generated: QuizQuestion[] = [
-    {
-      id: `${normalized}-gen-1`,
-      subject,
-      topicCode: normalized.split('.')[0],
-      question: `What is the primary scientific focus of ${normalized}: "${title}"?`,
-      options: [
-        objectives[0] || `Understanding core theoretical principles of ${title}`,
-        'Memorizing historical anecdotes unrelated to science',
-        'Measuring unrelated variables in outer space',
-        'Conducting tests without controls or measurements'
-      ],
-      correctIndex: 0,
-      explanation: `The key objective for ${normalized} is: ${objectives[0] || 'mastering core scientific concepts'}.`,
-      syllabusRef: normalized
-    },
-    {
-      id: `${normalized}-gen-2`,
-      subject,
-      topicCode: normalized.split('.')[0],
-      question: `Which key scientific term is directly associated with ${title}?`,
-      options: [
-        keywords[0] ? keywords[0].toUpperCase() : 'Concentration gradient',
-        'Geocentric epicycle',
-        'Phlogiston hypothesis',
-        'Caloric fluid'
-      ],
-      correctIndex: 0,
-      explanation: `${keywords[0] || 'The term'} is a fundamental Cambridge IGCSE syllabus keyword for ${normalized}.`,
-      syllabusRef: normalized
-    },
-    {
-      id: `${normalized}-gen-3`,
-      subject,
-      topicCode: normalized.split('.')[0],
-      question: `In an investigation regarding ${title}, why is it essential to keep control variables constant?`,
-      options: [
-        'To ensure only the independent variable causes the observed change in the dependent variable (fair test)',
-        'To make the experiment take longer to complete',
-        'To guarantee zero percentage error every time',
-        'To avoid needing repeat trials or averages'
-      ],
-      correctIndex: 0,
-      explanation: 'Controlling variables ensures a valid, fair investigation where results are directly attributable to the independent variable.',
-      syllabusRef: normalized
-    },
-    {
-      id: `${normalized}-gen-4`,
-      subject,
-      topicCode: normalized.split('.')[0],
-      question: `Which statement represents an accurate scientific relationship studied in ${normalized}?`,
-      options: [
-        objectives[1] || `Physical factors directly govern rates and equilibrium in ${title}`,
-        'Matter and energy are constantly destroyed during ordinary physical processes',
-        'All experimental measurements are perfectly accurate without repeats',
-        'Temperature has zero effect on molecular interactions'
-      ],
-      correctIndex: 0,
-      explanation: `In ${normalized}, ${objectives[1] || 'rates and equilibria respond systematically to physical conditions'}.`,
-      syllabusRef: normalized
-    },
-    {
-      id: `${normalized}-gen-5`,
-      subject,
-      topicCode: normalized.split('.')[0],
-      question: `Which laboratory instrument would be most appropriate when gathering quantitative data for ${normalized}?`,
-      options: [
-        'Calibrated measuring cylinders, stopwatches, balances, or digital probes',
-        'Uncalibrated plastic cups without markings',
-        'Rough visual estimation without recording numerical values',
-        'Household kitchen spoons'
-      ],
-      correctIndex: 0,
-      explanation: 'Precision instruments (graduated cylinders, digital balances, stopwatches) are required for accurate Cambridge science experiments.',
-      syllabusRef: normalized
-    },
-    {
-      id: `${normalized}-gen-6`,
-      subject,
-      topicCode: normalized.split('.')[0],
-      question: `What is the significance of the key concept "${keywords[1] || keywords[0] || 'equilibrium'}" in this subtopic?`,
-      options: [
-        `It explains how structural or operational adaptations support function in ${title}`,
-        'It is an outdated historical term no longer used in science',
-        'It refers strictly to nuclear fission reactions',
-        'It describes only planetary orbits'
-      ],
-      correctIndex: 0,
-      explanation: `The concept is central to understanding the operational mechanism of ${normalized}.`,
-      syllabusRef: normalized
-    },
-    {
-      id: `${normalized}-gen-7`,
-      subject,
-      topicCode: normalized.split('.')[0],
-      question: `When plotting experimental data for ${normalized}, which axis should the independent variable be placed on?`,
-      options: [
-        'The horizontal x-axis',
-        'The vertical y-axis',
-        'Neither; variables should never be plotted on axes',
-        'On a secondary pie chart only'
-      ],
-      correctIndex: 0,
-      explanation: 'The independent variable (what the experimenter changes) is plotted on the horizontal x-axis.',
-      syllabusRef: normalized
-    },
-    {
-      id: `${normalized}-gen-8`,
-      subject,
-      topicCode: normalized.split('.')[0],
-      question: `How does increasing temperature typically affect particle interactions in this topic?`,
-      options: [
-        'Increases kinetic energy, causing particles to move faster and collide more frequently',
-        'Decreases kinetic energy, causing particles to become stationary',
-        'Destroys the particles completely',
-        'Has zero effect on speed or collision rate'
-      ],
-      correctIndex: 0,
-      explanation: 'Higher thermal energy increases average kinetic energy, speeding particle motion and collision rates.',
-      syllabusRef: normalized
-    },
-    {
-      id: `${normalized}-gen-9`,
-      subject,
-      topicCode: normalized.split('.')[0],
-      question: `Why should experiments in ${title} be repeated at least three times?`,
-      options: [
-        'To identify anomalies and calculate a reliable mean average',
-        'To eliminate the independent variable',
-        'To alter the laws of physics',
-        'To make the sample size smaller'
-      ],
-      correctIndex: 0,
-      explanation: 'Repeats allow anomalous results to be identified and discarded before calculating a representative mean.',
-      syllabusRef: normalized
-    },
-    {
-      id: `${normalized}-gen-10`,
-      subject,
-      topicCode: normalized.split('.')[0],
-      question: `Which conclusion is fully supported by the Cambridge syllabus for ${normalized}?`,
-      options: [
-        subtopic?.syllabusSummary[0] || `The concepts of ${title} follow fundamental conservation and rate laws`,
-        'Energy and mass are created from nothing during chemical reactions',
-        'All observations can be explained without reference to atoms or cells',
-        'Variables never affect experimental outcomes'
-      ],
-      correctIndex: 0,
-      explanation: `Cambridge specification confirms: ${subtopic?.syllabusSummary[0] || 'fundamental scientific principles govern these processes'}.`,
-      syllabusRef: normalized
+  // 3. Extract Specific Theory Slide Definitions & Principles
+  const theorySlides = decks.flatMap(d => d.slides || []).filter(s => s.slideType === 'theory' || s.slideType === 'starter');
+  theorySlides.forEach((slide, sIdx) => {
+    if (questions.length >= 8) return;
+    
+    // Look for bullet points with key definitions (e.g. "• Term: definition")
+    const bulletDef = slide.content.find(c => c.includes(':') && c.length > 25);
+    if (bulletDef) {
+      const parts = bulletDef.replace(/^•\s*/, '').split(':');
+      const term = parts[0].trim();
+      const def = parts.slice(1).join(':').trim();
+
+      if (term.length < 35 && def.length > 15) {
+        questions.push({
+          id: `${code}-q-theory-${sIdx}`,
+          subject,
+          topicCode,
+          question: `According to the lesson slides on "${slide.title}", which scientific concept is described as: "${def}"?`,
+          options: [
+            term,
+            primaryDeck?.keywords[sIdx % (primaryDeck.keywords.length || 1)] || 'Equilibrium constant',
+            'Independent control factor',
+            'Caloric heat capacity'
+          ],
+          correctIndex: 0,
+          explanation: `In ${code}, ${term} is explicitly defined as: ${def}`,
+          syllabusRef: code
+        });
+      }
+    } else if (slide.content.length > 0) {
+      // General theory statement
+      const keyFact = slide.content[0].replace(/^•\s*/, '');
+      questions.push({
+        id: `${code}-q-slide-${sIdx}`,
+        subject,
+        topicCode,
+        question: `In the study of ${title} ("${slide.title}"), which statement reflects the key scientific principle taught?`,
+        options: [
+          keyFact,
+          'Atoms and energy are created and destroyed during ordinary reactions',
+          'Results depend entirely on non-reproducible external conditions',
+          'No quantitative measurements are required for verification'
+        ],
+        correctIndex: 0,
+        explanation: `From lesson slides: ${keyFact}`,
+        syllabusRef: code
+      });
     }
-  ];
+  });
 
-  return generated;
+  // 4. Practical Investigation, Equipment & Safety
+  const practicalSlide = decks.flatMap(d => d.slides || []).find(s => s.practicalInfo || s.slideType === 'practical');
+  if (practicalSlide?.practicalInfo) {
+    const p = practicalSlide.practicalInfo;
+    if (p.equipment && p.equipment.length > 0) {
+      questions.push({
+        id: `${code}-q-apparatus`,
+        subject,
+        topicCode,
+        question: `When carrying out the practical investigation for ${title} (${p.aim}), which apparatus is essential?`,
+        options: [
+          p.equipment.slice(0, 3).join(', '),
+          'Mercury barometer, uncalibrated scoop, non-sterile soil',
+          'Plastic basin without volume markings, iron nails, ruler only',
+          'Barometer and telescope only'
+        ],
+        correctIndex: 0,
+        explanation: `Required Cambridge laboratory equipment: ${p.equipment.join(', ')}.`,
+        syllabusRef: code
+      });
+    }
+
+    if (p.riskAssessment && p.riskAssessment.length > 0) {
+      const risk = p.riskAssessment[0];
+      questions.push({
+        id: `${code}-q-safety`,
+        subject,
+        topicCode,
+        question: `In the risk assessment for ${title} (${risk.hazard}), what is the required laboratory precaution?`,
+        options: [
+          risk.precaution,
+          'Perform experiment without eye protection to observe closer',
+          'Heat flammable substances directly over an open naked flame',
+          'Dispose of all concentrated chemicals directly into the open sink'
+        ],
+        correctIndex: 0,
+        explanation: `Safety precaution for ${risk.hazard}: ${risk.precaution}.`,
+        syllabusRef: code
+      });
+    }
+  }
+
+  // 5. Classroom Tasks & Solutions
+  const taskSlide = decks.flatMap(d => d.slides || []).find(s => s.task);
+  if (taskSlide?.task) {
+    const t = taskSlide.task;
+    if (t.solution) {
+      questions.push({
+        id: `${code}-q-task`,
+        subject,
+        topicCode,
+        question: `Regarding the classroom exercise on "${t.taskName}": ${t.instructions.slice(0, 100)}... what is the correct scientific outcome?`,
+        options: [
+          t.solution.slice(0, 120),
+          'The rate decreases exponentially to zero immediately',
+          'No reaction occurs because temperature remains neutral',
+          'The experiment violates the conservation of mass'
+        ],
+        correctIndex: 0,
+        explanation: `Classroom task solution: ${t.solution}`,
+        syllabusRef: code
+      });
+    }
+  }
+
+  // 6. Syllabus Objectives from Specification Summary
+  (subtopic.syllabusSummary || []).forEach((summaryPoint, idx) => {
+    if (questions.length >= 10) return;
+    questions.push({
+      id: `${code}-q-summary-${idx}`,
+      subject,
+      topicCode,
+      question: `Which statement accurately aligns with the Cambridge 0653 syllabus specification for ${code}: "${title}"?`,
+      options: [
+        summaryPoint,
+        'Chemical and physical systems do not obey predictable laws of conservation',
+        'Measurements should be taken without standard units or repeats',
+        'Observations in this topic are independent of atoms, forces, or cells'
+      ],
+      correctIndex: 0,
+      explanation: `Cambridge 0653 specification requirement: ${summaryPoint}`,
+      syllabusRef: code
+    });
+  });
+
+  // 7. Fill remainder from topic question templates in syllabusQuestionsBank if needed
+  if (questions.length < 10 && TOPIC_TEMPLATES[topicCode]) {
+    const templates = TOPIC_TEMPLATES[topicCode];
+    templates.forEach((tmpl, tIdx) => {
+      if (questions.length >= 10) return;
+      const vars = tmpl.generateVars ? tmpl.generateVars() : {};
+      const stem = typeof tmpl.stem === 'function' ? tmpl.stem(vars) : tmpl.stem;
+      const correct = typeof tmpl.correct === 'function' ? tmpl.correct(vars) : tmpl.correct;
+      const distractors = typeof tmpl.distractors === 'function' ? tmpl.distractors(vars) : tmpl.distractors;
+      const explanation = typeof tmpl.explanation === 'function' ? tmpl.explanation(vars) : tmpl.explanation;
+
+      questions.push({
+        id: `${code}-q-bank-${tIdx}`,
+        subject,
+        topicCode,
+        question: stem,
+        options: [correct, ...distractors],
+        correctIndex: 0,
+        explanation,
+        syllabusRef: code
+      });
+    });
+  }
+
+  // 8. If still under 10, add subtopic keyword applications
+  let kwIdx = 0;
+  while (questions.length < 10) {
+    const kw = primaryDeck?.keywords[kwIdx] || `concept ${kwIdx + 1}`;
+    questions.push({
+      id: `${code}-q-kw-${kwIdx}`,
+      subject,
+      topicCode,
+      question: `Why is understanding "${kw}" essential when answering Cambridge exam questions for ${code} (${title})?`,
+      options: [
+        `It represents a core scientific principle and mark-scheme keyword required to explain the mechanism in ${title}`,
+        'It is an arbitrary historical label not used in exam mark schemes',
+        'It applies only to theoretical physics in outer space',
+        'It describes an anomalous error that examiners always penalise'
+      ],
+      correctIndex: 0,
+      explanation: `"${kw}" is a mandatory Cambridge syllabus keyword for ${code}.`,
+      syllabusRef: code
+    });
+    kwIdx++;
+  }
+
+  return questions.slice(0, 10);
+}
+
+/**
+ * Returns a complete, 10-question quiz tailored specifically to the given subtopic.
+ * Guarantees that:
+ * 1. Questions are grounded in the subtopic's actual slides, starter prompts, and syllabus points.
+ * 2. Every question has its options randomized, with correctIndex evenly spread across A (0), B (1), C (2), and D (3).
+ */
+export function getQuizForSubtopic(subtopicCode: string): QuizQuestion[] {
+  const normalized = subtopicCode.trim().toUpperCase();
+
+  // 1. Check if a high-yield hand-crafted bank exists
+  if (predefinedSubtopicQuizzes[normalized] && predefinedSubtopicQuizzes[normalized].length >= 10) {
+    const baseBank = predefinedSubtopicQuizzes[normalized].slice(0, 10);
+    return randomizeQuizQuestions(baseBank);
+  }
+
+  // 2. Look up the subtopic in our comprehensive Cambridge data
+  const subtopic = getSubtopicByCode(normalized) || 
+    allSubtopicsData.find(s => s.subtopicCode.toLowerCase() === normalized.toLowerCase());
+
+  if (subtopic) {
+    const dynamicQuiz = buildDynamicSubtopicQuiz(subtopic);
+    return randomizeQuizQuestions(dynamicQuiz);
+  }
+
+  // 3. Fallback for any unknown code
+  const subject: ScienceSubject = normalized.startsWith('B') ? 'biology' : normalized.startsWith('C') ? 'chemistry' : 'physics';
+  const topicCode = normalized.split('.')[0] || 'B1';
+  const fallbackTemplates = TOPIC_TEMPLATES[topicCode] || TOPIC_TEMPLATES['B1'] || [];
+
+  const fallbackQuestions: QuizQuestion[] = fallbackTemplates.slice(0, 10).map((tmpl, idx) => {
+    const vars = tmpl.generateVars ? tmpl.generateVars() : {};
+    const stem = typeof tmpl.stem === 'function' ? tmpl.stem(vars) : tmpl.stem;
+    const correct = typeof tmpl.correct === 'function' ? tmpl.correct(vars) : tmpl.correct;
+    const distractors = typeof tmpl.distractors === 'function' ? tmpl.distractors(vars) : tmpl.distractors;
+    const explanation = typeof tmpl.explanation === 'function' ? tmpl.explanation(vars) : tmpl.explanation;
+
+    return {
+      id: `${normalized}-fb-${idx}`,
+      subject,
+      topicCode,
+      question: stem,
+      options: [correct, ...distractors],
+      correctIndex: 0,
+      explanation,
+      syllabusRef: normalized
+    };
+  });
+
+  return randomizeQuizQuestions(fallbackQuestions);
 }

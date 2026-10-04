@@ -12,6 +12,7 @@ import { InstructorDashboard } from './components/InstructorDashboard';
 import { StudentClassesView } from './components/StudentClassesView';
 import { AIChatTutor } from './components/AIChatTutor';
 import { GoogleSignInGate } from './components/GoogleSignInGate';
+import { ClassCodeGateModal } from './components/ClassCodeGateModal';
 import { ScienceSubject, UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult } from './types';
 import { 
   Sparkles, 
@@ -274,15 +275,38 @@ export default function App() {
     return (
       <GoogleSignInGate
         theme={theme}
-        onSignInSuccess={(profile) => {
+        onSignInSuccess={async (profile) => {
           setUser(profile);
           localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(profile));
+          try {
+            const classes = await fetchStudentEnrolledClasses(profile.id);
+            setEnrolledClassIds(classes.map(c => c.id));
+          } catch (e) {
+            console.error('Error fetching enrolled classes:', e);
+          }
         }}
       />
     );
   }
 
-  // 3. Authenticated App Experience
+  // 3. Mandatory Class Code Gate for Students on First Sign-In
+  // After students sign in for the first time they must enter a class code to join a class
+  if (user.role === 'student' && enrolledClassIds.length === 0) {
+    return (
+      <div className={`min-h-screen ${theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-100 text-slate-900'}`}>
+        <ClassCodeGateModal
+          user={user}
+          progress={progress}
+          theme={theme}
+          onClassJoined={(classItem) => {
+            setEnrolledClassIds([classItem.id]);
+          }}
+        />
+      </div>
+    );
+  }
+
+  // 4. Authenticated App Experience
   return (
     <div className={`min-h-screen flex flex-col font-sans selection:bg-emerald-500 selection:text-white transition-colors duration-200 ${
       theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-100 text-slate-900'

@@ -981,66 +981,6 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                   </span>
                 </div>
               </div>
-
-              {/* Large, obvious Lesson Deck Switcher in Subtopic Header when multiple lessons exist */}
-              {currentLessonCount > 1 && (
-                <div className={`p-3 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center gap-3 shrink-0 shadow-sm ${
-                  theme === 'dark' ? 'bg-slate-950/80 border-slate-700/80' : 'bg-slate-100/90 border-slate-300'
-                }`}>
-                  <div className="flex items-center gap-1.5">
-                    <Layers className="w-4 h-4 text-emerald-400" />
-                    <span className="text-xs font-black uppercase tracking-wider text-slate-300">
-                      Lesson Decks ({currentLessonCount}):
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {Array.from({ length: currentLessonCount }).map((_, i) => {
-                      const isCurrent = hasMatchingDriveSlide 
-                        ? i === activeDriveSlideIdx 
-                        : i === activeDeckIndex;
-                      const deckTitle = hasMatchingDriveSlide
-                        ? (driveSlidesForCurrentSubtopic[i]?.name || `Lesson ${i + 1}`)
-                        : (currentSubtopic.decks[i]?.title || `Lesson ${i + 1}`);
-
-                      return (
-                        <button
-                          key={i}
-                          onClick={() => {
-                            if (hasMatchingDriveSlide) {
-                              setActiveDriveSlideIdx(i);
-                            } else {
-                              setActiveDeckIndex(i);
-                              setActiveSlideIndex(0);
-                            }
-                          }}
-                          className={`px-3.5 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 shadow-sm cursor-pointer ${
-                            isCurrent
-                              ? hasMatchingDriveSlide
-                                ? 'bg-blue-600 text-white ring-2 ring-blue-400 shadow-blue-600/30'
-                                : 'bg-emerald-600 text-white ring-2 ring-emerald-400 shadow-emerald-600/30'
-                              : theme === 'dark'
-                                ? 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700'
-                                : 'bg-white text-slate-800 hover:bg-slate-200 border border-slate-300'
-                          }`}
-                          title={deckTitle}
-                        >
-                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black ${
-                            isCurrent ? 'bg-white text-slate-950' : 'bg-slate-700 text-slate-300'
-                          }`}>
-                            {i + 1}
-                          </span>
-                          <span>Lesson {i + 1}</span>
-                          {isCurrent && (
-                            <span className="text-[10px] uppercase font-bold opacity-90">
-                              (Active)
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* TRAFFIC LIGHT CONTROLS: Red, Orange, Green (with 80% quiz requirement) */}
