@@ -122,9 +122,26 @@ export default function App() {
           console.error('Error resolving user profile on auth change:', e);
         }
       } else {
-        setUser(null);
-        localStorage.removeItem(STORAGE_KEY_USER);
-        setEnrolledClassIds([]);
+        const stored = localStorage.getItem(STORAGE_KEY_USER);
+        if (stored) {
+          try {
+            const profile = JSON.parse(stored);
+            if (profile && profile.id) {
+              setUser(profile);
+              const classes = await fetchStudentEnrolledClasses(profile.id);
+              setEnrolledClassIds(classes.map(c => c.id));
+            } else {
+              setUser(null);
+              setEnrolledClassIds([]);
+            }
+          } catch {
+            setUser(null);
+            setEnrolledClassIds([]);
+          }
+        } else {
+          setUser(null);
+          setEnrolledClassIds([]);
+        }
       }
       setAuthLoading(false);
     });
