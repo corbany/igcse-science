@@ -23,12 +23,20 @@ export const db = (() => {
   }
 })();
 
+export const WORKSPACE_DRIVE_SCOPES = [
+  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/drive.readonly'
+];
+
 const provider = new GoogleAuthProvider();
-// Only request standard login scopes (email and profile)
+// Request standard profile plus Google Drive access scopes
 provider.addScope('email');
 provider.addScope('profile');
+WORKSPACE_DRIVE_SCOPES.forEach(scope => provider.addScope(scope));
+
 provider.setCustomParameters({
-  prompt: 'select_account'
+  prompt: 'consent select_account',
+  access_type: 'offline'
 });
 
 // Flag to indicate if we are in the middle of a sign-in flow

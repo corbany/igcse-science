@@ -390,11 +390,14 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
       setSyncedSlides(result.presentations || []);
       setDriveSyncMessage(result.message);
     } catch (err: any) {
-      console.error('Failed to organize drive lessons:', err);
-      if (err?.message?.includes('401') || err?.message?.includes('authentication')) {
+      if (err?.isInsufficientScope || err?.message?.includes('insufficient') || err?.message?.includes('403') || err?.message?.includes('401')) {
+        console.warn('Google Drive permission notice:', err?.message);
         clearCachedDriveToken();
+        setDriveSyncMessage(`Drive Permissions Notice: ${err?.message || 'Google Drive permissions required. Please authenticate to grant access.'}`);
+      } else {
+        console.error('Failed to organize drive lessons:', err);
+        setDriveSyncMessage(`Error organizing lessons: ${err?.message || 'Check folder access or Google sign-in.'}`);
       }
-      setDriveSyncMessage(`Error organizing lessons: ${err?.message || 'Check folder access or Google sign-in.'}`);
     } finally {
       setIsOrganizingDrive(false);
     }
@@ -419,11 +422,14 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
       setSyncedSlides(freshSlides);
       setDriveSyncMessage(`Replaced all lessons. Successfully re-synced ${freshSlides.length} Google Slides presentations!`);
     } catch (err: any) {
-      console.error('Failed to replace lessons:', err);
-      if (err?.message?.includes('401') || err?.message?.includes('authentication')) {
+      if (err?.isInsufficientScope || err?.message?.includes('insufficient') || err?.message?.includes('403') || err?.message?.includes('401')) {
+        console.warn('Google Drive permission notice:', err?.message);
         clearCachedDriveToken();
+        setDriveSyncMessage(`Drive Permissions Notice: ${err?.message || 'Google Drive permissions required. Please authenticate to grant access.'}`);
+      } else {
+        console.error('Failed to replace lessons:', err);
+        setDriveSyncMessage(`Error replacing lessons: ${err?.message || 'Check folder access or Google sign-in.'}`);
       }
-      setDriveSyncMessage(`Error replacing lessons: ${err?.message || 'Check folder access or Google sign-in.'}`);
     } finally {
       setIsSyncingDrive(false);
     }

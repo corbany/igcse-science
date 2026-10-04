@@ -1,5 +1,6 @@
 import { SlideDeckOption } from '../data/googleSlidesRegistry';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { clearCachedDriveToken } from './firebaseAuth';
 
 export const TARGET_DRIVE_FOLDER_ID = '1kypXZXP3nY9pFxuSJOTZ1anODYxxfZ1a';
 export const TARGET_DRIVE_FOLDER_URL = `https://drive.google.com/drive/folders/${TARGET_DRIVE_FOLDER_ID}`;
@@ -602,10 +603,15 @@ export async function fetchAllDriveFolderFiles(
           errorDetails = await response.text();
         }
 
-        if (response.status === 401) {
-          throw new Error('Google Drive access requires signing in. Please click "Sync Drive Slides" to authenticate with your Google account.');
+        if (response.status === 401 || (response.status === 403 && errorDetails.toLowerCase().includes('insufficient'))) {
+          clearCachedDriveToken();
+          const errObj: any = new Error(`Google Drive permission notice: Request had insufficient authentication scopes. Please re-authenticate to grant access to folder ${currentFolderId}.`);
+          errObj.isInsufficientScope = true;
+          throw errObj;
         } else if (response.status === 403) {
-          throw new Error(`Google Drive permission notice: ${errorDetails}. Please ensure you have access to folder ${currentFolderId}.`);
+          const errObj: any = new Error(`Google Drive permission notice: ${errorDetails}. Please ensure you have access to folder ${currentFolderId}.`);
+          errObj.isAccessDenied = true;
+          throw errObj;
         } else if (response.status === 404) {
           throw new Error(`Folder ID ${currentFolderId} not found in Google Drive.`);
         }
@@ -715,6 +721,12 @@ export async function organizeDriveLessonsIntoSubfolders(
         err = errJson?.error?.message || res.statusText;
       } catch {
         err = await res.text();
+      }
+      if (res.status === 401 || (res.status === 403 && err.toLowerCase().includes('insufficient'))) {
+        clearCachedDriveToken();
+        const errObj: any = new Error(`Google Drive permission notice: Request had insufficient authentication scopes. Please re-authenticate to grant access to organize folder ${rootFolderId}.`);
+        errObj.isInsufficientScope = true;
+        throw errObj;
       }
       throw new Error(`Failed to list root Drive folder (${res.status}): ${err}`);
     }
