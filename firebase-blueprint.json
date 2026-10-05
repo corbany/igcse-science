@@ -69,9 +69,21 @@
         "weakTopics": { "type": "array", "description": "List of weak topic codes" }
       },
       "required": ["studentId", "name", "email", "joinedAt"]
+    },
+    "TestConnection": {
+      "title": "TestConnection",
+      "description": "Connection test document for health checks.",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "description": "Status text" }
+      }
     }
   },
   "firestore": {
+    "/test/{docId}": {
+      "schema": { "$ref": "#/entities/TestConnection" },
+      "description": "Connection test documents for health checks."
+    },
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/User" },
       "description": "Stores user profiles with assigned roles (student or instructor)."

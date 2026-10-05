@@ -260,261 +260,358 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
-      {/* Main Navigation Tabs */}
-      <nav className={`border-t px-4 sm:px-6 lg:px-8 overflow-x-auto scrollbar-none transition-colors duration-200 ${
-        theme === 'dark' ? 'bg-slate-950/80 border-slate-800/80' : 'bg-slate-50 border-slate-200'
+      {/* Main Navigation Bar: Symmetrical, responsive, zero-horizontal-scroll */}
+      <nav className={`border-t px-2 sm:px-4 lg:px-8 py-2 transition-colors duration-200 ${
+        theme === 'dark' ? 'bg-slate-950/90 border-slate-800/80' : 'bg-slate-50 border-slate-200'
       }`}>
-        <div className="max-w-7xl mx-auto flex items-center justify-between py-2 text-sm whitespace-nowrap">
-          {/* Navigation Items */}
-          <div className="flex items-center space-x-1 sm:space-x-2">
-            {/* INSTRUCTOR-ONLY PROMINENT TAB */}
-            {!isStudent && (
+        <div className="max-w-7xl mx-auto">
+          {/* Symmetrical 8-Option Grid: 8 columns on desktop (lg+), 4x2 on tablet/mobile */}
+          <div className="grid grid-cols-4 lg:grid-cols-8 gap-1.5 sm:gap-2">
+            {/* OPTION 1: Teaching Hub (Instructor) or Lesson Slides (Student) */}
+            {!isStudent ? (
               <button
                 onClick={() => setCurrentTab('instructor')}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-bold transition shadow-xs ${
+                title="Teaching Hub, Class Roster & Drive Folder Sync"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
                   currentTab === 'instructor'
-                    ? 'bg-purple-600 text-white shadow-purple-600/30'
+                    ? 'bg-purple-600 text-white font-semibold shadow-xs ring-1 ring-purple-500/50'
                     : theme === 'dark'
-                      ? 'bg-purple-950/40 border border-purple-500/30 text-purple-300 hover:bg-purple-900/50 hover:text-white'
-                      : 'bg-purple-100 border border-purple-300 text-purple-800 hover:bg-purple-200'
+                      ? 'text-purple-300 hover:text-white hover:bg-slate-800/80 bg-purple-950/30 border border-purple-500/20'
+                      : 'text-purple-800 hover:text-purple-950 hover:bg-purple-100/80 bg-purple-50 border border-purple-200'
                 }`}
               >
-                <BarChart3 className="w-4 h-4 text-purple-400" />
-                <span>Instructor Classes & Drive Hub</span>
+                <LayoutDashboard className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-400 shrink-0" />
+                <span className="truncate">Teaching Hub</span>
               </button>
-            )}
-
-            {/* Lessons / Slides Tab */}
-            <button
-              onClick={() => setCurrentTab('lessons')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition ${
-                currentTab === 'lessons'
-                  ? isStudent ? 'bg-emerald-600 text-white shadow-xs' : 'bg-purple-600 text-white shadow-xs'
-                  : theme === 'dark'
-                    ? 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                    : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
-              }`}
-            >
-              <BookOpen className="w-4 h-4" />
-              <span>{isStudent ? 'Lesson Slides' : 'Slides & Curriculum'}</span>
-            </button>
-
-            {/* Practice Quizzes */}
-            <button
-              onClick={() => setCurrentTab('quizzes')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition ${
-                currentTab === 'quizzes'
-                  ? isStudent ? 'bg-emerald-600 text-white shadow-xs' : 'bg-purple-600 text-white shadow-xs'
-                  : theme === 'dark'
-                    ? 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                    : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
-              }`}
-            >
-              <Award className="w-4 h-4" />
-              <span>Practice Quizzes</span>
-            </button>
-
-            {/* Past Papers Vault */}
-            <button
-              onClick={() => setCurrentTab('exams')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition ${
-                currentTab === 'exams'
-                  ? isStudent ? 'bg-emerald-600 text-white shadow-xs' : 'bg-purple-600 text-white shadow-xs'
-                  : theme === 'dark'
-                    ? 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                    : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              <span>Past Exam Papers</span>
-            </button>
-
-            {/* Syllabus Notebook */}
-            <button
-              onClick={() => setCurrentTab('notebook')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition ${
-                currentTab === 'notebook'
-                  ? isStudent ? 'bg-emerald-600 text-white shadow-xs' : 'bg-purple-600 text-white shadow-xs'
-                  : theme === 'dark'
-                    ? 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                    : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
-              }`}
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Syllabus Notebook</span>
-            </button>
-
-            {/* Progress Tracker */}
-            <button
-              onClick={() => setCurrentTab('tracker')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition ${
-                currentTab === 'tracker'
-                  ? isStudent ? 'bg-emerald-600 text-white shadow-xs' : 'bg-purple-600 text-white shadow-xs'
-                  : theme === 'dark'
-                    ? 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                    : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
-              }`}
-            >
-              <BarChart3 className="w-4 h-4" />
-              <span>{isStudent ? 'My Progress' : 'Progress Tracker'}</span>
-            </button>
-
-            {/* STUDENT ONLY: My Classes Tab to Join with Code & Track Connection */}
-            {isStudent && (
+            ) : (
               <button
-                onClick={() => setCurrentTab('classes')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition ${
-                  currentTab === 'classes'
-                    ? 'bg-emerald-600 text-white shadow-xs'
+                onClick={() => setCurrentTab('lessons')}
+                title="Lesson Slides & Cambridge Syllabus Objectives"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                  currentTab === 'lessons'
+                    ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50'
                     : theme === 'dark'
-                      ? 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
                       : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
                 }`}
               >
-                <Users className="w-4 h-4 text-emerald-400" />
-                <span>My Classes</span>
+                <BookOpen className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span className="truncate">Lesson Slides</span>
               </button>
             )}
 
-            {/* STUDENT MODE: Clean 'More Tools' Dropdown */}
-            {isStudent ? (
-              <div className="relative" ref={dropdownRef}>
-                <button
-                  onClick={() => setShowMoreTools(prev => !prev)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition ${
-                    isExtraStudentTab
-                      ? 'bg-emerald-600 text-white shadow-xs'
-                      : theme === 'dark'
-                        ? 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                        : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
-                  }`}
-                >
-                  <Compass className="w-4 h-4" />
-                  <span>
-                    {currentTab === 'schedule' ? 'Revision Schedule' :
-                     currentTab === 'recommendations' ? 'AI Learning Path' :
-                     currentTab === 'guidelines' ? 'Exam Guidelines' : 'Study Tools'}
-                  </span>
-                  <ChevronDown className="w-3.5 h-3.5 opacity-70" />
-                </button>
-
-                {showMoreTools && (
-                  <div className={`absolute left-0 mt-1 w-56 rounded-xl border p-1.5 shadow-xl z-50 ${
-                    theme === 'dark' ? 'bg-slate-900 border-slate-800 text-slate-200' : 'bg-white border-slate-200 text-slate-800'
-                  }`}>
-                    <button
-                      onClick={() => { setCurrentTab('schedule'); setShowMoreTools(false); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition ${
-                        currentTab === 'schedule' 
-                          ? 'bg-emerald-500/20 text-emerald-400' 
-                          : theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
-                      }`}
-                    >
-                      <Calendar className="w-4 h-4 text-emerald-400" />
-                      <span>AI Revision Schedule</span>
-                    </button>
-
-                    <button
-                      onClick={() => { setCurrentTab('recommendations'); setShowMoreTools(false); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition ${
-                        currentTab === 'recommendations' 
-                          ? 'bg-emerald-500/20 text-emerald-400' 
-                          : theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
-                      }`}
-                    >
-                      <Sparkles className="w-4 h-4 text-amber-400" />
-                      <span>AI Learning Path</span>
-                    </button>
-
-                    <button
-                      onClick={() => { setCurrentTab('guidelines'); setShowMoreTools(false); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition ${
-                        currentTab === 'guidelines' 
-                          ? 'bg-emerald-500/20 text-emerald-400' 
-                          : theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
-                      }`}
-                    >
-                      <ShieldCheck className="w-4 h-4 text-blue-400" />
-                      <span>Exam Guidelines (Core vs Ext)</span>
-                    </button>
-                  </div>
-                )}
-              </div>
+            {/* OPTION 2: Slides & Curriculum (Instructor) or Practice Quizzes (Student) */}
+            {!isStudent ? (
+              <button
+                onClick={() => setCurrentTab('lessons')}
+                title="Syllabus Slide Decks & Curriculum Reference"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                  currentTab === 'lessons'
+                    ? 'bg-purple-600 text-white font-semibold shadow-xs ring-1 ring-purple-500/50'
+                    : theme === 'dark'
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span className="truncate">Lesson Slides</span>
+              </button>
             ) : (
-              /* INSTRUCTOR MODE: Show all tools directly */
-              <>
-                <button
-                  onClick={() => setCurrentTab('guidelines')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition ${
-                    currentTab === 'guidelines'
-                      ? 'bg-purple-600 text-white shadow-xs'
-                      : theme === 'dark'
-                        ? 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                        : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
-                  }`}
-                >
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>Exam Guidelines</span>
-                </button>
-
-                <button
-                  onClick={() => setCurrentTab('schedule')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition ${
-                    currentTab === 'schedule'
-                      ? 'bg-purple-600 text-white shadow-xs'
-                      : theme === 'dark'
-                        ? 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                        : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
-                  }`}
-                >
-                  <Calendar className="w-4 h-4" />
-                  <span>Revision Schedule</span>
-                </button>
-
-                <button
-                  onClick={() => setCurrentTab('recommendations')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition ${
-                    currentTab === 'recommendations'
-                      ? 'bg-purple-600 text-white shadow-xs'
-                      : theme === 'dark'
-                        ? 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                        : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
-                  }`}
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span>AI Learning Path</span>
-                </button>
-              </>
+              <button
+                onClick={() => setCurrentTab('quizzes')}
+                title="10-Question Green Light Practice Quizzes"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                  currentTab === 'quizzes'
+                    ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50'
+                    : theme === 'dark'
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                }`}
+              >
+                <Award className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span className="truncate">Practice Quizzes</span>
+              </button>
             )}
 
-            {/* AI Chat Tutor */}
+            {/* OPTION 3: Practice Quizzes (Instructor) or Past Exam Papers (Student) */}
+            {!isStudent ? (
+              <button
+                onClick={() => setCurrentTab('quizzes')}
+                title="10-Question Green Light Practice Quizzes"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                  currentTab === 'quizzes'
+                    ? 'bg-purple-600 text-white font-semibold shadow-xs ring-1 ring-purple-500/50'
+                    : theme === 'dark'
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                }`}
+              >
+                <Award className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span className="truncate">Practice Quizzes</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setCurrentTab('exams')}
+                title="Past Exam Papers Vault & Mark Schemes"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                  currentTab === 'exams'
+                    ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50'
+                    : theme === 'dark'
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span className="truncate">Past Exam Papers</span>
+              </button>
+            )}
+
+            {/* OPTION 4: Past Exam Papers (Instructor) or Syllabus Notebook (Student) */}
+            {!isStudent ? (
+              <button
+                onClick={() => setCurrentTab('exams')}
+                title="Past Exam Papers Vault & Mark Schemes"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                  currentTab === 'exams'
+                    ? 'bg-purple-600 text-white font-semibold shadow-xs ring-1 ring-purple-500/50'
+                    : theme === 'dark'
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span className="truncate">Past Exam Papers</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setCurrentTab('notebook')}
+                title="Syllabus Notebook & Personal Notes"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                  currentTab === 'notebook'
+                    ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50'
+                    : theme === 'dark'
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span className="truncate">Syllabus Notebook</span>
+              </button>
+            )}
+
+            {/* OPTION 5: Syllabus Notebook (Instructor) or Progress Tracker (Student) */}
+            {!isStudent ? (
+              <button
+                onClick={() => setCurrentTab('notebook')}
+                title="Syllabus Notebook & Curriculum Notes"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                  currentTab === 'notebook'
+                    ? 'bg-purple-600 text-white font-semibold shadow-xs ring-1 ring-purple-500/50'
+                    : theme === 'dark'
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span className="truncate">Syllabus Notebook</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setCurrentTab('tracker')}
+                title="My Progress, Traffic Lights & Confidence Ratings"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                  currentTab === 'tracker'
+                    ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50'
+                    : theme === 'dark'
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                }`}
+              >
+                <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span className="truncate">My Progress</span>
+              </button>
+            )}
+
+            {/* OPTION 6: Cohort Progress (Instructor) or My Classes (Student) */}
+            {!isStudent ? (
+              <button
+                onClick={() => setCurrentTab('tracker')}
+                title="Cohort Progress & Confidence Analytics"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                  currentTab === 'tracker'
+                    ? 'bg-purple-600 text-white font-semibold shadow-xs ring-1 ring-purple-500/50'
+                    : theme === 'dark'
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                }`}
+              >
+                <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span className="truncate">Cohort Progress</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setCurrentTab('classes')}
+                title="My Classes & Class Code Enrollment"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                  currentTab === 'classes'
+                    ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50'
+                    : theme === 'dark'
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400 shrink-0" />
+                <span className="truncate">My Classes</span>
+              </button>
+            )}
+
+            {/* OPTION 7: Study Tools Suite Dropdown (Schedule, AI Path, Guidelines) */}
+            <div className="relative w-full" ref={dropdownRef}>
+              <button
+                onClick={() => setShowMoreTools(prev => !prev)}
+                title="Revision Schedule, AI Learning Path & Exam Guidelines"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1 transition-all duration-150 select-none ${
+                  isExtraStudentTab
+                    ? (isStudent 
+                        ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50' 
+                        : 'bg-purple-600 text-white font-semibold shadow-xs ring-1 ring-purple-500/50'
+                      )
+                    : theme === 'dark'
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                }`}
+              >
+                <Compass className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span className="truncate">
+                  {currentTab === 'schedule' ? 'Schedule' :
+                   currentTab === 'recommendations' ? 'AI Path' :
+                   currentTab === 'guidelines' ? 'Guidelines' : 'Study Tools'}
+                </span>
+                <ChevronDown className={`w-3 h-3 shrink-0 opacity-70 transition-transform ${showMoreTools ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showMoreTools && (
+                <div className={`absolute right-0 sm:left-auto lg:right-0 mt-1.5 w-64 rounded-xl border p-1.5 shadow-2xl z-50 animate-in fade-in-50 zoom-in-95 duration-100 ${
+                  theme === 'dark' ? 'bg-slate-900 border-slate-800 text-slate-200' : 'bg-white border-slate-200 text-slate-800'
+                }`}>
+                  <div className="px-3 py-1.5 border-b border-slate-800/40 dark:border-slate-800 mb-1">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Study Suite & Revision Tools</p>
+                  </div>
+                  <button
+                    onClick={() => { setCurrentTab('schedule'); setShowMoreTools(false); }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition ${
+                      currentTab === 'schedule' 
+                        ? (isStudent ? 'bg-emerald-500/20 text-emerald-400' : 'bg-purple-500/20 text-purple-400')
+                        : theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
+                    }`}
+                  >
+                    <Calendar className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <div className="text-left">
+                      <div className="font-semibold">AI Revision Schedule</div>
+                      <div className="text-[10px] text-slate-400 font-normal">Exam countdown & daily topics</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => { setCurrentTab('recommendations'); setShowMoreTools(false); }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition ${
+                      currentTab === 'recommendations' 
+                        ? (isStudent ? 'bg-emerald-500/20 text-emerald-400' : 'bg-purple-500/20 text-purple-400')
+                        : theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
+                    }`}
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div className="text-left">
+                      <div className="font-semibold">AI Learning Path</div>
+                      <div className="text-[10px] text-slate-400 font-normal">Targeted review for weak topics</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => { setCurrentTab('guidelines'); setShowMoreTools(false); }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition ${
+                      currentTab === 'guidelines' 
+                        ? (isStudent ? 'bg-emerald-500/20 text-emerald-400' : 'bg-purple-500/20 text-purple-400')
+                        : theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
+                    }`}
+                  >
+                    <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0" />
+                    <div className="text-left">
+                      <div className="font-semibold">Exam Guidelines</div>
+                      <div className="text-[10px] text-slate-400 font-normal">Core vs Extended criteria</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* OPTION 8: Ask AI Tutor */}
             <button
               onClick={() => setCurrentTab('chat')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition ${
+              title="24/7 Cambridge Science AI Tutor"
+              className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
                 currentTab === 'chat'
-                  ? 'bg-indigo-600 text-white shadow-xs'
+                  ? 'bg-indigo-600 text-white font-semibold shadow-xs ring-1 ring-indigo-500/50'
                   : theme === 'dark'
-                    ? 'text-indigo-300 hover:text-white hover:bg-indigo-900/40'
-                    : 'text-indigo-700 hover:text-indigo-950 hover:bg-indigo-100'
+                    ? 'text-indigo-300 hover:text-white hover:bg-indigo-950/50 bg-indigo-950/20 border border-indigo-500/20'
+                    : 'text-indigo-700 hover:text-indigo-950 hover:bg-indigo-100/80 bg-indigo-50 border border-indigo-200'
               }`}
             >
-              <MessageSquare className="w-4 h-4 text-indigo-400" />
-              <span>Ask AI Tutor</span>
+              <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-400 shrink-0" />
+              <span className="truncate">Ask AI Tutor</span>
             </button>
-          </div>
-
-          {/* User Status Indicator */}
-          <div className="hidden xl:flex items-center gap-2">
-            <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${
-              isStudent 
-                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
-            }`}>
-              {isStudent ? `Student: ${user.name}` : `Educator: ${user.name}`}
-            </span>
           </div>
         </div>
       </nav>
+
+      {/* Active Study Tool Sub-Switcher (when in Schedule, AI Path, or Guidelines) */}
+      {isExtraStudentTab && (
+        <div className={`border-t px-4 sm:px-6 lg:px-8 py-2 transition-colors duration-200 ${
+          theme === 'dark' ? 'bg-slate-900/90 border-slate-800/60' : 'bg-white border-slate-200'
+        }`}>
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className={`font-semibold flex items-center gap-1.5 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>
+              <Compass className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Study Suite:</span>
+            </span>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <button
+                onClick={() => setCurrentTab('schedule')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-medium transition ${
+                  currentTab === 'schedule'
+                    ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                    : theme === 'dark' ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+                <span>AI Revision Schedule</span>
+              </button>
+              <button
+                onClick={() => setCurrentTab('recommendations')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-medium transition ${
+                  currentTab === 'recommendations'
+                    ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                    : theme === 'dark' ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>AI Learning Path</span>
+              </button>
+              <button
+                onClick={() => setCurrentTab('guidelines')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-medium transition ${
+                  currentTab === 'guidelines'
+                    ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                    : theme === 'dark' ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                <span>Exam Guidelines (Core vs Ext)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Quick Subject Switcher Sub-bar (for Lessons & Notebook views) */}
       {(currentTab === 'lessons' || currentTab === 'notebook' || currentTab === 'quizzes') && (

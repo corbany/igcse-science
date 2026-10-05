@@ -6,7 +6,7 @@ import firebaseConfig from '../../firebase-applet-config.json';
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
-const databaseId = (firebaseConfig as any).firestoreDatabaseId;
+const databaseId = (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-igcsecombinedsci-22a2cdf5-7220-4d08-bc81-da5c0b77a814';
 
 export const db = (() => {
   try {
