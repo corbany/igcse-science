@@ -19,20 +19,25 @@ import {
   joinClassWithCode, 
   fetchStudentEnrolledClasses 
 } from '../services/firestoreService';
+import { StudentTasksPanel } from './StudentTasksPanel';
+import { Calendar } from 'lucide-react';
 
 interface StudentClassesViewProps {
   user: UserProfile;
   progress: StudentProgress;
-  onNavigateToLessons?: () => void;
-  onNavigateToQuizzes?: () => void;
+  onNavigateToLessons?: (subtopicCode?: string) => void;
+  onNavigateToQuizzes?: (topicCode?: string) => void;
+  initialTab?: 'tasks' | 'classes';
 }
 
 export const StudentClassesView: React.FC<StudentClassesViewProps> = ({
   user,
   progress,
   onNavigateToLessons,
-  onNavigateToQuizzes
+  onNavigateToQuizzes,
+  initialTab = 'tasks'
 }) => {
+  const [activeSubTab, setActiveSubTab] = useState<'tasks' | 'classes'>(initialTab);
   const [classCodeInput, setClassCodeInput] = useState<string>('');
   const [joining, setJoining] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -120,8 +125,45 @@ export const StudentClassesView: React.FC<StudentClassesViewProps> = ({
         </div>
       </div>
 
-      {/* Join Class Form Card */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-sm">
+      {/* Navigation Sub-Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+        <button
+          onClick={() => setActiveSubTab('tasks')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            activeSubTab === 'tasks'
+              ? 'bg-emerald-600 text-white shadow-md'
+              : 'bg-slate-800 text-slate-400 hover:text-white'
+          }`}
+        >
+          <Calendar className="w-4 h-4" />
+          <span>Assigned Tasks & Homework</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('classes')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            activeSubTab === 'classes'
+              ? 'bg-emerald-600 text-white shadow-md'
+              : 'bg-slate-800 text-slate-400 hover:text-white'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span>Enrolled Classes & Join Code ({enrolledClasses.length})</span>
+        </button>
+      </div>
+
+      {activeSubTab === 'tasks' ? (
+        <StudentTasksPanel
+          user={user}
+          progress={progress}
+          enrolledClassIds={enrolledClasses.map(c => c.id)}
+          onNavigateToLessons={onNavigateToLessons}
+          onNavigateToQuizzes={onNavigateToQuizzes}
+        />
+      ) : (
+        <>
+          {/* Join Class Form Card */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-sm">
         <div className="max-w-xl mx-auto space-y-5">
           <div className="text-center space-y-1">
             <div className="inline-flex items-center justify-center p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 mb-1">
@@ -274,7 +316,7 @@ export const StudentClassesView: React.FC<StudentClassesViewProps> = ({
                 <div className="flex items-center gap-2 pt-1">
                   {onNavigateToLessons && (
                     <button
-                      onClick={onNavigateToLessons}
+                      onClick={() => onNavigateToLessons?.()}
                       className="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition text-center"
                     >
                       Study Slides
@@ -282,7 +324,7 @@ export const StudentClassesView: React.FC<StudentClassesViewProps> = ({
                   )}
                   {onNavigateToQuizzes && (
                     <button
-                      onClick={onNavigateToQuizzes}
+                      onClick={() => onNavigateToQuizzes?.()}
                       className="flex-1 py-2 px-3 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-xs font-semibold text-emerald-300 transition text-center"
                     >
                       Practice Quizzes
@@ -294,6 +336,8 @@ export const StudentClassesView: React.FC<StudentClassesViewProps> = ({
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 };

@@ -20,7 +20,8 @@ import {
   Users,
   LogOut
 } from 'lucide-react';
-import { ScienceSubject, UserProfile } from '../types';
+import { ScienceSubject, UserProfile, StudentProgress } from '../types';
+import { TaskNotificationBell } from './TaskNotificationBell';
 
 interface NavbarProps {
   currentTab: string;
@@ -34,6 +35,10 @@ interface NavbarProps {
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
   onSignOut?: () => void;
+  enrolledClassIds?: string[];
+  progress?: StudentProgress;
+  onNavigateToLessons?: (subtopicCode?: string) => void;
+  onNavigateToQuizzes?: (topicCode?: string) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -47,7 +52,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   setUser,
   theme,
   onToggleTheme,
-  onSignOut
+  onSignOut,
+  enrolledClassIds = [],
+  progress,
+  onNavigateToLessons,
+  onNavigateToQuizzes
 }) => {
   const [showMoreTools, setShowMoreTools] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -189,6 +198,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               </div>
             )}
+
+            {/* Task Notifications Bell */}
+            <TaskNotificationBell
+              user={user}
+              progress={progress}
+              enrolledClassIds={enrolledClassIds}
+              theme={theme}
+              onNavigateToTasks={() => setCurrentTab(isStudent ? 'classes' : 'instructor')}
+              onNavigateToLessons={onNavigateToLessons}
+              onNavigateToQuizzes={onNavigateToQuizzes}
+            />
 
             {/* Curriculum Tier button */}
             <button

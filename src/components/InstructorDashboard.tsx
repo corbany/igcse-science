@@ -33,8 +33,10 @@ import {
   ShieldCheck,
   CheckCircle2,
   UserCheck,
+  Calendar,
   X
 } from 'lucide-react';
+import { InstructorTasksManager } from './InstructorTasksManager';
 import { 
   getActiveGoogleSlideSubtopics, 
   saveGoogleSlidesOverride, 
@@ -93,7 +95,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   onSwitchToStudentMode, 
   onNavigateToLessons 
 }) => {
-  const [dashboardTab, setDashboardTab] = useState<'classes' | 'invites' | 'roster' | 'drive' | 'slides'>('classes');
+  const [dashboardTab, setDashboardTab] = useState<'classes' | 'tasks' | 'invites' | 'roster' | 'drive' | 'slides'>('classes');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [tierFilter, setTierFilter] = useState<'all' | 'Core' | 'Extended'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'Excelling' | 'On Track' | 'Intervention Required'>('all');
@@ -535,6 +537,18 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         </button>
 
         <button
+          onClick={() => setDashboardTab('tasks')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            dashboardTab === 'tasks'
+              ? 'bg-purple-600 text-white shadow-md'
+              : 'bg-slate-800 text-slate-400 hover:text-white'
+          }`}
+        >
+          <Calendar className="w-4 h-4" />
+          <span>Class Tasks & Homework</span>
+        </button>
+
+        <button
           onClick={() => setDashboardTab('invites')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
             dashboardTab === 'invites'
@@ -894,6 +908,18 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
             </div>
           )}
         </div>
+      )}
+
+      {/* ============================================================= */}
+      {/* TAB: CLASS TASKS & HOMEWORK ASSIGNMENTS                       */}
+      {/* ============================================================= */}
+      {dashboardTab === 'tasks' && (
+        <InstructorTasksManager
+          currentUser={currentUser}
+          classes={classes}
+          selectedClassId={selectedClass?.id}
+          onNavigateToLessons={onNavigateToLessons}
+        />
       )}
 
       {/* ============================================================= */}

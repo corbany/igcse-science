@@ -77,12 +77,66 @@
       "properties": {
         "status": { "type": "string", "description": "Status text" }
       }
+    },
+    "Task": {
+      "title": "Task",
+      "description": "An assignment or task created by an instructor for a class or specific students.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique task identifier" },
+        "classId": { "type": "string", "description": "Class identifier or 'all'" },
+        "className": { "type": "string", "description": "Name of the target class" },
+        "title": { "type": "string", "description": "Title of the assigned task" },
+        "description": { "type": "string", "description": "Instructions or guidance for the task" },
+        "type": { 
+          "type": "string", 
+          "enum": ["both", "slides_traffic_light", "practice_quiz", "exam_paper", "custom"], 
+          "description": "Task type: both slides and quiz, slide reading with traffic light, quiz, past paper, or custom" 
+        },
+        "targetSubtopics": { "type": "array", "description": "List of target Cambridge subtopic codes" },
+        "targetSubject": { "type": "string", "enum": ["all", "biology", "chemistry", "physics"], "description": "Subject area" },
+        "targetStudentIds": { "type": "array", "description": "Optional list of student UIDs if assigned to individual students" },
+        "dueDate": { "type": "string", "description": "ISO timestamp of the due date" },
+        "instructorId": { "type": "string", "description": "UID of the creating instructor" },
+        "instructorName": { "type": "string", "description": "Display name of the instructor" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["id", "classId", "title", "type", "dueDate", "instructorId", "createdAt"]
+    },
+    "TaskSubmission": {
+      "title": "TaskSubmission",
+      "description": "Student progress and completion status for a specific task.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "description": "Student UID" },
+        "studentName": { "type": "string", "description": "Student display name" },
+        "studentEmail": { "type": "string", "description": "Student email" },
+        "status": { 
+          "type": "string", 
+          "enum": ["not_started", "incomplete", "completed"], 
+          "description": "Completion state of the task" 
+        },
+        "completedAt": { "type": "string", "description": "Timestamp when completed" },
+        "lastActivityAt": { "type": "string", "description": "Timestamp of most recent activity" },
+        "quizScore": { "type": "number", "description": "Quiz score achieved if practice quiz" },
+        "trafficLight": { "type": "string", "description": "Traffic light status achieved if slides task" },
+        "notes": { "type": "string", "description": "Optional student or instructor note" }
+      },
+      "required": ["studentId", "status"]
     }
   },
   "firestore": {
     "/test/{docId}": {
       "schema": { "$ref": "#/entities/TestConnection" },
       "description": "Connection test documents for health checks."
+    },
+    "/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Tasks set by instructors for classes or individual students."
+    },
+    "/tasks/{taskId}/submissions/{studentId}": {
+      "schema": { "$ref": "#/entities/TaskSubmission" },
+      "description": "Student progress tracking and submission status per task."
     },
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/User" },

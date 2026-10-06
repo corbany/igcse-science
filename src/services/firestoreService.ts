@@ -11,7 +11,7 @@ import {
   increment
 } from 'firebase/firestore';
 import { db } from './firebaseAuth';
-import { UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, ScienceSubject, ExamTier } from '../types';
+import { UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, ScienceSubject, ExamTier, ClassTask, TaskSubmission, TaskWithSubmission, TaskProgressStatus } from '../types';
 
 // The owner/primary educator email who always has instructor access
 export const INITIAL_INSTRUCTOR_EMAILS = [
@@ -25,6 +25,8 @@ const LOCAL_STUDENTS_PREFIX = 'igcse_0653_offline_class_students_';
 const LOCAL_INVITES_KEY = 'igcse_0653_offline_invites';
 const LOCAL_ENROLLED_PREFIX = 'igcse_0653_offline_enrolled_';
 const LOCAL_NOTIFICATIONS_KEY = 'igcse_0653_instructor_notifications';
+const LOCAL_TASKS_KEY = 'igcse_0653_offline_tasks';
+const LOCAL_TASK_SUBMISSIONS_PREFIX = 'igcse_0653_offline_task_subs_';
 
 export const DEFAULT_CLASS_CODE = 'SCI-0653';
 export const DEFAULT_CLASS_ITEM: ClassItem = {
@@ -821,4 +823,430 @@ export async function removeStudentFromClass(classId: string, studentId: string)
   }
 
   return true;
+}
+
+// -------------------------------------------------------------
+// INSTRUCTOR TASKS & STUDENT HOMEWORK ASSIGNMENTS
+// -------------------------------------------------------------
+
+/**
+ * Creates a new task/assignment for a class and/or individual students.
+ */
+export async function createClassTask(
+  taskData: Omit<ClassTask, 'id' | 'createdAt'>
+): Promise<ClassTask> {
+  const id = `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const createdAt = new Date().toISOString();
+
+  const newTask: ClassTask = {
+    ...taskData,
+    id,
+    createdAt
+  };
+
+  // 1. Update local storage
+  const localTasks = getLocalItem<ClassTask[]>(LOCAL_TASKS_KEY, []);
+  localTasks.unshift(newTask);
+  setLocalItem(LOCAL_TASKS_KEY, localTasks);
+
+  // 2. Persist to Firestore
+  try {
+    const taskRef = doc(db, 'tasks', id);
+    await setDoc(taskRef, newTask);
+
+    // If specific students or whole class, initialize submissions as 'not_started'
+    const studentList = await fetchStudentsInClass(taskData.classId);
+    for (const student of studentList) {
+      if (!taskData.targetStudentIds || taskData.targetStudentIds.length === 0 || taskData.targetStudentIds.includes(student.studentId)) {
+        const subRef = doc(db, 'tasks', id, 'submissions', student.studentId);
+        const subData: TaskSubmission = {
+          studentId: student.studentId,
+          studentName: student.name,
+          studentEmail: student.email,
+          status: 'not_started',
+          lastActivityAt: createdAt
+        };
+        setDoc(subRef, subData).catch(() => {});
+
+        // Save local sub
+        const subKey = `${LOCAL_TASK_SUBMISSIONS_PREFIX}${id}`;
+        const localSubs = getLocalItem<Record<string, TaskSubmission>>(subKey, {});
+        localSubs[student.studentId] = subData;
+        setLocalItem(subKey, localSubs);
+      }
+    }
+  } catch (err) {
+    console.warn('Offline mode: Saved task locally.', err);
+  }
+
+  return newTask;
+}
+
+/**
+ * Fetch all tasks created by instructor or for specific class.
+ */
+export async function fetchClassTasks(classId?: string, instructorId?: string): Promise<ClassTask[]> {
+  const localTasks = getLocalItem<ClassTask[]>(LOCAL_TASKS_KEY, []);
+
+  try {
+    let q = collection(db, 'tasks');
+    const snap = await getDocs(q);
+    const firestoreTasks: ClassTask[] = [];
+
+    snap.forEach(d => {
+      const data = d.data() as ClassTask;
+      if (data && data.id) {
+        firestoreTasks.push(data);
+      }
+    });
+
+    if (firestoreTasks.length > 0) {
+      // Merge with local tasks
+      const mergedMap = new Map<string, ClassTask>();
+      localTasks.forEach(t => mergedMap.set(t.id, t));
+      firestoreTasks.forEach(t => mergedMap.set(t.id, t));
+      const combined = Array.from(mergedMap.values());
+      setLocalItem(LOCAL_TASKS_KEY, combined);
+
+      let filtered = combined;
+      if (classId && classId !== 'all') {
+        filtered = filtered.filter(t => t.classId === classId || t.classId === 'all');
+      }
+      if (instructorId) {
+        filtered = filtered.filter(t => t.instructorId === instructorId);
+      }
+      return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
+  } catch (err) {
+    console.warn('Failed to query Firestore tasks, using local cache:', err);
+  }
+
+  let filtered = localTasks;
+  if (classId && classId !== 'all') {
+    filtered = filtered.filter(t => t.classId === classId || t.classId === 'all');
+  }
+  if (instructorId) {
+    filtered = filtered.filter(t => t.instructorId === instructorId);
+  }
+  return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+/**
+ * Fetch tasks applicable to a student (based on their enrolled classes and/or UID).
+ */
+export async function fetchTasksForStudent(
+  student: UserProfile,
+  enrolledClassIds: string[],
+  studentProgress?: StudentProgress
+): Promise<TaskWithSubmission[]> {
+  const allTasks = await fetchClassTasks();
+  const studentTasks: TaskWithSubmission[] = [];
+  const now = Date.now();
+
+  for (const task of allTasks) {
+    // Check if task applies to student:
+    // 1. Task is for 'all' classes OR task.classId is in student's enrolled classes
+    // 2. Either no targetStudentIds specified OR student.id is in targetStudentIds
+    const appliesToClass = task.classId === 'all' || enrolledClassIds.includes(task.classId);
+    const appliesToStudent = !task.targetStudentIds || task.targetStudentIds.length === 0 || task.targetStudentIds.includes(student.id);
+
+    if (appliesToClass && appliesToStudent) {
+      // Fetch or derive student's submission status
+      let submission: TaskSubmission | undefined = undefined;
+
+      // Check local storage submission
+      const subKey = `${LOCAL_TASK_SUBMISSIONS_PREFIX}${task.id}`;
+      const localSubs = getLocalItem<Record<string, TaskSubmission>>(subKey, {});
+      if (localSubs[student.id]) {
+        submission = localSubs[student.id];
+      }
+
+      // Check Firestore submission
+      try {
+        const subDoc = await getDoc(doc(db, 'tasks', task.id, 'submissions', student.id));
+        if (subDoc.exists()) {
+          submission = subDoc.data() as TaskSubmission;
+          localSubs[student.id] = submission;
+          setLocalItem(subKey, localSubs);
+        }
+      } catch {
+        // use local
+      }
+
+      // If no recorded submission yet, verify if student's progress already completed it!
+      if (!submission) {
+        let initialStatus: TaskProgressStatus = 'not_started';
+        let trafficLightVal: TrafficLightStatus | undefined = undefined;
+        let quizScoreVal: number | undefined = undefined;
+
+        if (studentProgress) {
+          if (task.type === 'both' && task.targetSubtopics?.length > 0) {
+            const hasSlides = task.targetSubtopics.every(
+              sub => studentProgress.trafficLights && studentProgress.trafficLights[sub]
+            );
+            const hasQuiz = task.targetSubtopics.some(
+              sub => studentProgress.subtopicQuizScores && studentProgress.subtopicQuizScores[sub]
+            );
+
+            if (hasSlides) trafficLightVal = studentProgress.trafficLights[task.targetSubtopics[0]];
+            if (hasQuiz) quizScoreVal = studentProgress.subtopicQuizScores[task.targetSubtopics[0]]?.score;
+
+            if (hasSlides && hasQuiz) {
+              initialStatus = 'completed';
+            } else if (hasSlides || hasQuiz) {
+              initialStatus = 'incomplete';
+            }
+          } else if (task.type === 'slides_traffic_light' && task.targetSubtopics?.length > 0) {
+            const hasAllLights = task.targetSubtopics.every(
+              sub => studentProgress.trafficLights && studentProgress.trafficLights[sub]
+            );
+            if (hasAllLights) {
+              initialStatus = 'completed';
+              trafficLightVal = studentProgress.trafficLights[task.targetSubtopics[0]];
+            } else if (task.targetSubtopics.some(sub => studentProgress.trafficLights && studentProgress.trafficLights[sub])) {
+              initialStatus = 'incomplete';
+            }
+          } else if (task.type === 'practice_quiz' && task.targetSubtopics?.length > 0) {
+            const hasQuiz = task.targetSubtopics.some(
+              sub => studentProgress.subtopicQuizScores && studentProgress.subtopicQuizScores[sub]
+            );
+            if (hasQuiz) {
+              initialStatus = 'completed';
+              quizScoreVal = studentProgress.subtopicQuizScores[task.targetSubtopics[0]]?.score;
+            }
+          }
+        }
+
+        submission = {
+          studentId: student.id,
+          studentName: student.name,
+          studentEmail: student.email,
+          status: initialStatus,
+          trafficLight: trafficLightVal,
+          quizScore: quizScoreVal,
+          completedAt: initialStatus === 'completed' ? new Date().toISOString() : undefined
+        };
+
+        // Cache submission
+        localSubs[student.id] = submission;
+        setLocalItem(subKey, localSubs);
+      }
+
+      const dueTimestamp = new Date(task.dueDate).getTime();
+      const isOverdue = dueTimestamp < now && submission.status !== 'completed';
+
+      studentTasks.push({
+        ...task,
+        submission,
+        isOverdue
+      });
+    }
+  }
+
+  // Sort: Overdue & Incomplete first, then Not Started, then Completed
+  return studentTasks.sort((a, b) => {
+    if (a.isOverdue && !b.isOverdue) return -1;
+    if (!a.isOverdue && b.isOverdue) return 1;
+
+    const statusOrder: Record<TaskProgressStatus, number> = {
+      incomplete: 0,
+      not_started: 1,
+      completed: 2
+    };
+
+    const statusA = a.submission?.status || 'not_started';
+    const statusB = b.submission?.status || 'not_started';
+
+    if (statusOrder[statusA] !== statusOrder[statusB]) {
+      return statusOrder[statusA] - statusOrder[statusB];
+    }
+
+    return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+  });
+}
+
+/**
+ * Updates a student's submission status for a task (e.g. marked complete, quiz completed, or traffic light set).
+ */
+export async function updateTaskSubmission(
+  taskId: string,
+  studentId: string,
+  update: Partial<TaskSubmission>
+): Promise<TaskSubmission> {
+  const subKey = `${LOCAL_TASK_SUBMISSIONS_PREFIX}${taskId}`;
+  const localSubs = getLocalItem<Record<string, TaskSubmission>>(subKey, {});
+  const existing: TaskSubmission = localSubs[studentId] || {
+    studentId,
+    studentName: 'Student',
+    studentEmail: '',
+    status: 'not_started'
+  };
+
+  const updated: TaskSubmission = {
+    ...existing,
+    ...update,
+    lastActivityAt: new Date().toISOString(),
+    completedAt: update.status === 'completed' ? (existing.completedAt || new Date().toISOString()) : existing.completedAt
+  };
+
+  localSubs[studentId] = updated;
+  setLocalItem(subKey, localSubs);
+
+  try {
+    const subRef = doc(db, 'tasks', taskId, 'submissions', studentId);
+    await setDoc(subRef, updated, { merge: true });
+  } catch (err) {
+    console.warn('Offline: Saved task submission locally.', err);
+  }
+
+  return updated;
+}
+
+/**
+ * Retrieves all student submissions for an instructor reviewing a task.
+ */
+export async function fetchTaskSubmissions(taskId: string, classId?: string): Promise<TaskSubmission[]> {
+  const subKey = `${LOCAL_TASK_SUBMISSIONS_PREFIX}${taskId}`;
+  const localSubsMap = getLocalItem<Record<string, TaskSubmission>>(subKey, {});
+  const result: TaskSubmission[] = [];
+
+  // 1. Fetch from Firestore
+  try {
+    const snap = await getDocs(collection(db, 'tasks', taskId, 'submissions'));
+    snap.forEach(d => {
+      const data = d.data() as TaskSubmission;
+      if (data && data.studentId) {
+        localSubsMap[data.studentId] = data;
+      }
+    });
+    setLocalItem(subKey, localSubsMap);
+  } catch {
+    // Offline
+  }
+
+  // 2. If classId provided, make sure all enrolled students are represented (default 'not_started')
+  if (classId && classId !== 'all') {
+    const students = await fetchStudentsInClass(classId);
+    for (const student of students) {
+      if (!localSubsMap[student.studentId]) {
+        localSubsMap[student.studentId] = {
+          studentId: student.studentId,
+          studentName: student.name,
+          studentEmail: student.email,
+          status: 'not_started'
+        };
+      }
+    }
+  }
+
+  return Object.values(localSubsMap);
+}
+
+/**
+ * Delete a task
+ */
+export async function deleteClassTask(taskId: string): Promise<boolean> {
+  // Local storage
+  const localTasks = getLocalItem<ClassTask[]>(LOCAL_TASKS_KEY, []);
+  setLocalItem(LOCAL_TASKS_KEY, localTasks.filter(t => t.id !== taskId));
+  try {
+    localStorage.removeItem(`${LOCAL_TASK_SUBMISSIONS_PREFIX}${taskId}`);
+  } catch {}
+
+  // Firestore
+  try {
+    const subsSnap = await getDocs(collection(db, 'tasks', taskId, 'submissions'));
+    for (const sub of subsSnap.docs) {
+      await deleteDoc(sub.ref);
+    }
+    await deleteDoc(doc(db, 'tasks', taskId));
+  } catch {
+    // Offline
+  }
+
+  return true;
+}
+
+/**
+ * Update task due date
+ */
+export async function updateClassTaskDueDate(taskId: string, newDueDate: string): Promise<boolean> {
+  const localTasks = getLocalItem<ClassTask[]>(LOCAL_TASKS_KEY, []);
+  const idx = localTasks.findIndex(t => t.id !== taskId);
+  if (idx >= 0) {
+    localTasks[idx].dueDate = newDueDate;
+    setLocalItem(LOCAL_TASKS_KEY, localTasks);
+  }
+
+  try {
+    await updateDoc(doc(db, 'tasks', taskId), { dueDate: newDueDate });
+  } catch {
+    // Offline
+  }
+
+  return true;
+}
+
+/**
+ * Checks if a student's newly updated traffic light or quiz score completes any assigned tasks.
+ */
+export async function autoCheckTaskCompletion(
+  student: UserProfile,
+  enrolledClassIds: string[],
+  actionType: 'traffic_light' | 'quiz',
+  subtopicCode: string,
+  extra?: { trafficLight?: TrafficLightStatus; quizScore?: number }
+): Promise<void> {
+  try {
+    const studentTasks = await fetchTasksForStudent(student, enrolledClassIds);
+    for (const task of studentTasks) {
+      if (task.submission?.status === 'completed') continue;
+
+      if (task.type === 'both') {
+        const matchesSubtopic = task.targetSubtopics.includes(subtopicCode) || 
+          task.targetSubtopics.some(s => subtopicCode.startsWith(s));
+
+        if (matchesSubtopic) {
+          const currentSub = task.submission;
+          const slidesDone = actionType === 'traffic_light' ? true : (currentSub?.slidesCompleted || currentSub?.trafficLight !== undefined);
+          const quizDone = actionType === 'quiz' ? true : (currentSub?.quizCompleted || currentSub?.quizScore !== undefined);
+
+          const isFullyCompleted = slidesDone && quizDone;
+
+          await updateTaskSubmission(task.id, student.id, {
+            status: isFullyCompleted ? 'completed' : 'incomplete',
+            trafficLight: actionType === 'traffic_light' ? extra?.trafficLight : currentSub?.trafficLight,
+            quizScore: actionType === 'quiz' ? extra?.quizScore : currentSub?.quizScore,
+            slidesCompleted: slidesDone,
+            quizCompleted: quizDone,
+            studentName: student.name,
+            studentEmail: student.email,
+            completedAt: isFullyCompleted ? new Date().toISOString() : undefined
+          });
+        }
+      } else if (actionType === 'traffic_light' && task.type === 'slides_traffic_light') {
+        if (task.targetSubtopics.includes(subtopicCode)) {
+          await updateTaskSubmission(task.id, student.id, {
+            status: 'completed',
+            trafficLight: extra?.trafficLight,
+            studentName: student.name,
+            studentEmail: student.email,
+            completedAt: new Date().toISOString()
+          });
+        }
+      } else if (actionType === 'quiz' && task.type === 'practice_quiz') {
+        if (task.targetSubtopics.includes(subtopicCode) || task.targetSubtopics.some(s => subtopicCode.startsWith(s))) {
+          await updateTaskSubmission(task.id, student.id, {
+            status: 'completed',
+            quizScore: extra?.quizScore,
+            studentName: student.name,
+            studentEmail: student.email,
+            completedAt: new Date().toISOString()
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Auto task check error:', err);
+  }
 }

@@ -58,5 +58,19 @@ service cloud.firestore {
         );
       }
     }
+
+    // Tasks and homework assignments
+    match /tasks/{taskId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated();
+
+      // Student progress submissions per task
+      match /submissions/{studentId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated();
+        allow delete: if isAuthenticated();
+      }
+    }
   }
 }

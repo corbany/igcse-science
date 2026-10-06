@@ -25,7 +25,8 @@ import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { 
   getOrCreateUserProfile, 
   syncStudentProgressToClasses, 
-  fetchStudentEnrolledClasses 
+  fetchStudentEnrolledClasses,
+  autoCheckTaskCompletion
 } from './services/firestoreService';
 
 const STORAGE_KEY_USER = 'igcse_0653_user_profile';
@@ -222,6 +223,10 @@ export default function App() {
       },
       lastActive: new Date().toISOString()
     }));
+
+    if (user && user.role === 'student') {
+      autoCheckTaskCompletion(user, enrolledClassIds, 'quiz', subject, { quizScore: Math.round((score / total) * 100) });
+    }
   };
 
   const handleUpdateTrafficLight = (subtopicCode: string, status: TrafficLightStatus) => {
@@ -233,6 +238,10 @@ export default function App() {
       },
       lastActive: new Date().toISOString()
     }));
+
+    if (user && user.role === 'student') {
+      autoCheckTaskCompletion(user, enrolledClassIds, 'traffic_light', subtopicCode, { trafficLight: status });
+    }
   };
 
   const handleSaveSubtopicQuizResult = (subtopicCode: string, result: SubtopicQuizResult) => {
@@ -244,6 +253,10 @@ export default function App() {
       },
       lastActive: new Date().toISOString()
     }));
+
+    if (user && user.role === 'student') {
+      autoCheckTaskCompletion(user, enrolledClassIds, 'quiz', subtopicCode, { quizScore: result.score });
+    }
   };
 
   const handleAskAITutor = (query: string, _topicCode?: string) => {
@@ -251,8 +264,8 @@ export default function App() {
     setCurrentTab('chat');
   };
 
-  const handleOpenLesson = (topicCode: string) => {
-    setSearchQuery(topicCode);
+  const handleOpenLesson = (topicCode?: string) => {
+    if (topicCode) setSearchQuery(topicCode);
     setCurrentTab('lessons');
   };
 
@@ -341,6 +354,10 @@ export default function App() {
         theme={theme}
         onToggleTheme={handleToggleTheme}
         onSignOut={handleSignOut}
+        enrolledClassIds={enrolledClassIds}
+        progress={progress}
+        onNavigateToLessons={handleOpenLesson}
+        onNavigateToQuizzes={() => setCurrentTab('quizzes')}
       />
 
       {/* Role Distinction Sub-bar */}
@@ -425,7 +442,7 @@ export default function App() {
           <StudentClassesView
             user={user}
             progress={progress}
-            onNavigateToLessons={() => setCurrentTab('lessons')}
+            onNavigateToLessons={handleOpenLesson}
             onNavigateToQuizzes={() => setCurrentTab('quizzes')}
           />
         )}

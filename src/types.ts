@@ -244,3 +244,44 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
 }
+
+// -------------------------------------------------------------
+// CLASS TASKS & ASSIGNMENTS
+// -------------------------------------------------------------
+export type TaskType = 'both' | 'slides_traffic_light' | 'practice_quiz' | 'exam_paper' | 'custom';
+export type TaskProgressStatus = 'not_started' | 'incomplete' | 'completed';
+
+export interface ClassTask {
+  id: string;
+  classId: string; // class ID or 'all'
+  className: string;
+  title: string;
+  description: string;
+  type: TaskType;
+  targetSubtopics: string[]; // e.g. ['B1.1', 'C2.3']
+  targetSubject: ScienceSubject | 'all';
+  targetStudentIds?: string[]; // optional array of specific student UIDs; if empty/omitted, whole class
+  dueDate: string; // ISO date string (e.g. 2026-10-10T23:59:59Z)
+  instructorId: string;
+  instructorName: string;
+  createdAt: string;
+}
+
+export interface TaskSubmission {
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  status: TaskProgressStatus;
+  completedAt?: string;
+  lastActivityAt?: string;
+  quizScore?: number;
+  trafficLight?: TrafficLightStatus;
+  slidesCompleted?: boolean;
+  quizCompleted?: boolean;
+  notes?: string;
+}
+
+export interface TaskWithSubmission extends ClassTask {
+  submission?: TaskSubmission;
+  isOverdue?: boolean;
+}
