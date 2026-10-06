@@ -886,27 +886,32 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
         </div>
       )}
 
-      {/* Create Task Modal */}
+      {/* Create Task Modal - Viewport constrained, always visible header & options */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl p-6 sm:p-8 space-y-6 shadow-2xl my-8">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <div className="space-y-1">
-                <span className="text-xs font-bold text-purple-400 uppercase tracking-wider">Class Task Generator</span>
-                <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
-                  <Calendar className="w-5 h-5 text-purple-400" />
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-hidden animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Fixed Modal Header */}
+            <div className="px-5 sm:px-6 py-4 border-b border-slate-800/90 flex items-center justify-between shrink-0 bg-slate-900/95 backdrop-blur-sm z-10">
+              <div className="space-y-0.5">
+                <span className="text-[11px] font-bold text-purple-400 uppercase tracking-wider">Class Task Generator</span>
+                <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-purple-400" />
                   <span>Assign Task to Students</span>
                 </h3>
               </div>
               <button 
+                type="button"
                 onClick={() => setShowCreateModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                title="Close modal"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateTask} className="space-y-5 text-xs">
+            <form onSubmit={handleCreateTask} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              {/* Scrollable Form Body - Smooth scrolling, never pushed above viewport */}
+              <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-4 space-y-4 text-xs scrollbar-thin scrollbar-thumb-slate-700">
               {/* Task Title */}
               <div className="space-y-1.5">
                 <label className="font-semibold text-slate-300">Task Title *</label>
@@ -1474,23 +1479,34 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                 ></textarea>
               </div>
 
-              {/* Modal Actions */}
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={creating}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold transition shadow-md disabled:opacity-50"
-                >
-                  {creating && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>}
-                  <span>Publish Task to Class</span>
-                </button>
+              </div>
+
+              {/* Fixed Modal Footer - Always in view */}
+              <div className="px-5 sm:px-6 py-3.5 border-t border-slate-800/90 bg-slate-900/95 backdrop-blur-sm flex items-center justify-between gap-3 shrink-0">
+                <div className="text-[11px] text-slate-400 hidden sm:block">
+                  {selectedSubtopics.length > 0 ? (
+                    <span>Assigned to <strong className="text-purple-300 font-semibold">{selectedSubtopics.length}</strong> subtopic{selectedSubtopics.length !== 1 ? 's' : ''}</span>
+                  ) : (
+                    <span className="text-amber-400 font-medium">Please select at least 1 subtopic</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2.5 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateModal(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creating}
+                    className="flex items-center gap-2 px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold transition shadow-md disabled:opacity-50 text-xs"
+                  >
+                    {creating && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>}
+                    <span>Publish Task to Class</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>
