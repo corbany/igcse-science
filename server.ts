@@ -48,18 +48,18 @@ async function callGeminiWithFallback(
     preferredModel?: string;
   }
 ): Promise<{ text: string; model: string }> {
-  // Prioritize gemini-3.1-flash-lite for immediate response and resilience against high-demand spikes
+  // Prioritize gemini-flash-latest for highest availability and speed, followed by flash-lite and 3.8-flash
   const candidateModels = [
-    params.preferredModel || 'gemini-3.1-flash-lite',
-    'gemini-3.8-flash',
-    'gemini-flash-latest'
+    params.preferredModel || 'gemini-flash-latest',
+    'gemini-flash-latest',
+    'gemini-3.1-flash-lite',
+    'gemini-3.8-flash'
   ];
   const uniqueModels = Array.from(new Set(candidateModels));
 
   let lastError: any = null;
   for (const model of uniqueModels) {
     try {
-      // 12-second timeout per model attempt so high-demand spikes trigger instant fallback
       const generatePromise = ai.models.generateContent({
         model,
         contents: params.contents,
@@ -75,11 +75,12 @@ async function callGeminiWithFallback(
         return { text: response.text, model };
       }
     } catch (err: any) {
-      console.warn(`[Gemini Call] Model "${model}" failed (${err?.status || err?.message || 'unknown error'}). Trying next candidate...`);
       lastError = err;
+      // Brief jitter/backoff before trying next candidate
+      await new Promise(r => setTimeout(r, 350));
     }
   }
-  throw lastError || new Error('All candidate models failed to return content.');
+  throw lastError || new Error('All candidate models currently unavailable');
 }
 
 // API Routes
@@ -526,17 +527,17 @@ ${studentAnswer.trim()}
 
 Evaluate this candidate response now strictly against the mark points above. Output valid JSON.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const { text, model } = await callGeminiWithFallback(ai, {
       contents: prompt,
       config: {
         systemInstruction,
         responseMimeType: 'application/json',
         temperature: 0.2
-      }
+      },
+      preferredModel: 'gemini-flash-latest'
     });
 
-    const parsed = JSON.parse(response.text || '{}');
+    const parsed = JSON.parse(text || '{}');
     // Ensure marksAwarded is bounded
     const clampedMarks = Math.min(Math.max(0, Math.round(parsed.marksAwarded ?? 0)), maxMarks);
     parsed.marksAwarded = clampedMarks;
@@ -544,10 +545,9 @@ Evaluate this candidate response now strictly against the mark points above. Out
     parsed.percentage = Math.round((clampedMarks / maxMarks) * 100);
     parsed.questionId = questionId;
 
-    res.json({ analysis: parsed, source: 'gemini-3.8-flash' });
+    res.json({ analysis: parsed, source: model });
   } catch (error) {
-    console.error('Error in /api/exam-analysis:', error);
-    // Fallback to offline analysis if AI call throws
+    // Graceful fallback to offline analysis if AI call throws
     const { questionId, fullLabel, questionText, marks, correctAnswer, markSchemeBreakdown, guidanceNotes, examinerComment, studentAnswer } = req.body;
     const fallback = generateOfflineExamAnalysis({
       questionId: questionId || 'q',
@@ -753,7 +753,7 @@ PEDAGOGICAL STYLE & RULES:
             temperature: 0.7,
             maxOutputTokens: 1400,
           },
-          preferredModel: 'gemini-3.1-flash-lite'
+          preferredModel: 'gemini-flash-latest'
         });
 
         return res.json({ 
@@ -762,7 +762,7 @@ PEDAGOGICAL STYLE & RULES:
           success: true 
         });
       } catch (aiErr: any) {
-        console.warn('[AI Tutor] Gemini API calls failed, serving rich offline syllabus answer:', aiErr?.message);
+        // AI calls unavailable; proceed to rich offline syllabus answer
       }
     }
 
@@ -824,18 +824,17 @@ Return a valid JSON object with:
   "examTips": ["Key tip 1", "Key tip 2"]
 }`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const { text, model } = await callGeminiWithFallback(ai, {
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
       },
+      preferredModel: 'gemini-flash-latest'
     });
 
-    const parsed = JSON.parse(response.text || '{}');
-    res.json({ schedule: parsed, source: 'gemini-3.8-flash' });
+    const parsed = JSON.parse(text || '{}');
+    res.json({ schedule: parsed, source: model });
   } catch (error) {
-    console.error('Error generating schedule:', error);
     res.json({
       schedule: generateFallbackSchedule(req.body.examDate, req.body.dailyHours, req.body.weaknesses, req.body.tier),
       source: 'fallback-planner',
@@ -878,18 +877,17 @@ Return a valid JSON object:
   "motivationalAdvice": "Encouraging teacher feedback"
 }`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const { text, model } = await callGeminiWithFallback(ai, {
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
       },
+      preferredModel: 'gemini-flash-latest'
     });
 
-    const parsed = JSON.parse(response.text || '{}');
-    res.json({ recommendations: parsed, source: 'gemini-3.8-flash' });
+    const parsed = JSON.parse(text || '{}');
+    res.json({ recommendations: parsed, source: model });
   } catch (error) {
-    console.error('Error generating recommendations:', error);
     res.json({
       recommendations: generateFallbackRecommendations(req.body.studentName, req.body.topicScores, req.body.recentQuizMistakes),
       source: 'fallback-analytics',
@@ -955,21 +953,20 @@ Quality Rules:
         const prompt = `Generate ${count} brand-new, unique Cambridge IGCSE Combined Science 0653 multiple choice questions for these syllabus topics: ${topicsSubset.join(', ')}.
 Ensure high variety and rigor. Output JSON only.`;
 
-        const response = await ai!.models.generateContent({
-          model: 'gemini-3.8-flash',
+        const { text } = await callGeminiWithFallback(ai!, {
           contents: prompt,
           config: {
             systemInstruction,
             responseMimeType: 'application/json',
             temperature: 0.85,
             maxOutputTokens: 8192
-          }
+          },
+          preferredModel: 'gemini-flash-latest'
         });
 
-        const parsed = JSON.parse(response.text || '{}');
+        const parsed = JSON.parse(text || '{}');
         return Array.isArray(parsed.questions) ? parsed.questions : (Array.isArray(parsed) ? parsed : []);
       } catch (batchErr) {
-        console.warn(`AI batch generation failed for seed ${batchSeed}, falling back to dynamic syllabus engine:`, batchErr);
         return generateServerFallbackQuiz(topicsSubset, count, tier || 'Extended', batchSeed);
       }
     }

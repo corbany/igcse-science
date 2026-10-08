@@ -14,9 +14,7 @@ import {
   Zap,
   Copy,
   Check,
-  School,
-  ExternalLink,
-  UserCheck
+  ExternalLink
 } from 'lucide-react';
 import { googleSignIn } from '../services/firebaseAuth';
 import { getOrCreateUserProfile, updateUserProfile } from '../services/firestoreService';
@@ -38,8 +36,8 @@ export const GoogleSignInGate: React.FC<GoogleSignInGateProps> = ({
   const [showDirectForm, setShowDirectForm] = useState<boolean>(false);
 
   // Custom Direct Form State
-  const [directName, setDirectName] = useState<string>('Alex Mercer');
-  const [directEmail, setDirectEmail] = useState<string>('student@school.edu');
+  const [directName, setDirectName] = useState<string>('');
+  const [directEmail, setDirectEmail] = useState<string>('');
   const [directRole, setDirectRole] = useState<'student' | 'instructor'>('student');
   const [directTier, setDirectTier] = useState<ExamTier>('Extended');
 
@@ -270,57 +268,19 @@ export const GoogleSignInGate: React.FC<GoogleSignInGateProps> = ({
             <div className="relative flex items-center justify-center">
               <div className="border-t border-slate-700/60 w-full"></div>
               <span className="bg-slate-900 px-3 text-[11px] uppercase tracking-wider text-slate-400 font-semibold absolute">
-                Or Direct School Sign-In
+                Or Sign In with School Email
               </span>
             </div>
 
-            {/* Quick 1-Click Role Profiles */}
-            <div className="space-y-2">
-              <p className="text-xs text-slate-400 font-semibold text-center">
-                One-Click Quick Access (No Google Auth Required):
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => handleDirectSignIn('Alex Mercer', 'student@gisboyshigh.net', 'student', 'Extended')}
-                  disabled={loading}
-                  className="flex items-center gap-3 p-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-left transition transform active:scale-[0.98]"
-                >
-                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                    <UserCheck className="w-4 h-4" />
-                  </div>
-                  <div className="overflow-hidden">
-                    <div className="text-xs font-bold text-emerald-300">Student Access</div>
-                    <div className="text-[11px] text-slate-400 truncate">Alex Mercer • Extended Tier</div>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleDirectSignIn('Mr. Corban', 'corbanb@gisboyshigh.net', 'instructor', 'Extended')}
-                  disabled={loading}
-                  className="flex items-center gap-3 p-3 rounded-2xl border border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 text-left transition transform active:scale-[0.98]"
-                >
-                  <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
-                    <School className="w-4 h-4" />
-                  </div>
-                  <div className="overflow-hidden">
-                    <div className="text-xs font-bold text-purple-300">Educator / Instructor</div>
-                    <div className="text-[11px] text-slate-400 truncate">corbanb@gisboyshigh.net</div>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* Custom School Details Toggle */}
+            {/* School Details Form */}
             <div className="pt-1">
               {!showDirectForm ? (
                 <button
                   type="button"
                   onClick={() => setShowDirectForm(true)}
-                  className="w-full text-center text-xs text-slate-400 hover:text-emerald-400 underline underline-offset-4 transition"
+                  className="w-full py-2.5 px-4 rounded-xl text-center text-xs font-semibold bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/70 transition"
                 >
-                  Enter custom name & school email...
+                  Sign in with Name & School Email...
                 </button>
               ) : (
                 <form
