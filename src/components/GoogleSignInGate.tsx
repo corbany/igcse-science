@@ -17,8 +17,8 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { googleSignIn } from '../services/firebaseAuth';
-import { getOrCreateUserProfile, updateUserProfile } from '../services/firestoreService';
-import { UserProfile, ExamTier } from '../types';
+import { getOrCreateUserProfile } from '../services/firestoreService';
+import { UserProfile } from '../types';
 
 interface GoogleSignInGateProps {
   onSignInSuccess: (user: UserProfile, token: string) => void;
@@ -33,13 +33,6 @@ export const GoogleSignInGate: React.FC<GoogleSignInGateProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isUnauthorizedDomain, setIsUnauthorizedDomain] = useState<boolean>(false);
   const [copiedHost, setCopiedHost] = useState<boolean>(false);
-  const [showDirectForm, setShowDirectForm] = useState<boolean>(false);
-
-  // Custom Direct Form State
-  const [directName, setDirectName] = useState<string>('');
-  const [directEmail, setDirectEmail] = useState<string>('');
-  const [directRole, setDirectRole] = useState<'student' | 'instructor'>('student');
-  const [directTier, setDirectTier] = useState<ExamTier>('Extended');
 
   const currentHostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
 
@@ -72,10 +65,10 @@ export const GoogleSignInGate: React.FC<GoogleSignInGateProps> = ({
       if (err?.code === 'auth/unauthorized-domain') {
         setIsUnauthorizedDomain(true);
         console.warn(
-          `[Firebase Auth] Domain "${currentHostname}" is not yet authorized in Firebase Console. Showing direct sign-in fallback.`
+          `[Firebase Auth] Domain "${currentHostname}" is not yet authorized in Firebase Console.`
         );
         setErrorMessage(
-          `This preview domain (${currentHostname}) is not yet registered under Firebase Authentication's Authorized Domains. You can use direct sign-in below or add this domain in your Firebase Console.`
+          `This preview domain (${currentHostname}) is not yet registered under Firebase Authentication's Authorized Domains. Please add this domain to your Firebase Console under Authentication > Settings > Authorized Domains.`
         );
       } else if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
         setErrorMessage('Sign-in popup was closed before completing. Please try again.');
@@ -83,47 +76,6 @@ export const GoogleSignInGate: React.FC<GoogleSignInGateProps> = ({
         console.error('Google Sign In error:', err);
         setErrorMessage(err?.message || 'Unable to sign in with Google. Please try again.');
       }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDirectSignIn = async (
-    nameToUse: string,
-    emailToUse: string,
-    roleToUse: 'student' | 'instructor',
-    tierToUse: ExamTier
-  ) => {
-    setLoading(true);
-    setErrorMessage(null);
-    try {
-      const cleanEmail = emailToUse.trim().toLowerCase();
-      const cleanName = nameToUse.trim() || (roleToUse === 'instructor' ? 'Instructor' : 'Student');
-      const uid = 'user_' + cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
-      
-      const profile = await getOrCreateUserProfile(uid, cleanName, cleanEmail);
-      profile.role = roleToUse;
-      profile.tier = tierToUse;
-      try {
-        await updateUserProfile(profile);
-      } catch (saveErr) {
-        console.warn('Profile local sync:', saveErr);
-      }
-
-      onSignInSuccess(profile, 'direct_session_token');
-    } catch (err: any) {
-      console.warn('Direct sign-in fallback:', err);
-      // Resilient fallback profile
-      const fallbackProfile: UserProfile = {
-        id: 'user_' + Date.now(),
-        name: nameToUse || 'Student',
-        email: emailToUse || 'student@school.edu',
-        role: roleToUse,
-        tier: tierToUse,
-        targetGrade: 'A*',
-        examDate: '2026-05-15'
-      };
-      onSignInSuccess(fallbackProfile, 'direct_session_token');
     } finally {
       setLoading(false);
     }
@@ -220,7 +172,7 @@ export const GoogleSignInGate: React.FC<GoogleSignInGateProps> = ({
             <div className="text-center space-y-1">
               <h2 className="text-lg font-bold">Sign In to Continue</h2>
               <p className="text-xs text-slate-400">
-                Choose your preferred sign-in method to access your revision dashboard.
+                Sign in with your Google account to access your Combined Science revision dashboard.
               </p>
             </div>
 
@@ -263,106 +215,6 @@ export const GoogleSignInGate: React.FC<GoogleSignInGateProps> = ({
                 </>
               )}
             </button>
-
-            {/* Divider */}
-            <div className="relative flex items-center justify-center">
-              <div className="border-t border-slate-700/60 w-full"></div>
-              <span className="bg-slate-900 px-3 text-[11px] uppercase tracking-wider text-slate-400 font-semibold absolute">
-                Or Sign In with School Email
-              </span>
-            </div>
-
-            {/* School Details Form */}
-            <div className="pt-1">
-              {!showDirectForm ? (
-                <button
-                  type="button"
-                  onClick={() => setShowDirectForm(true)}
-                  className="w-full py-2.5 px-4 rounded-xl text-center text-xs font-semibold bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/70 transition"
-                >
-                  Sign in with Name & School Email...
-                </button>
-              ) : (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleDirectSignIn(directName, directEmail, directRole, directTier);
-                  }}
-                  className={`p-4 rounded-2xl space-y-3 border text-xs ${
-                    theme === 'dark' ? 'bg-slate-950/70 border-slate-800' : 'bg-slate-50 border-slate-200'
-                  }`}
-                >
-                  <div className="flex items-center justify-between font-bold text-slate-300">
-                    <span>Custom Credentials</span>
-                    <button
-                      type="button"
-                      onClick={() => setShowDirectForm(false)}
-                      className="text-[11px] text-slate-400 hover:text-white"
-                    >
-                      Hide
-                    </button>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-slate-400">Full Name</label>
-                    <input
-                      type="text"
-                      value={directName}
-                      onChange={(e) => setDirectName(e.target.value)}
-                      required
-                      placeholder="e.g. John Doe"
-                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-emerald-500"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-slate-400">School Email</label>
-                    <input
-                      type="email"
-                      value={directEmail}
-                      onChange={(e) => setDirectEmail(e.target.value)}
-                      required
-                      placeholder="e.g. jdoe@school.edu"
-                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-emerald-500"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <label className="text-slate-400">Role</label>
-                      <select
-                        value={directRole}
-                        onChange={(e) => setDirectRole(e.target.value as any)}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-emerald-500"
-                      >
-                        <option value="student">Student</option>
-                        <option value="instructor">Instructor</option>
-                      </select>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-slate-400">IGCSE Tier</label>
-                      <select
-                        value={directTier}
-                        onChange={(e) => setDirectTier(e.target.value as any)}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-emerald-500"
-                      >
-                        <option value="Extended">Extended (A*–G)</option>
-                        <option value="Core">Core (C–G)</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full py-2.5 px-4 rounded-xl font-bold bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 hover:brightness-110 transition shadow"
-                  >
-                    Enter Portal as {directRole === 'instructor' ? 'Instructor' : 'Student'}
-                  </button>
-                </form>
-              )}
-            </div>
 
             {/* Role Expectations Explanation */}
             <div className={`p-4 rounded-2xl text-xs space-y-2 ${
