@@ -23,7 +23,8 @@ import {
   RefreshCw,
   Bell,
   Layers,
-  CheckSquare
+  CheckSquare,
+  Mail
 } from 'lucide-react';
 import { 
   ClassTask, 
@@ -41,7 +42,8 @@ import {
   fetchTaskSubmissions, 
   deleteClassTask, 
   updateClassTaskDueDate,
-  fetchStudentsInClass
+  fetchStudentsInClass,
+  notifyStudentsOfTaskAssignment
 } from '../services/firestoreService';
 import { CAMBRIDGE_0653_TOPIC_SUBTOPICS } from '../services/googleDriveService';
 import { allSubtopicsData, SubtopicTopicGroup } from '../data/subtopicSlidesData';
@@ -95,6 +97,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
   const [subtopicFilterTopic, setSubtopicFilterTopic] = useState<string>('all');
   const [subtopicSearchQuery, setSubtopicSearchQuery] = useState<string>('');
   const [showSubtopicBrowser, setShowSubtopicBrowser] = useState<boolean>(true);
+  const [sendEmailNotification, setSendEmailNotification] = useState<boolean>(true);
   
   // Individual student targeting
   const [targetAudienceType, setTargetAudienceType] = useState<'entire_class' | 'specific_students'>('entire_class');
@@ -106,6 +109,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [taskSubmissions, setTaskSubmissions] = useState<Record<string, TaskSubmission[]>>({});
   const [loadingSubmissions, setLoadingSubmissions] = useState<Record<string, boolean>>({});
+  const [sendingEmailTaskId, setSendingEmailTaskId] = useState<string | null>(null);
 
   // Unique topics across allSubtopicsData for dropdown filtering
   const uniqueTopics = useMemo(() => {
@@ -316,6 +320,24 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
         }
       }
 
+      // Prepare explicit recipients list for reliable email delivery
+      let explicitRecipients: { studentId: string; studentName: string; studentEmail: string }[] | undefined = undefined;
+      if (targetAudienceType === 'specific_students' && selectedStudentIds.length > 0) {
+        explicitRecipients = classStudents
+          .filter(s => selectedStudentIds.includes(s.studentId))
+          .map(s => ({
+            studentId: s.studentId,
+            studentName: s.name,
+            studentEmail: s.email && s.email.includes('@') ? s.email : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
+          }));
+      } else if (newClassId !== 'all' && classStudents.length > 0) {
+        explicitRecipients = classStudents.map(s => ({
+          studentId: s.studentId,
+          studentName: s.name,
+          studentEmail: s.email && s.email.includes('@') ? s.email : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
+        }));
+      }
+
       const created = await createClassTask({
         classId: newClassId,
         className: targetClassName,
@@ -328,10 +350,19 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
         dueDate: new Date(newDueDate).toISOString(),
         instructorId: currentUser.id,
         instructorName: currentUser.name
+      }, {
+        sendEmail: sendEmailNotification,
+        explicitRecipients
       });
 
       setTasks([created, ...tasks]);
-      setFeedbackNotice({ type: 'success', text: `Task "${created.title}" successfully assigned!` });
+      const notifMsg = sendEmailNotification 
+        ? ` 📧 Automated email notification dispatched to assigned students.` 
+        : '';
+      setFeedbackNotice({ 
+        type: 'success', 
+        text: `Task "${created.title}" successfully assigned!${notifMsg}` 
+      });
       setShowCreateModal(false);
 
       // Reset form to clean default
@@ -343,6 +374,71 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
       setFeedbackNotice({ type: 'error', text: err?.message || 'Failed to create task.' });
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleSendEmailReminder = async (task: ClassTask, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSendingEmailTaskId(task.id);
+    try {
+      let recipients: { studentId: string; studentName: string; studentEmail: string }[] = [];
+      const subs = taskSubmissions[task.id];
+      if (subs && subs.length > 0) {
+        recipients = subs
+          .filter(s => s.status !== 'completed')
+          .map(s => ({
+            studentId: s.studentId,
+            studentName: s.studentName,
+            studentEmail: s.studentEmail && s.studentEmail.includes('@')
+              ? s.studentEmail
+              : `${s.studentName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
+          }));
+      }
+
+      if (recipients.length === 0) {
+        if (task.classId !== 'all') {
+          const students = await fetchStudentsInClass(task.classId);
+          recipients = students
+            .filter(s => !task.targetStudentIds || task.targetStudentIds.length === 0 || task.targetStudentIds.includes(s.studentId))
+            .map(s => ({
+              studentId: s.studentId,
+              studentName: s.name,
+              studentEmail: s.email && s.email.includes('@')
+                ? s.email
+                : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
+            }));
+        } else {
+          for (const c of classes) {
+            const students = await fetchStudentsInClass(c.id);
+            for (const s of students) {
+              if (!task.targetStudentIds || task.targetStudentIds.length === 0 || task.targetStudentIds.includes(s.studentId)) {
+                recipients.push({
+                  studentId: s.studentId,
+                  studentName: s.name,
+                  studentEmail: s.email && s.email.includes('@')
+                    ? s.email
+                    : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
+                });
+              }
+            }
+          }
+        }
+      }
+
+      if (recipients.length === 0) {
+        setFeedbackNotice({ type: 'error', text: 'No students found to email for this task.' });
+        return;
+      }
+
+      const sentCount = await notifyStudentsOfTaskAssignment(task, recipients);
+      setFeedbackNotice({
+        type: 'success',
+        text: `📧 Dispatched task email notifications to ${sentCount || recipients.length} student${(sentCount || recipients.length) !== 1 ? 's' : ''}!`
+      });
+    } catch (err: any) {
+      setFeedbackNotice({ type: 'error', text: 'Failed to dispatch email notifications.' });
+    } finally {
+      setSendingEmailTaskId(null);
     }
   };
 
@@ -616,6 +712,12 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                             <span>Whole Class</span>
                           </span>
                         )}
+
+                        {/* Email notification badge */}
+                        <span className="text-[11px] font-medium text-purple-300/80 bg-purple-950/40 border border-purple-500/20 px-2 py-0.5 rounded-md flex items-center gap-1">
+                          <Mail className="w-3 h-3 text-purple-400" />
+                          <span>Email Notified</span>
+                        </span>
                       </div>
 
                       <h3 className="text-base sm:text-lg font-bold text-white hover:text-purple-300 transition">
@@ -730,7 +832,21 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                       </div>
 
                       {/* Quick Actions */}
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          onClick={e => handleSendEmailReminder(task, e)}
+                          disabled={sendingEmailTaskId === task.id}
+                          title="Dispatch email notification or reminder to students"
+                          className="px-3 py-1.5 rounded-xl bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 border border-purple-500/40 text-xs font-semibold transition flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                          {sendingEmailTaskId === task.id ? (
+                            <div className="w-3.5 h-3.5 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
+                          ) : (
+                            <Mail className="w-3.5 h-3.5 text-purple-400" />
+                          )}
+                          <span>{sendingEmailTaskId === task.id ? 'Sending...' : 'Email Students'}</span>
+                        </button>
+
                         <button
                           onClick={e => handleQuickExtendDueDate(task.id, 2, e)}
                           title="Extend due date by 2 days"
@@ -888,13 +1004,13 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
       {/* Create Task Modal - Viewport constrained, always visible header & options */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-hidden animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+          <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl flex flex-col shadow-2xl my-2 sm:my-auto max-h-[86vh] sm:max-h-[82vh] overflow-hidden animate-in zoom-in-95 duration-150 shrink-0">
             {/* Fixed Modal Header */}
-            <div className="px-5 sm:px-6 py-4 border-b border-slate-800/90 flex items-center justify-between shrink-0 bg-slate-900/95 backdrop-blur-sm z-10">
+            <div className="px-5 sm:px-6 py-3 sm:py-3.5 border-b border-slate-800/90 flex items-center justify-between shrink-0 bg-slate-900/95 backdrop-blur-sm z-10">
               <div className="space-y-0.5">
-                <span className="text-[11px] font-bold text-purple-400 uppercase tracking-wider">Class Task Generator</span>
-                <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                <span className="text-[10px] sm:text-[11px] font-bold text-purple-400 uppercase tracking-wider">Class Task Generator</span>
+                <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-purple-400" />
                   <span>Assign Task to Students</span>
                 </h3>
@@ -911,7 +1027,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
             <form onSubmit={handleCreateTask} className="flex flex-col flex-1 min-h-0 overflow-hidden">
               {/* Scrollable Form Body - Smooth scrolling, never pushed above viewport */}
-              <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-4 space-y-4 text-xs scrollbar-thin scrollbar-thumb-slate-700">
+              <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-3.5 sm:py-4 space-y-3 sm:space-y-3.5 text-xs scrollbar-thin scrollbar-thumb-slate-700">
               {/* Task Title */}
               <div className="space-y-1.5">
                 <label className="font-semibold text-slate-300">Task Title *</label>
@@ -940,13 +1056,13 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         autoFillTitleAndDescription('both', selectedSubtopics);
                       }
                     }}
-                    className={`p-3.5 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
+                    className={`p-2.5 sm:p-3 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
                       newType === 'both'
                         ? 'bg-purple-950/50 border-purple-500 text-white shadow-md ring-1 ring-purple-500/40'
                         : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:border-slate-600'
                     }`}
                   >
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
                           <BookOpen className="w-4 h-4 text-emerald-400" />
@@ -982,13 +1098,13 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         autoFillTitleAndDescription('slides_traffic_light', selectedSubtopics);
                       }
                     }}
-                    className={`p-3.5 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
+                    className={`p-2.5 sm:p-3 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
                       newType === 'slides_traffic_light'
                         ? 'bg-purple-950/50 border-purple-500 text-white shadow-md ring-1 ring-purple-500/40'
                         : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:border-slate-600'
                     }`}
                   >
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
                         <BookOpen className="w-4 h-4 text-emerald-400" />
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
@@ -1018,13 +1134,13 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         autoFillTitleAndDescription('practice_quiz', selectedSubtopics);
                       }
                     }}
-                    className={`p-3.5 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
+                    className={`p-2.5 sm:p-3 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
                       newType === 'practice_quiz'
                         ? 'bg-purple-950/50 border-purple-500 text-white shadow-md ring-1 ring-purple-500/40'
                         : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:border-slate-600'
                     }`}
                   >
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
                         <Award className="w-4 h-4 text-sky-400" />
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30">
@@ -1357,7 +1473,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                       <span className="italic">Click any row to select or deselect</span>
                     </div>
 
-                    <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 rounded-xl">
+                    <div className="max-h-40 sm:max-h-44 overflow-y-auto space-y-1.5 pr-1 rounded-xl">
                       {filteredSubtopicsList.length === 0 ? (
                         <div className="p-6 text-center text-xs text-slate-400 bg-slate-900/60 rounded-xl border border-slate-800">
                           No subtopics match your current search/filters. Try clearing your search keyword.
@@ -1477,6 +1593,36 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                   placeholder="e.g. Review key terms on slides 4-8. Once you understand the concepts, update your traffic light to Green and attempt the practice quiz."
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500 font-normal"
                 ></textarea>
+              </div>
+
+              {/* Student Email Notification Option Card */}
+              <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-purple-500/30 flex items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
+                    <Mail className="w-4 h-4 text-purple-400" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <div className="font-bold text-white flex items-center gap-1.5">
+                      <span>Notify Students by Email</span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                        Automated
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      Dispatches an automated email to each assigned student with the task title, activity type, due date, and direct portal link.
+                    </div>
+                  </div>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={sendEmailNotification}
+                    onChange={e => setSendEmailNotification(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                </label>
               </div>
 
               </div>

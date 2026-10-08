@@ -829,11 +829,17 @@ export async function removeStudentFromClass(classId: string, studentId: string)
 // INSTRUCTOR TASKS & STUDENT HOMEWORK ASSIGNMENTS
 // -------------------------------------------------------------
 
+export interface CreateClassTaskOptions {
+  sendEmail?: boolean;
+  explicitRecipients?: { studentId: string; studentName: string; studentEmail: string }[];
+}
+
 /**
  * Creates a new task/assignment for a class and/or individual students.
  */
 export async function createClassTask(
-  taskData: Omit<ClassTask, 'id' | 'createdAt'>
+  taskData: Omit<ClassTask, 'id' | 'createdAt'>,
+  options?: CreateClassTaskOptions
 ): Promise<ClassTask> {
   const id = `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const createdAt = new Date().toISOString();
@@ -849,37 +855,148 @@ export async function createClassTask(
   localTasks.unshift(newTask);
   setLocalItem(LOCAL_TASKS_KEY, localTasks);
 
-  // 2. Persist to Firestore
+  // Determine target student list across class or specific students
+  let studentList: { studentId: string; name: string; email: string }[] = [];
+  if (options?.explicitRecipients && options.explicitRecipients.length > 0) {
+    studentList = options.explicitRecipients.map(r => ({
+      studentId: r.studentId,
+      name: r.studentName,
+      email: r.studentEmail
+    }));
+  } else if (taskData.classId !== 'all') {
+    const classStudents = await fetchStudentsInClass(taskData.classId);
+    studentList = classStudents
+      .filter(s => !taskData.targetStudentIds || taskData.targetStudentIds.length === 0 || taskData.targetStudentIds.includes(s.studentId))
+      .map(s => ({ studentId: s.studentId, name: s.name, email: s.email }));
+  } else {
+    // Collect students across all classes created by instructor
+    const classes = await fetchClassesByInstructor(taskData.instructorId);
+    const studentMap = new Map<string, { studentId: string; name: string; email: string }>();
+    for (const c of classes) {
+      const students = await fetchStudentsInClass(c.id);
+      for (const s of students) {
+        if (!taskData.targetStudentIds || taskData.targetStudentIds.length === 0 || taskData.targetStudentIds.includes(s.studentId)) {
+          studentMap.set(s.studentId, { studentId: s.studentId, name: s.name, email: s.email });
+        }
+      }
+    }
+    studentList = Array.from(studentMap.values());
+  }
+
+  // 2. Persist to Firestore and initialize submissions
   try {
     const taskRef = doc(db, 'tasks', id);
     await setDoc(taskRef, newTask);
 
-    // If specific students or whole class, initialize submissions as 'not_started'
-    const studentList = await fetchStudentsInClass(taskData.classId);
     for (const student of studentList) {
-      if (!taskData.targetStudentIds || taskData.targetStudentIds.length === 0 || taskData.targetStudentIds.includes(student.studentId)) {
-        const subRef = doc(db, 'tasks', id, 'submissions', student.studentId);
-        const subData: TaskSubmission = {
-          studentId: student.studentId,
-          studentName: student.name,
-          studentEmail: student.email,
-          status: 'not_started',
-          lastActivityAt: createdAt
-        };
-        setDoc(subRef, subData).catch(() => {});
+      const subRef = doc(db, 'tasks', id, 'submissions', student.studentId);
+      const subData: TaskSubmission = {
+        studentId: student.studentId,
+        studentName: student.name,
+        studentEmail: student.email,
+        status: 'not_started',
+        lastActivityAt: createdAt
+      };
+      setDoc(subRef, subData).catch(() => {});
 
-        // Save local sub
-        const subKey = `${LOCAL_TASK_SUBMISSIONS_PREFIX}${id}`;
-        const localSubs = getLocalItem<Record<string, TaskSubmission>>(subKey, {});
-        localSubs[student.studentId] = subData;
-        setLocalItem(subKey, localSubs);
-      }
+      // Save local sub
+      const subKey = `${LOCAL_TASK_SUBMISSIONS_PREFIX}${id}`;
+      const localSubs = getLocalItem<Record<string, TaskSubmission>>(subKey, {});
+      localSubs[student.studentId] = subData;
+      setLocalItem(subKey, localSubs);
     }
   } catch (err) {
     console.warn('Offline mode: Saved task locally.', err);
   }
 
+  // 3. Dispatch automated email notification to all targeted students if requested
+  if (options?.sendEmail !== false) {
+    const emailRecipients = studentList.map(s => ({
+      studentId: s.studentId,
+      studentName: s.name,
+      studentEmail: s.email && s.email.includes('@')
+        ? s.email
+        : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
+    }));
+
+    if (emailRecipients.length > 0) {
+      notifyStudentsOfTaskAssignment(newTask, emailRecipients).catch(err => {
+        console.warn('Failed to dispatch task assignment email notifications:', err);
+      });
+    }
+  }
+
   return newTask;
+}
+
+/**
+ * Dispatches an automated email notification to students when a task is set.
+ */
+export async function notifyStudentsOfTaskAssignment(
+  task: ClassTask,
+  explicitRecipients?: { studentId: string; studentName: string; studentEmail: string }[]
+): Promise<number> {
+  try {
+    let recipients = explicitRecipients || [];
+
+    if (recipients.length === 0) {
+      if (task.classId !== 'all') {
+        const students = await fetchStudentsInClass(task.classId);
+        recipients = students
+          .filter(s => !task.targetStudentIds || task.targetStudentIds.length === 0 || task.targetStudentIds.includes(s.studentId))
+          .map(s => ({ 
+            studentId: s.studentId, 
+            studentName: s.name, 
+            studentEmail: s.email && s.email.includes('@')
+              ? s.email
+              : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
+          }));
+      } else {
+        const classes = await fetchClassesByInstructor(task.instructorId);
+        const studentMap = new Map<string, { studentId: string; studentName: string; studentEmail: string }>();
+        for (const c of classes) {
+          const students = await fetchStudentsInClass(c.id);
+          for (const s of students) {
+            if (!task.targetStudentIds || task.targetStudentIds.length === 0 || task.targetStudentIds.includes(s.studentId)) {
+              studentMap.set(s.studentId, { 
+                studentId: s.studentId, 
+                studentName: s.name, 
+                studentEmail: s.email && s.email.includes('@')
+                  ? s.email
+                  : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
+              });
+            }
+          }
+        }
+        recipients = Array.from(studentMap.values());
+      }
+    }
+
+    if (recipients.length === 0) {
+      console.log('[notifyStudentsOfTaskAssignment] No student recipients found for task:', task.id);
+      return 0;
+    }
+
+    const res = await fetch('/api/notify-task-assigned', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipients,
+        task
+      })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      console.log(`[notifyStudentsOfTaskAssignment] Dispatched emails to ${data.count || recipients.length} students.`);
+      return data.count || recipients.length;
+    } else {
+      console.warn('[notifyStudentsOfTaskAssignment] Server error response:', await res.text());
+    }
+  } catch (err) {
+    console.warn('[notifyStudentsOfTaskAssignment] Email dispatch failed:', err);
+  }
+  return 0;
 }
 
 /**
