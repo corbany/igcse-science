@@ -35,6 +35,53 @@ function getGenAI(): GoogleGenAI | null {
   return genAIClient;
 }
 
+/**
+ * Executes a Gemini model request with automated fallback across available models.
+ * If the primary model experiences high demand or temporary 503/429 spikes,
+ * it seamlessly switches to the next fast and capable candidate model.
+ */
+async function callGeminiWithFallback(
+  ai: GoogleGenAI,
+  params: {
+    contents: any;
+    config?: any;
+    preferredModel?: string;
+  }
+): Promise<{ text: string; model: string }> {
+  // Prioritize gemini-3.1-flash-lite for immediate response and resilience against high-demand spikes
+  const candidateModels = [
+    params.preferredModel || 'gemini-3.1-flash-lite',
+    'gemini-3.8-flash',
+    'gemini-flash-latest'
+  ];
+  const uniqueModels = Array.from(new Set(candidateModels));
+
+  let lastError: any = null;
+  for (const model of uniqueModels) {
+    try {
+      // 12-second timeout per model attempt so high-demand spikes trigger instant fallback
+      const generatePromise = ai.models.generateContent({
+        model,
+        contents: params.contents,
+        config: params.config,
+      });
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Timeout waiting for model "${model}"`)), 12000)
+      );
+
+      const response = await Promise.race([generatePromise, timeoutPromise]);
+      if (response && response.text) {
+        return { text: response.text, model };
+      }
+    } catch (err: any) {
+      console.warn(`[Gemini Call] Model "${model}" failed (${err?.status || err?.message || 'unknown error'}). Trying next candidate...`);
+      lastError = err;
+    }
+  }
+  throw lastError || new Error('All candidate models failed to return content.');
+}
+
 // API Routes
 app.get(['/healthz', '/api/health'], (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -592,12 +639,12 @@ app.post('/api/chat', async (req, res) => {
   try {
     const { messages: rawMessages, message, history, topic, gradeTarget, tier } = req.body;
     
-    // Normalize messages format
+    // Normalize incoming messages
     let messages: { role: string; content: string }[] = [];
-    if (Array.isArray(rawMessages)) {
+    if (Array.isArray(rawMessages) && rawMessages.length > 0) {
       messages = rawMessages;
     } else if (message) {
-      if (Array.isArray(history)) {
+      if (Array.isArray(history) && history.length > 0) {
         messages = [...history, { role: 'user', content: message }];
       } else {
         messages = [{ role: 'user', content: message }];
@@ -608,52 +655,132 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'Invalid messages format' });
     }
 
-    const lastMessage = messages[messages.length - 1]?.content || '';
+    const lastMessage = (typeof message === 'string' && message.trim())
+      ? message.trim()
+      : (messages[messages.length - 1]?.content || '').trim();
+
     const studentTier = tier || gradeTarget || 'Extended';
     const ai = getGenAI();
 
-    if (!ai) {
-      // Intelligent fallback when GEMINI_API_KEY is not configured in preview
-      const fallbackResponse = generateSmartOfflineResponse(lastMessage, topic, studentTier);
-      return res.json({ reply: fallbackResponse, source: 'offline-expert' });
+    // Prepare strictly normalized Gemini multi-turn conversation history
+    // Rules: Must start with 'user', roles must strictly alternate, and must end with 'user'
+    const conversationHistory: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
+    for (const m of messages) {
+      const role: 'user' | 'model' = (m.role === 'assistant' || m.role === 'model') ? 'model' : 'user';
+      const text = (m.content || '').trim();
+      if (!text) continue;
+
+      // Gemini API prohibits starting with model
+      if (conversationHistory.length === 0 && role === 'model') {
+        continue;
+      }
+
+      // Merge consecutive identical roles
+      if (conversationHistory.length > 0 && conversationHistory[conversationHistory.length - 1].role === role) {
+        conversationHistory[conversationHistory.length - 1].parts[0].text += `\n\n${text}`;
+      } else {
+        conversationHistory.push({ role, parts: [{ text }] });
+      }
+    }
+
+    // Ensure at least one user turn exists and ends with user
+    if (conversationHistory.length === 0 || conversationHistory[conversationHistory.length - 1].role === 'model') {
+      conversationHistory.push({ role: 'user', parts: [{ text: lastMessage || 'Hello' }] });
     }
 
     const systemInstruction = `You are the Expert Cambridge IGCSE Combined Science (0653) AI Tutor for students and instructors.
-The syllabus covers:
-- Biology (B1-B16): Characteristics of living organisms (MRS GREN), Cells (plant, animal, bacterial cell with plasmids/circular DNA, specialized cells), Movement into/out of cells (diffusion, osmosis, active transport with energy/carrier proteins), Biological molecules (carbohydrates, fats, proteins, food tests: Benedict's, iodine, biuret, ethanol emulsion), Enzymes (lock & key, denaturation, optimum temp & pH), Plant nutrition (6CO2 + 6H2O -> C6H12O6 + 6O2, leaf structures, light/CO2/temp, aquatic gas exchange), Human nutrition (diet, alimentary canal, peristalsis, enzymes: amylase, protease, lipase, villi absorption, model gut Visking tubing), Transport in plants (xylem & phloem, root hair cells, transpiration stream, potometer), Transport in animals (heart structure, double circulation, arteries, veins, capillaries, blood components, coronary heart disease, pulse/ECG), Diseases and immunity (pathogens, viruses with protein coat & genetic material, transmission, physical/chemical barriers, hygiene/water/sewage, active immunity, vaccines, memory cells), Gas exchange in humans (breathing system, alveoli adaptations), Respiration (aerobic respiration word & symbol equation, 5 uses of energy: muscle contraction, protein synthesis, cell division, growth, constant temp), Drugs (antibiotics kill bacteria not viruses, antibiotic resistance/MRSA, painkillers), Reproduction (insect vs wind pollination, flower structures, fertilisation, seed germination: water, oxygen, suitable temp, male & female reproduction, 28-day menstrual cycle), Organisms & environment (Sun energy flow, food chains/webs, 10% biomass rule, carbon cycle), Human influences (deforestation, habitat destruction, conservation).
-- Chemistry (C1-C12): States of matter (kinetic particle theory, Boyle's law), Atoms/elements/compounds (atomic number, mass number, electron config 2,8,8, ionic bonding giant lattice, covalent single/double/triple, simple covalent properties), Stoichiometry (chemical formulas, balancing equations), Electrochemistry (molten PbBr2, conc aqueous NaCl, dilute H2SO4, electrode rules), Energetics (exothermic & endothermic, activation energy Ea, reaction profiles, bond breaking endo vs bond making exo), Reactions (rates, collision theory, measuring methods, catalysts, redox oxygen gain/loss & oxidation states Fe(II)/Fe(III)), Acids/bases/salts (indicators: litmus, methyl orange, universal indicator, acidic vs basic oxides, salt prep: titration, excess base filtration & crystallisation, precipitation), Periodic Table (Group 1 alkali metals, Group 7 halogens & displacement, transition metals, noble gases), Metals (properties, uses of Al & Cu, alloys: brass, steel, reactivity series, extraction: iron blast furnace coke/CO reduction & aluminium bauxite electrolysis), Environmental chemistry (water tests CoCl2 & CuSO4, water treatment, air composition 78% N2, 21% O2, pollutants, global warming & acid rain), Organic chemistry (homologous series, petroleum fractional distillation fractions & uses, alkanes, alkenes, cracking, addition reactions Br2/H2/steam, poly(ethene) polymerisation), Experimental techniques (apparatus: burette, pipette, balance, chromatography Rf = spot/solvent, qualitative analysis: cations flame/NaOH/NH3, anions CO32-, SO42-, halides, gases H2 pop, O2 glowing splint, CO2 limewater, Cl2 bleach litmus, NH3 damp red litmus blue).
-- Physics (P1-P5): Motion/forces/energy (measuring length/volume/time, speed v=s/t, acceleration a=Δv/t, graphs gradient=speed/accel, area under speed-time graph = distance, mass & weight W=mg with g=9.8 N/kg, density ρ=m/V, resultant force F=ma, friction & drag, energy stores & transfers HERM, work W=Fd=ΔE, kinetic energy Ek=1/2mv^2, GPE ΔEp=mgΔh, efficiency, power P=W/t=E/t, pressure p=F/A), Thermal physics (conduction lattice vibrations & free electrons, convection density currents, radiation IR absorption/emission Leslie cube, thermal expansion, evaporation cooling), Waves (transverse vs longitudinal, wave equation v=fλ, reflection i=r, refraction, thin converging lens F & f, dispersion of white light ROYGBIV, EM spectrum order/uses/hazards, sound 20Hz-20kHz, echoes & speed of sound, ultrasound >20kHz), Electricity (charge q=It, conductors vs insulators, AC vs DC, conventional vs electron flow, e.m.f. vs p.d. in volts, Ohm's law R=V/I, series vs parallel rules, electrical power P=IV, energy E=IVt, kWh cost, safety: fuses, trip switches, earthing, double insulation), Space physics (solar system order, Sun mass & gravity, orbital speed v=2πr/T, light-years 3x10^8 m/s, nuclear fusion H to He in Sun, star life cycles small vs massive, Milky Way, Big Bang & redshift).
+Your entire knowledge base is grounded strictly in the official Cambridge Assessment International Education (CAIE) Combined Science 0653 syllabus (2025-2027), mark schemes, and examiner reports.
 
-Current context:
-- Topic: ${topic || 'General Combined Science 0653'}
-- Student Tier: ${gradeTarget || 'Extended (Aiming for Grades A*-C)'}
+SYLLABUS GROUNDING & CORE PRINCIPLES:
+1. BIOLOGY (B1-B16):
+- B1 Characteristics of living organisms: MRS GREN (Movement, Respiration, Sensitivity, Growth, Reproduction, Excretion, Nutrition).
+- B2 Cells: Cytoplasm, nucleus, cell membrane, mitochondria, ribosomes. Plant extras: cellulose cell wall, large central vacuole, chloroplasts. Bacterial cells: circular loop of DNA, plasmids, no nucleus. Magnification formula: M = Image / Actual size (M = I / A).
+- B3 Movement into/out of cells: Diffusion down concentration gradient (passive). Osmosis of water through partially permeable membrane. Active transport against gradient using carrier proteins and energy from cellular respiration.
+- B4 Biological molecules: Carbohydrates, fats, proteins. Food tests: Benedict's + heat for reducing sugars (blue -> green/yellow/brick-red); Iodine for starch (orange-brown -> blue-black); Biuret for proteins (blue -> purple/violet); Ethanol emulsion for lipids (clear -> cloudy/milky emulsion).
+- B5 Enzymes: Protein catalysts, active site, lock and key hypothesis, complementary substrate fit, enzyme-substrate complex. Denaturation at high temp (>45°C) and extreme pH due to shape change of active site so substrate no longer fits.
+- B6 Plant nutrition: Photosynthesis word & balanced chemical equation: 6CO2 + 6H2O -> C6H12O6 + 6O2 (light + chlorophyll). Leaf structure: cuticle, epidermis, palisade mesophyll (chloroplasts), spongy mesophyll, stomata & guard cells, xylem & phloem. Limiting factors: light intensity, CO2 concentration, temperature.
+- B7 Human nutrition: Balanced diet, deficiencies (scurvy vitamin C, rickets vitamin D/calcium, anemia iron). Ingestion, mechanical digestion, chemical digestion, absorption in villi of small intestine, assimilation, egestion. Digestive enzymes: amylase (starch -> maltose), protease/pepsin/trypsin (protein -> amino acids), lipase (fats -> glycerol + fatty acids). Bile: neutralizes stomach acid & emulsifies fats to increase surface area.
+- B8 Transport in plants: Xylem (water & minerals up, dead hollow cells with lignin), Phloem (sucrose & amino acids up/down translocation). Root hair cells (large surface area). Transpiration stream, potometer, factors affecting transpiration rate.
+- B9 Transport in animals: Double circulatory system (pulmonary & systemic). Heart chambers (atria, ventricles, septum, valves, coronary arteries). Blood vessels: arteries (thick muscular/elastic wall, small lumen, high pressure), veins (thinner wall, large lumen, valves), capillaries (one cell thick). Blood: red blood cells (hemoglobin, no nucleus, biconcave), white blood cells (phagocytes engulf pathogens, lymphocytes produce antibodies), platelets (clotting), plasma.
+- B10 Diseases and immunity: Pathogens (bacteria, viruses, fungi). Viruses have protein coat & genetic material, lack cells. Defenses: physical/chemical barriers, phagocytosis, antibody production. Active immunity (vaccines, memory cells).
+- B11 Gas exchange: Alveoli adaptations (huge surface area, one-cell thin, moist, dense capillary network, steep gradient). Ventilation mechanics (diaphragm and intercostal muscles).
+- B12 Respiration: Aerobic: C6H12O6 + 6O2 -> 6CO2 + 6H2O. 5 uses of energy: muscle contraction, protein synthesis, cell division, active transport, body temperature maintenance. Anaerobic respiration in muscles (lactic acid) and yeast (ethanol + CO2).
+- B13 Coordination and response: Nervous system (CNS, sensory, relay, motor neurones, reflex arc). Adrenaline, insulin, glucagon. Plant tropisms: phototropism and gravitropism mediated by auxin.
+- B14 Drugs: Antibiotics destroy bacterial cell walls, ineffective against viruses. Antibiotic resistance (MRSA, natural selection).
+- B15 Reproduction: Asexual vs sexual. Insect vs wind pollination. Seed germination requirements: WOW (Water, Oxygen, Warmth). Menstrual cycle: ovulation ~day 14, lining repair and maintenance.
+- B16 Organisms & environment: Energy from Sun, food chains & webs, trophic levels, 10% energy transfer rule, pyramids of numbers/biomass, carbon cycle. Human impact, deforestation, greenhouse gases, conservation.
 
-Instructions:
-1. Provide accurate, clear, and encouraging explanations aligned strictly with Cambridge 0653 mark schemes.
-2. Highlight key scientific vocabulary and definitions.
-3. If calculations are requested, show step-by-step working with formula, substitutions, and correct units.
-4. Distinguish clearly between Core (Grades C to G) and Supplement/Extended content (Grades A* to C) when relevant.`;
+2. CHEMISTRY (C1-C12):
+- C1 States of matter: Particle arrangement in solids, liquids, gases. Kinetic particle theory. Diffusion rates related to molecular mass (lower Mr diffuses faster).
+- C2 Atoms, elements, compounds: Protons, neutrons, electrons. Atomic number (Z), nucleon number (A). Electron configuration (2,8,8). Ionic bonding (transfer of electrons, electrostatic attraction in giant lattice, high melting point, conducts when molten/aqueous). Covalent bonding (shared electron pairs, simple molecular vs giant covalent diamond/graphite/silicon dioxide).
+- C3 Stoichiometry: Chemical formulas, balancing equations. Mole concept: n = m / Mr, volume of gas = n * 24 dm³ at rtp, concentration c = n / V.
+- C4 Electrochemistry: Electrolysis rules. Molten PbBr2: Pb at cathode, Br2 at anode. Aqueous NaCl: H2 at cathode, Cl2 at anode, NaOH in solution. Dilute H2SO4: H2 at cathode, O2 at anode. Electroplating with copper/silver.
+- C5 Chemical energetics: Exothermic (heat released, negative ΔH), Endothermic (heat absorbed, positive ΔH). Bond breaking is endothermic, bond forming is exothermic. Energy level diagrams & activation energy (Ea).
+- C6 Chemical reactions: Reaction rates, collision theory (frequency of collisions, activation energy). Effects of temperature, concentration, surface area, catalyst. Redox: OIL RIG (Oxidation Is Loss, Reduction Is Gain of electrons; gain/loss of oxygen).
+- C7 Acids, bases, salts: pH scale, indicators (litmus, methyl orange, thymolphthalein, universal indicator). Oxide categories (acidic, basic, amphoteric, neutral). 3 salt preparation methods: (1) excess insoluble base/metal with acid + filtration + crystallization, (2) titration for soluble alkali + acid, (3) precipitation for insoluble salts.
+- C8 Periodic Table: Group 1 alkali metals (reactivity increases down, form alkaline hydroxides + H2 gas). Group 7 halogens (reactivity decreases down, displacement reactions, colors/states: Cl2 pale green gas, Br2 red-brown liquid, I2 grey solid/purple vapor). Transition elements (high density/melting point, colored compounds, catalysts). Noble gases (inert, full outer shell).
+- C9 Metals: Reactivity series (K, Na, Ca, Mg, Al, [C], Zn, Fe, [H], Cu, Ag, Au). Blast furnace extraction of iron (hematite, coke, limestone, air; C + O2 -> CO2, CO2 + C -> 2CO, Fe2O3 + 3CO -> 2Fe + 3CO2, CaCO3 -> CaO + CO2, CaO + SiO2 -> CaSiO3 slag). Aluminium extraction by electrolysis in molten cryolite. Rusting requires water AND oxygen (barrier methods, galvanizing, sacrificial protection).
+- C10 Environmental chemistry: Chemical tests for water (anhydrous copper(II) sulfate turns white to blue; anhydrous cobalt(II) chloride turns blue to pink). Water purification steps. Clean dry air composition (78% N2, 21% O2, noble gases, 0.04% CO2). Pollutants: CO (incomplete combustion), SO2 (fossil fuels -> acid rain), NOx (car engines -> acid rain), lead. Greenhouse effect & global warming (CO2 and CH4).
+- C11 Organic chemistry: Fractional distillation of petroleum (refinery gas, gasoline, naphtha, kerosene, diesel, fuel oil, bitumen). Alkanes (CnH2n+2, saturated, combustion). Alkenes (CnH2n, unsaturated C=C, bromine water decolourization orange-brown to colorless, addition of H2, steam, Br2). Cracking long-chain alkanes. Addition polymerisation of ethene to poly(ethene).
+- C12 Experimental techniques & Qualitative analysis:
+  * Flame tests: Li+ red, Na+ yellow, K+ lilac, Cu2+ blue-green, Ca2+ orange-red.
+  * Cations with aq NaOH & aq NH3: Al3+ (white ppt, soluble in excess NaOH to colourless, insol in NH3), NH4+ (gas turns damp red litmus blue on warming), Ca2+ (white ppt with NaOH, no ppt with NH3), Cu2+ (light blue ppt, dark blue with excess NH3), Fe2+ (green ppt), Fe3+ (red-brown ppt), Zn2+ (white ppt, soluble in excess of both).
+  * Anions: Carbonate CO32- (dilute acid -> effervescence CO2 turns limewater milky); Halides Cl- (white ppt with AgNO3), Br- (cream ppt), I- (yellow ppt); Nitrate NO3- (NaOH + Al foil + heat -> NH3 gas); Sulfate SO42- (dilute HNO3 + Ba(NO3)2 -> white ppt).
+  * Gases: H2 (lighted splint pops), O2 (relights glowing splint), CO2 (limewater cloudy), Cl2 (bleaches damp litmus), NH3 (turns damp red litmus blue), SO2 (turns acidified aqueous potassium manganate(VII) from purple to colourless).
 
-    const conversationHistory = messages.map((m: { role: string; content: string }) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    }));
+3. PHYSICS (P1-P5):
+- P1 Motion, forces, energy: Speed v = s/t. Acceleration a = (v - u)/t. Distance-time graph gradient = speed. Speed-time graph gradient = acceleration, area under graph = distance. Weight W = mg (g = 9.8 N/kg). Density ρ = m / V. Resultant force F = ma. Hooke's law F = kΔx. Moment = F * d. Work W = F * d = ΔE. Kinetic energy Ek = 0.5 * m * v². Gravitational potential energy ΔEp = m * g * Δh. Power P = W / t = E / t. Efficiency = (useful / total) * 100%. Pressure p = F / A.
+- P2 Thermal physics: Conduction (lattice vibrations, free electrons in metals), Convection (density currents in fluids), Radiation (infrared, dark matt surfaces best emitters/absorbers, shiny light surfaces best reflectors). Evaporation cooling (most energetic particles escape).
+- P3 Waves: Transverse vs longitudinal. Wave equation v = f * λ. Period T = 1/f. Reflection (i = r). Refraction (bending towards normal when slowing down, n = sin i / sin r). Total internal reflection (sin c = 1/n). Converging lenses. EM spectrum (Radio, Micro, Infrared, Visible ROYGBIV, UV, X-ray, Gamma; speed 3.0 x 10^8 m/s). Sound audible range 20 Hz – 20 kHz, ultrasound >20 kHz, speed in air ~330-340 m/s.
+- P4 Electricity: Charge Q = I * t. Current (amperes), Voltage (volts), Resistance (ohms). Ohm's law R = V / I. Series circuits (I same, V splits, R_total = R1 + R2). Parallel circuits (V same across branches, I splits, 1/R_total = 1/R1 + 1/R2). Power P = V * I = I² * R. Energy E = V * I * t = P * t. Electrical safety: fuses (melt on high current), circuit breakers, earthing, double insulation.
+- P5 Space physics: Solar system planetary order (Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune). Orbital speed v = 2πr / T. Nuclear fusion in stars (H -> He). Star life cycles. Redshift and Big Bang evidence.
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: conversationHistory,
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-        maxOutputTokens: 1000,
-      },
+PEDAGOGICAL STYLE & RULES:
+1. Ground every answer specifically in Cambridge IGCSE 0653 syllabus conventions and mark scheme points.
+2. Clearly indicate when a concept is Core (Grades C–G) vs Extended/Supplement (Grades A*–C).
+3. If calculation is required, always provide step-by-step working: Formula -> Values substituted -> Working -> Final Answer with Units.
+4. Bold key scientific terminology (the words that earn marks on Cambridge mark schemes).
+5. Format equations clearly using readable mathematical notation.
+6. Student Tier: ${studentTier} (tailor depth and calculation focus accordingly).
+7. Topic context: ${topic || 'Cambridge IGCSE 0653 Science'}.`;
+
+    if (ai) {
+      try {
+        const { text, model } = await callGeminiWithFallback(ai, {
+          contents: conversationHistory,
+          config: {
+            systemInstruction,
+            temperature: 0.7,
+            maxOutputTokens: 1400,
+          },
+          preferredModel: 'gemini-3.1-flash-lite'
+        });
+
+        return res.json({ 
+          reply: text, 
+          source: model,
+          success: true 
+        });
+      } catch (aiErr: any) {
+        console.warn('[AI Tutor] Gemini API calls failed, serving rich offline syllabus answer:', aiErr?.message);
+      }
+    }
+
+    // High-quality offline syllabus fallback
+    const offlineReply = generateSmartOfflineResponse(lastMessage, topic, studentTier);
+    return res.json({
+      reply: offlineReply,
+      source: 'cambridge-0653-syllabus-engine',
+      success: true
     });
-
-    const text = response.text || 'I could not generate an answer at this moment. Please try again.';
-    res.json({ reply: text, source: 'gemini-3.8-flash' });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error in /api/chat:', error);
-    res.status(500).json({ error: 'Failed to generate response' });
+    const offlineReply = generateSmartOfflineResponse('general syllabus guidance', undefined, 'Extended');
+    res.json({ 
+      reply: offlineReply,
+      source: 'cambridge-0653-syllabus-engine',
+      success: true
+    });
   }
 });
 
@@ -1596,6 +1723,43 @@ function generateServerFallbackQuiz(topics: string[], count: number, tier?: stri
 function generateSmartOfflineResponse(query: string, topic?: string, tier?: string): string {
   const q = query.toLowerCase();
 
+  // Active Transport / Diffusion / Osmosis (B3)
+  if (q.includes('active transport') || q.includes('diffusion') || q.includes('osmosis') || q.includes('b3')) {
+    return `### Movement In & Out of Cells (Cambridge 0653 B3)
+- **Active Transport (Extended):** Movement of particles through a cell membrane from a region of lower concentration to a region of higher concentration (against a concentration gradient) using energy from respiration and carrier proteins.
+  - *Key Examples:* Root hair cells absorbing mineral ions (nitrates); epithelial villi cells absorbing glucose into bloodstream.
+  - *Examiner Tip:* Always link active transport to cells having abundant **mitochondria** to produce ATP via aerobic respiration.
+- **Diffusion (Core & Extended):** Net movement of particles from a region of higher concentration to lower concentration down a concentration gradient as a result of their random movement. (Passive - no energy required).
+- **Osmosis (Core & Extended):** Net movement of water molecules from a region of higher water potential to lower water potential through a partially permeable membrane.
+  - *Plant Cells:* Turgid (swollen with high pressure against cell wall) vs Plasmolysed (cytoplasm shrinks away from cell wall in concentrated solution).`;
+  }
+
+  // Enzymes (B5)
+  if (q.includes('enzyme') || q.includes('denatur') || q.includes('lock and key') || q.includes('b5')) {
+    return `### Enzymes & Catalysis (Cambridge 0653 B5)
+- **Definition:** Biological catalysts that speed up the rate of chemical reactions without being consumed. Proteins folded into a specific 3D shape.
+- **Active Site & Mechanism:** Complementary shape to the substrate. Lock and key hypothesis forms an enzyme-substrate complex.
+- **Denaturation (High Temp / Extreme pH):** Above optimum temperature (~37–40°C), thermal kinetic energy disrupts hydrogen/ionic bonds holding enzyme structure. Active site changes shape permanently, substrate no longer fits.
+- **Exam Mark Scheme Points:**
+  1. High temperature increases kinetic energy and collision frequency until optimum.
+  2. Past optimum, active site shape changes (**denatures** — never say "dies" or "killed").
+  3. Substrate no longer complementary/can no longer bind.`;
+  }
+
+  // Food Tests & Biological Molecules (B4)
+  if (q.includes('food test') || q.includes('benedict') || q.includes('biuret') || q.includes('iodine') || q.includes('ethanol') || q.includes('b4')) {
+    return `### Cambridge 0653 Food Tests Summary (B4)
+1. **Reducing Sugars (e.g. Glucose):** Add Benedict's reagent + heat in water bath (>80°C).
+   - *Result:* Blue ➔ Green ➔ Yellow ➔ Brick-red precipitate.
+2. **Starch:** Add drops of Iodine solution.
+   - *Result:* Orange-brown ➔ Blue-black.
+3. **Proteins:** Add Biuret reagent (dilute NaOH + dilute CuSO₄).
+   - *Result:* Blue ➔ Purple / Violet.
+4. **Fats / Lipids:** Ethanol emulsion test (dissolve in ethanol, pour into water).
+   - *Result:* Clear ➔ Milky / Cloudy white emulsion.`;
+  }
+
+  // Photosynthesis (B6)
   if (q.includes('photosynthesis') || q.includes('b6')) {
     return `### Photosynthesis Summary (Cambridge 0653 B6)
 - **Definition:** Process by which plants synthesise carbohydrates from raw materials using energy from light.
@@ -1606,6 +1770,7 @@ function generateSmartOfflineResponse(query: string, topic?: string, tier?: stri
 - **Exam Tip:** On exams, remember that starch is stored because glucose is soluble and would affect osmotic balance.`;
   }
 
+  // Respiration (B12)
   if (q.includes('respiration') || q.includes('b12')) {
     return `### Aerobic Respiration (Cambridge 0653 B12)
 - **Definition:** Chemical reactions in cells that use oxygen to break down nutrient molecules to release energy for metabolism.
@@ -1620,6 +1785,16 @@ function generateSmartOfflineResponse(query: string, topic?: string, tier?: stri
 - **Site:** Occurs inside the **mitochondria** of cells.`;
   }
 
+  // Plant Transport & Transpiration (B8)
+  if (q.includes('transpiration') || q.includes('xylem') || q.includes('phloem') || q.includes('b8')) {
+    return `### Plant Transport & Transpiration (Cambridge 0653 B8)
+- **Xylem:** Vessels made of dead, hollow, lignified cells that transport water and dissolved mineral ions upward from roots to leaves (one-way).
+- **Phloem:** Sieve tube elements with companion cells that translocate sucrose and amino acids from sources (leaves/storage) to sinks (growing shoots/roots) in both directions.
+- **Transpiration:** Evaporation of water at the surfaces of the mesophyll cells followed by loss of water vapor from plant leaves through stomata.
+- **Factors Increasing Transpiration:** High temperature, high wind speed, high light intensity, low humidity.`;
+  }
+
+  // Electrolysis (C4)
   if (q.includes('electrolysis') || q.includes('c4')) {
     return `### Electrolysis Guidelines (Cambridge 0653 C4)
 - **Definition:** Decomposition of an ionic compound, when molten or in aqueous solution, by the passage of an electric current.
@@ -1638,7 +1813,63 @@ function generateSmartOfflineResponse(query: string, topic?: string, tier?: stri
   - Anode: Oxygen gas (\`O₂\`).`;
   }
 
-  if (q.includes('ohm') || q.includes('resistance') || q.includes('p4')) {
+  // Qualitative Analysis (C12)
+  if (q.includes('qualitative analysis') || q.includes('cation') || q.includes('anion') || q.includes('flame test') || q.includes('c12')) {
+    return `### Qualitative Analysis Notes (Cambridge 0653 C12 / Paper 6)
+- **Flame Tests:**
+  - Lithium (\`Li⁺\`): Red
+  - Sodium (\`Na⁺\`): Yellow
+  - Potassium (\`K⁺\`): Lilac
+  - Copper(II) (\`Cu²⁺\`): Blue-green
+  - Calcium (\`Ca²⁺\`): Orange-red
+- **Cations with Aqueous NaOH and Aqueous NH₃:**
+  - **Aluminium (\`Al³⁺\`):** White precipitate, soluble in excess NaOH giving colorless solution; insoluble in excess NH₃.
+  - **Calcium (\`Ca²⁺\`):** White precipitate with NaOH (insoluble in excess); no precipitate with NH₃.
+  - **Zinc (\`Zn²⁺\`):** White precipitate, soluble in excess NaOH AND soluble in excess NH₃ (gives colorless solution in both).
+  - **Copper(II) (\`Cu²⁺\`):** Light blue precipitate; dissolves in excess NH₃ to form dark blue solution.
+  - **Iron(II) (\`Fe²⁺\`):** Green precipitate, insoluble in excess.
+  - **Iron(III) (\`Fe³⁺\`):** Red-brown precipitate, insoluble in excess.
+  - **Ammonium (\`NH₄⁺\`):** Ammonia gas produced on warming (turns damp red litmus paper blue).
+- **Anions:**
+  - Carbonate (\`CO₃²⁻\`): Add dilute acid ➔ effervescence, \`CO₂\` turns limewater milky.
+  - Halides: Acidify with dilute \`HNO₃\`, add aqueous \`AgNO₃\`:
+    - Chloride (\`Cl⁻\`): White precipitate.
+    - Bromide (\`Br⁻\`): Cream precipitate.
+    - Iodide (\`I⁻\`): Yellow precipitate.
+  - Sulfate (\`SO₄²⁻\`): Acidify with dilute \`HNO₃\`, add aqueous \`Ba(NO₃)₂\` ➔ White precipitate.`;
+  }
+
+  // Periodic Table (C8)
+  if (q.includes('periodic table') || q.includes('group 1') || q.includes('group 7') || q.includes('halogen') || q.includes('c8')) {
+    return `### The Periodic Table (Cambridge 0653 C8)
+- **Group 1 (Alkali Metals):** Li, Na, K.
+  - Soft metals with low densities and low melting points.
+  - Reactivity **increases** down the group (outer electron further from nucleus, less electrostatic attraction, lost more easily).
+  - Reaction with water: Metal + Water ➔ Metal Hydroxide + Hydrogen gas (\`2Na + 2H₂O ➔ 2NaOH + H₂\`).
+- **Group 7 (Halogens):** Cl₂, Br₂, I₂.
+  - Diatomic non-metals.
+  - Reactivity **decreases** down the group.
+  - Colors: Chlorine is pale green gas, Bromine is red-brown liquid, Iodine is grey-black solid (sublimes to purple vapor).
+  - Displacement reactions: A more reactive halogen displaces a less reactive halide from solution (\`Cl₂ + 2KBr ➔ 2KCl + Br₂\`).
+- **Noble Gases (Group 8/0):** He, Ne, Ar. Monatomic, unreactive/inert due to full outer shell of electrons.`;
+  }
+
+  // Metals & Blast Furnace (C9)
+  if (q.includes('blast furnace') || q.includes('iron') || q.includes('reactivity series') || q.includes('rust') || q.includes('c9')) {
+    return `### Metals & Blast Furnace Extraction (Cambridge 0653 C9)
+- **Reactivity Series:** K > Na > Ca > Mg > Al > [Carbon] > Zn > Fe > [Hydrogen] > Cu > Ag > Au.
+- **Blast Furnace Extraction of Iron:**
+  - Raw materials: Iron ore (hematite, \`Fe₂O₃\`), Coke (carbon), Limestone (\`CaCO₃\`), Hot air.
+  - Reaction 1: \`C + O₂ ➔ CO₂\` (exothermic, heats the furnace).
+  - Reaction 2: \`CO₂ + C ➔ 2CO\` (reducing agent formed).
+  - Reaction 3: \`Fe₂O₃ + 3CO ➔ 2Fe + 3CO₂\` (iron ore reduced to molten iron).
+  - Removing impurities: \`CaCO₃ ➔ CaO + CO₂\`, then \`CaO + SiO₂ ➔ CaSiO₃\` (molten slag floats on iron).
+- **Rusting of Iron:** Requires **Water AND Oxygen**.
+  - Prevention: Barrier methods (paint, grease, plastic), Galvanising (coating with zinc), Sacrificial protection (more reactive metal like zinc/magnesium corrodes first).`;
+  }
+
+  // Ohm's Law & Resistance (P4)
+  if (q.includes('ohm') || q.includes('resistance') || q.includes('circuit') || q.includes('p4')) {
     return `### Ohm's Law & Resistance (Cambridge 0653 P4)
 - **Formula:** \`R = V / I\` (Resistance = Potential Difference ÷ Current)
   - Unit of Resistance: Ohms (Ω)
@@ -1650,15 +1881,61 @@ function generateSmartOfflineResponse(query: string, topic?: string, tier?: stri
   - Resistance is inversely proportional to **cross-sectional area** (thicker wire = more paths = lower resistance).
 - **Circuit Rules:**
   - **Series:** \`R_total = R₁ + R₂ + ...\`, Current is the same everywhere.
-  - **Parallel:** \`1/R_total = 1/R₁ + 1/R₂\` (combined resistance is less than the smallest individual branch resistance!).`;
+  - **Parallel:** \`1/R_total = 1/R₁ + 1/R₂\` (combined resistance is less than the smallest individual branch resistance!).
+  - **Electrical Power:** \`P = V × I = I² × R\` (Watts)
+  - **Electrical Energy:** \`E = P × t = V × I × t\` (Joules)`;
+  }
+
+  // Waves & Light (P3)
+  if (q.includes('wave') || q.includes('light') || q.includes('refraction') || q.includes('em spectrum') || q.includes('p3')) {
+    return `### Waves, Light & EM Spectrum (Cambridge 0653 P3)
+- **Wave Equation:** \`v = f × λ\`
+  - Speed (\`v\`, m/s) = Frequency (\`f\`, Hz) × Wavelength (\`λ\`, m).
+- **Transverse vs Longitudinal:**
+  - Transverse: Oscillations perpendicular to direction of energy transfer (light, water waves, all EM waves).
+  - Longitudinal: Oscillations parallel to direction of energy transfer (sound waves, ultrasound).
+- **Electromagnetic Spectrum (Order of increasing frequency / decreasing wavelength):**
+  - Radio waves ➔ Microwaves ➔ Infrared ➔ Visible light (ROYGBIV) ➔ Ultraviolet ➔ X-rays ➔ Gamma rays.
+  - All travel at the speed of light in vacuum (\`3.0 × 10⁸ m/s\`).
+- **Refraction:** Bending of light when passing into denser medium (slows down, bends towards the normal: \`n = sin i / sin r\`).
+- **Total Internal Reflection:** Occurs when light travels from denser to less dense medium at an angle of incidence greater than the critical angle (\`sin c = 1/n\`).`;
+  }
+
+  // Motion, Forces, Energy (P1)
+  if (q.includes('speed') || q.includes('acceleration') || q.includes('newton') || q.includes('density') || q.includes('p1')) {
+    return `### Motion, Forces & Energy (Cambridge 0653 P1)
+- **Key Equations:**
+  - Speed: \`v = s / t\`
+  - Acceleration: \`a = (v - u) / t\`
+  - Weight: \`W = m × g\` (\`g = 9.8 N/kg\` or \`10 N/kg\` on Earth)
+  - Density: \`ρ = m / V\`
+  - Newton's Second Law: \`Resultant Force F = m × a\`
+  - Hooke's Law: \`F = k × x\` (up to the limit of proportionality)
+  - Work Done: \`W = F × d\` (Joules)
+  - Kinetic Energy: \`E_k = 0.5 × m × v²\`
+  - Gravitational Potential Energy: \`ΔE_p = m × g × Δh\`
+  - Power: \`P = W / t = E / t\` (Watts)
+  - Pressure: \`p = F / A\` (Pascals or \`N/m²\`)
+- **Graphs:**
+  - Distance-time graph gradient = **speed**.
+  - Speed-time graph gradient = **acceleration**, area under graph = **distance travelled**.`;
   }
 
   return `### Cambridge IGCSE 0653 Science Tutor Response
-Regarding your question on **"${query}"** in ${topic || 'Combined Science'}:
-1. **Key Concept:** In Cambridge 0653, ensure you distinguish between descriptions (what happens) and explanations (why it happens using particle/biological models).
-2. **Formula & Units:** Always double-check standard units (e.g. mass in kg for physics \`W = mg\` with g = 9.8 N/kg; distance in metres; volumes in cm³ or dm³).
-3. **Core vs Extended:** Extended candidates must recall balanced chemical equations (e.g. photosynthesis, aerobic respiration, extraction of iron), quantitative relationships (\`F = ma\`, \`v = fλ\`, \`P = IV\`), and collision theory explanations.
-Would you like me to generate a practice question or explain a specific slide from this topic?`;
+Regarding your question on **"${query}"** in ${topic || 'Cambridge Combined Science'}:
+
+1. **Syllabus Focus (${tier || 'Extended'} Tier):**
+   - Core tests qualitative understanding, primary definitions, and direct application.
+   - Extended/Supplement requires quantitative equations, balanced chemical formulas, and particle-level mechanisms.
+
+2. **Cambridge Mark Scheme Method:**
+   - Always quote standard formulas before substituting values (\`Formula ➔ Values ➔ Calculation ➔ Final Answer + Units\`).
+   - Use official Cambridge command words accurately: **State** (short fact), **Describe** (what happens), **Explain** (why it happens using scientific reasoning).
+
+3. **Key Terminology:**
+   - Ensure your written responses use precise scientific vocabulary to secure maximum marks.
+
+Feel free to ask for a practice exam question, a model answer with mark schemes, or a step-by-step breakdown of any 0653 subtopic!`;
 }
 
 function generateFallbackSchedule(examDate?: string, dailyHours?: number, weaknesses?: string[], tier?: string) {
