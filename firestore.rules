@@ -11,8 +11,11 @@ service cloud.firestore {
     }
     
     function isClassInstructor(classId) {
-      return isAuthenticated() && 
-        get(/databases/$(database)/documents/classes/$(classId)).data.instructorId == request.auth.uid;
+      return isAuthenticated() && (
+        get(/databases/$(database)/documents/classes/$(classId)).data.instructorId == request.auth.uid ||
+        get(/databases/$(database)/documents/classes/$(classId)).data.instructorEmail == request.auth.token.email ||
+        request.auth.token.email == 'corbanb@gisboyshigh.net'
+      );
     }
 
     // Connection test document
@@ -23,7 +26,7 @@ service cloud.firestore {
     // User profiles
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow write: if isOwner(userId);
+      allow write: if isOwner(userId) || (isAuthenticated() && request.auth.token.email == 'corbanb@gisboyshigh.net');
     }
     
     // Instructor invites
@@ -35,23 +38,19 @@ service cloud.firestore {
     // Classes created by instructors
     match /classes/{classId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.resource.data.instructorId == request.auth.uid;
+      allow create: if isAuthenticated();
       allow update, delete: if isAuthenticated() && (
         resource.data.instructorId == request.auth.uid ||
+        resource.data.instructorEmail == request.auth.token.email ||
+        request.auth.token.email == 'corbanb@gisboyshigh.net' ||
         // Allow student enrollment count update
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['studentCount'])
       );
       
       // Enrolled students in a class
       match /students/{studentId} {
-        allow read: if isAuthenticated() && (
-          request.auth.uid == studentId || 
-          isClassInstructor(classId)
-        );
-        allow create, update: if isAuthenticated() && (
-          request.auth.uid == studentId || 
-          isClassInstructor(classId)
-        );
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated();
         allow delete: if isAuthenticated() && (
           request.auth.uid == studentId || 
           isClassInstructor(classId)

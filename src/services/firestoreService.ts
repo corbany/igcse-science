@@ -434,20 +434,37 @@ export async function createClass(
 /**
  * Fetch all classes created by an instructor
  */
-export async function fetchClassesByInstructor(instructorId: string): Promise<ClassItem[]> {
-  const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, []);
-  const instructorLocal = localClasses.filter(c => c.instructorId === instructorId);
+export async function fetchClassesByInstructor(instructorId: string, instructorEmail?: string): Promise<ClassItem[]> {
+  const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, [DEFAULT_CLASS_ITEM]);
+  const cleanEmail = (instructorEmail || '').toLowerCase().trim();
+  const isPrimary = cleanEmail === 'corbanb@gisboyshigh.net' || instructorId === 'corbanb_instructor';
+
+  const instructorLocal = localClasses.filter(c => 
+    c.instructorId === instructorId || 
+    (cleanEmail && c.instructorEmail?.toLowerCase() === cleanEmail) ||
+    (isPrimary && (c.id === DEFAULT_CLASS_ITEM.id || c.instructorEmail === 'corbanb@gisboyshigh.net'))
+  );
 
   try {
-    const q = query(
-      collection(db, 'classes'),
-      where('instructorId', '==', instructorId)
-    );
-    const snap = await getDocs(q);
+    const snap = await getDocs(collection(db, 'classes'));
     const remoteClasses: ClassItem[] = [];
     snap.forEach(docSnap => {
-      remoteClasses.push(docSnap.data() as ClassItem);
+      const c = docSnap.data() as ClassItem;
+      if (c && c.id) {
+        if (
+          c.instructorId === instructorId || 
+          (cleanEmail && c.instructorEmail?.toLowerCase() === cleanEmail) ||
+          (isPrimary && (c.id === DEFAULT_CLASS_ITEM.id || c.instructorEmail === 'corbanb@gisboyshigh.net'))
+        ) {
+          remoteClasses.push(c);
+        }
+      }
     });
+
+    // Always ensure default class is represented for primary instructor
+    if (isPrimary && !remoteClasses.some(c => c.id === DEFAULT_CLASS_ITEM.id)) {
+      remoteClasses.unshift(DEFAULT_CLASS_ITEM);
+    }
 
     if (remoteClasses.length > 0) {
       // Merge remote with local
@@ -460,6 +477,10 @@ export async function fetchClassesByInstructor(instructorId: string): Promise<Cl
     }
   } catch {
     // Offline mode: return local classes
+  }
+
+  if (isPrimary && !instructorLocal.some(c => c.id === DEFAULT_CLASS_ITEM.id)) {
+    instructorLocal.unshift(DEFAULT_CLASS_ITEM);
   }
 
   return instructorLocal.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -660,32 +681,128 @@ export async function joinClassWithCode(
  */
 export async function fetchStudentEnrolledClasses(studentId: string): Promise<ClassItem[]> {
   const enrolledKey = `${LOCAL_ENROLLED_PREFIX}${studentId}`;
-  const localEnrolled = getLocalItem<ClassItem[]>(enrolledKey, []);
+  const localEnrolled = getLocalItem<ClassItem[]>(enrolledKey, [DEFAULT_CLASS_ITEM]);
 
   try {
     const userRef = doc(db, 'users', studentId);
     const userSnap = await getDoc(userRef);
-    if (userSnap.exists()) {
-      const enrolledIds: string[] = userSnap.data().enrolledClassIds || [];
-      if (enrolledIds.length > 0) {
-        const classes: ClassItem[] = [];
-        for (const classId of enrolledIds) {
-          const classSnap = await getDoc(doc(db, 'classes', classId));
-          if (classSnap.exists()) {
-            classes.push(classSnap.data() as ClassItem);
+    const enrolledIds: string[] = (userSnap.exists() && userSnap.data()?.enrolledClassIds) || [];
+    
+    // Always include DEFAULT_CLASS_ITEM for Cambridge 0653 syllabus
+    if (!enrolledIds.includes(DEFAULT_CLASS_ITEM.id)) {
+      enrolledIds.unshift(DEFAULT_CLASS_ITEM.id);
+    }
+
+    const classes: ClassItem[] = [];
+    for (const classId of enrolledIds) {
+      if (classId === DEFAULT_CLASS_ITEM.id) {
+        classes.push(DEFAULT_CLASS_ITEM);
+        continue;
+      }
+      try {
+        const classSnap = await getDoc(doc(db, 'classes', classId));
+        if (classSnap.exists()) {
+          classes.push(classSnap.data() as ClassItem);
+        }
+      } catch {}
+    }
+
+    // Also check if student exists in any class's students subcollection
+    try {
+      const allClassSnap = await getDocs(collection(db, 'classes'));
+      for (const cd of allClassSnap.docs) {
+        if (!classes.some(c => c.id === cd.id)) {
+          const studentDoc = await getDoc(doc(db, 'classes', cd.id, 'students', studentId));
+          if (studentDoc.exists()) {
+            classes.push(cd.data() as ClassItem);
           }
         }
-        if (classes.length > 0) {
-          setLocalItem(enrolledKey, classes);
-          return classes;
-        }
       }
+    } catch {}
+
+    if (classes.length > 0) {
+      setLocalItem(enrolledKey, classes);
+      return classes;
     }
   } catch {
     // Offline mode: return local enrolled classes
   }
 
+  if (!localEnrolled.some(c => c.id === DEFAULT_CLASS_ITEM.id)) {
+    localEnrolled.unshift(DEFAULT_CLASS_ITEM);
+  }
   return localEnrolled;
+}
+
+/**
+ * Fetch all registered students on the platform across users collection and class rosters
+ */
+export async function fetchAllRegisteredStudents(): Promise<ClassStudentItem[]> {
+  const studentMap = new Map<string, ClassStudentItem>();
+
+  // 1. Fetch from users collection where role is 'student'
+  try {
+    const usersSnap = await getDocs(collection(db, 'users'));
+    usersSnap.forEach(d => {
+      const data = d.data();
+      if (data && (data.role === 'student' || (!data.role && data.email !== 'corbanb@gisboyshigh.net'))) {
+        const studentId = d.id;
+        studentMap.set(studentId, {
+          studentId,
+          name: data.name || 'Student',
+          email: data.email || '',
+          tier: data.tier || 'Extended',
+          joinedAt: data.createdAt || new Date().toISOString(),
+          lastActive: data.lastActive || new Date().toISOString(),
+          completedLessonsCount: 0,
+          quizScores: {},
+          subtopicQuizScores: {},
+          topicConfidence: {},
+          trafficLights: {},
+          weakTopics: []
+        });
+      }
+    });
+  } catch (err) {
+    console.warn('Could not read users collection for student list:', err);
+  }
+
+  // 2. Fetch from all classes students subcollections
+  try {
+    const classesSnap = await getDocs(collection(db, 'classes'));
+    for (const classDoc of classesSnap.docs) {
+      const classId = classDoc.id;
+      const classStudents = await fetchStudentsInClass(classId);
+      for (const s of classStudents) {
+        if (!studentMap.has(s.studentId)) {
+          studentMap.set(s.studentId, s);
+        } else {
+          const existing = studentMap.get(s.studentId)!;
+          studentMap.set(s.studentId, {
+            ...existing,
+            ...s,
+            email: s.email || existing.email
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Could not read classes subcollections:', err);
+  }
+
+  // 3. Fallback to local storage cached students
+  const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, [DEFAULT_CLASS_ITEM]);
+  for (const c of localClasses) {
+    const studentKey = `${LOCAL_STUDENTS_PREFIX}${c.id}`;
+    const localClassStudents = getLocalItem<ClassStudentItem[]>(studentKey, []);
+    for (const s of localClassStudents) {
+      if (!studentMap.has(s.studentId)) {
+        studentMap.set(s.studentId, s);
+      }
+    }
+  }
+
+  return Array.from(studentMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -705,6 +822,15 @@ export async function fetchStudentsInClass(classId: string): Promise<ClassStuden
     if (remoteList.length > 0) {
       setLocalItem(studentKey, remoteList);
       return remoteList.sort((a, b) => b.lastActive.localeCompare(a.lastActive));
+    }
+
+    // If default class has no students in subcollection, query all registered students
+    if (classId === DEFAULT_CLASS_ITEM.id || classId === 'class_default_0653') {
+      const allReg = await fetchAllRegisteredStudents();
+      if (allReg.length > 0) {
+        setLocalItem(studentKey, allReg);
+        return allReg;
+      }
     }
   } catch {
     // Offline mode: return local students
