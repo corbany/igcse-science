@@ -24,7 +24,9 @@ import {
   Bell,
   Layers,
   CheckSquare,
-  Mail
+  Mail,
+  Copy,
+  ExternalLink
 } from 'lucide-react';
 import { 
   ClassTask, 
@@ -112,6 +114,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
   const [taskSubmissions, setTaskSubmissions] = useState<Record<string, TaskSubmission[]>>({});
   const [loadingSubmissions, setLoadingSubmissions] = useState<Record<string, boolean>>({});
   const [sendingEmailTaskId, setSendingEmailTaskId] = useState<string | null>(null);
+  const [copiedLinkTaskId, setCopiedLinkTaskId] = useState<string | null>(null);
 
   // Unique topics across allSubtopicsData for dropdown filtering
   const uniqueTopics = useMemo(() => {
@@ -433,14 +436,30 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
       }
 
       const sentCount = await notifyStudentsOfTaskAssignment(task, recipients);
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
       setFeedbackNotice({
         type: 'success',
-        text: `📧 Dispatched task email notifications to ${sentCount || recipients.length} student${(sentCount || recipients.length) !== 1 ? 's' : ''}!`
+        text: `📧 Dispatched task email notifications to ${sentCount || recipients.length} student${(sentCount || recipients.length) !== 1 ? 's' : ''} with portal link (${origin || 'Portal'})!`
       });
     } catch (err: any) {
       setFeedbackNotice({ type: 'error', text: 'Failed to dispatch email notifications.' });
     } finally {
       setSendingEmailTaskId(null);
+    }
+  };
+
+  const handleCopyStudentLink = (task: ClassTask, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://ais-dev-fezihukeplecjbhmw6fblt-840997730911.asia-southeast1.run.app';
+    const link = `${origin}/?tab=assignments&taskId=${encodeURIComponent(task.id)}`;
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(link);
+      setCopiedLinkTaskId(task.id);
+      setTimeout(() => setCopiedLinkTaskId(null), 2500);
+      setFeedbackNotice({
+        type: 'success',
+        text: `📋 Copied student task link: ${link}`
+      });
     }
   };
 
@@ -847,6 +866,24 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                             <Mail className="w-3.5 h-3.5 text-purple-400" />
                           )}
                           <span>{sendingEmailTaskId === task.id ? 'Sending...' : 'Email Students'}</span>
+                        </button>
+
+                        <button
+                          onClick={e => handleCopyStudentLink(task, e)}
+                          title="Copy direct link for students to access this task in the portal"
+                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-semibold transition flex items-center gap-1.5"
+                        >
+                          {copiedLinkTaskId === task.id ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              <span className="text-emerald-300">Link Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5 text-slate-400" />
+                              <span>Copy Student Link</span>
+                            </>
+                          )}
                         </button>
 
                         <button

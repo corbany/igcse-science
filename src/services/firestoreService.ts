@@ -978,12 +978,15 @@ export async function notifyStudentsOfTaskAssignment(
       return 0;
     }
 
+    const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+
     const res = await fetch('/api/notify-task-assigned', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         recipients,
-        task
+        task,
+        portalUrl: currentOrigin
       })
     });
 

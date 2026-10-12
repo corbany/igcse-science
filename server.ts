@@ -260,7 +260,8 @@ app.post('/api/notify-task-assigned', async (req, res) => {
   try {
     const { 
       recipients = [], // Array of { studentId, studentName, studentEmail }
-      task = {} // { id, title, description, type, targetSubtopics, dueDate, className, instructorName, instructorEmail }
+      task = {}, // { id, title, description, type, targetSubtopics, dueDate, className, instructorName, instructorEmail }
+      portalUrl: clientPortalUrl
     } = req.body;
 
     if (!Array.isArray(recipients) || recipients.length === 0) {
@@ -270,6 +271,18 @@ app.post('/api/notify-task-assigned', async (req, res) => {
     if (!task.title) {
       return res.status(400).json({ error: 'Task title is required' });
     }
+
+    // Determine the active, working portal URL for students:
+    // Prioritize: 1. Client browser origin sent by instructor, 2. process.env.APP_URL, 3. Origin/Referer headers, 4. Dev Cloud Run fallback
+    const effectivePortalUrl = (
+      clientPortalUrl ||
+      process.env.APP_URL ||
+      (req.headers.origin && !req.headers.origin.includes('localhost') ? req.headers.origin : null) ||
+      (req.headers.referer && !req.headers.referer.includes('localhost') ? new URL(req.headers.referer).origin : null) ||
+      'https://ais-dev-fezihukeplecjbhmw6fblt-840997730911.asia-southeast1.run.app'
+    ).toString().replace(/\/$/, '');
+
+    const taskPortalLink = `${effectivePortalUrl}/?tab=assignments`;
 
     const dueDateFormatted = task.dueDate 
       ? new Date(task.dueDate).toLocaleString('en-US', {
@@ -374,10 +387,15 @@ app.post('/api/notify-task-assigned', async (req, res) => {
               </div>
             ` : ''}
 
-            <div style="text-align: center; margin-top: 20px;">
-              <a href="https://ais-pre-fezihukeplecjbhmw6fblt-840997730911.asia-southeast1.run.app" style="display: inline-block; background: linear-gradient(135deg, #9333ea, #7c3aed); color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 12px 28px; border-radius: 10px; box-shadow: 0 4px 12px rgba(147, 51, 234, 0.4);">
+            <div style="text-align: center; margin-top: 22px;">
+              <a href="${taskPortalLink}" style="display: inline-block; background: linear-gradient(135deg, #9333ea, #7c3aed); color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 12px 28px; border-radius: 10px; box-shadow: 0 4px 12px rgba(147, 51, 234, 0.4);">
                 Open Task in Portal →
               </a>
+            </div>
+            <div style="text-align: center; margin-top: 10px;">
+              <p style="font-size: 11px; color: #94a3b8; margin: 0; word-break: break-all;">
+                Direct link: <a href="${taskPortalLink}" style="color: #38bdf8; text-decoration: underline;">${taskPortalLink}</a>
+              </p>
             </div>
           </div>
 
@@ -402,7 +420,7 @@ Due Date: ${dueDateFormatted}
 ${task.description ? `\nInstructions:\n${task.description}\n` : ''}
 
 Log into your Cambridge IGCSE Combined Science Portal to open your slides, mark your traffic lights, and complete your quiz challenge:
-https://ais-pre-fezihukeplecjbhmw6fblt-840997730911.asia-southeast1.run.app
+${taskPortalLink}
 `;
 
       let delivered = false;

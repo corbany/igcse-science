@@ -46,10 +46,35 @@ const defaultProgress: StudentProgress = {
 };
 
 export default function App() {
-  // Navigation & filter state
-  const [currentTab, setCurrentTab] = useState<string>('lessons');
+  // Navigation & filter state (supports ?tab=assignments direct links from student task notification emails)
+  const [currentTab, setCurrentTab] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const tabParam = params.get('tab');
+        if (tabParam) return tabParam;
+      } catch (e) {
+        // ignore
+      }
+    }
+    return 'lessons';
+  });
   const [selectedSubject, setSelectedSubject] = useState<ScienceSubject | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Auto-switch tab if URL query parameter changes
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      if (tabParam && tabParam !== currentTab) {
+        setCurrentTab(tabParam);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
 
   // Global Theme state (Light / Dark mode)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
