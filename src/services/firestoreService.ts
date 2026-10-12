@@ -8,7 +8,8 @@ import {
   getDocs, 
   query, 
   where,
-  increment
+  increment,
+  onSnapshot
 } from 'firebase/firestore';
 import { db } from './firebaseAuth';
 import { UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, ScienceSubject, ExamTier, ClassTask, TaskSubmission, TaskWithSubmission, TaskProgressStatus } from '../types';
@@ -1216,6 +1217,12 @@ export async function updateTaskSubmission(
     console.warn('Offline: Saved task submission locally.', err);
   }
 
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('igcse_task_submission_updated', {
+      detail: { taskId, studentId, status: updated.status }
+    }));
+  }
+
   return updated;
 }
 
@@ -1367,3 +1374,205 @@ export async function autoCheckTaskCompletion(
     console.warn('Auto task check error:', err);
   }
 }
+
+/**
+ * Subscribes to real-time updates for class tasks.
+ * Updates immediately when tasks are added, modified, or deleted.
+ */
+export function subscribeToClassTasks(
+  classId: string | undefined,
+  instructorId: string | undefined,
+  callback: (tasks: ClassTask[]) => void
+): () => void {
+  // Initial fire from local cache
+  fetchClassTasks(classId, instructorId).then(callback).catch(() => {});
+
+  let unsubFirestore: (() => void) | null = null;
+  try {
+    const tasksCol = collection(db, 'tasks');
+    unsubFirestore = onSnapshot(tasksCol, (snap) => {
+      const firestoreTasks: ClassTask[] = [];
+      snap.forEach(d => {
+        const data = d.data() as ClassTask;
+        if (data && data.id) firestoreTasks.push(data);
+      });
+
+      const localTasks = getLocalItem<ClassTask[]>(LOCAL_TASKS_KEY, []);
+      const mergedMap = new Map<string, ClassTask>();
+      localTasks.forEach(t => mergedMap.set(t.id, t));
+      firestoreTasks.forEach(t => mergedMap.set(t.id, t));
+      const combined = Array.from(mergedMap.values());
+      setLocalItem(LOCAL_TASKS_KEY, combined);
+
+      let filtered = combined;
+      if (classId && classId !== 'all') {
+        filtered = filtered.filter(t => t.classId === classId || t.classId === 'all');
+      }
+      if (instructorId) {
+        filtered = filtered.filter(t => t.instructorId === instructorId);
+      }
+      callback(filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+    }, (err) => {
+      console.warn('Tasks onSnapshot error, falling back to local:', err);
+    });
+  } catch {
+    // Offline
+  }
+
+  // Also listen for local custom events (cross-tab / in-window updates)
+  const handleLocalUpdate = () => {
+    fetchClassTasks(classId, instructorId).then(callback).catch(() => {});
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('igcse_task_submission_updated', handleLocalUpdate);
+    window.addEventListener('storage', handleLocalUpdate);
+  }
+
+  return () => {
+    if (unsubFirestore) unsubFirestore();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('igcse_task_submission_updated', handleLocalUpdate);
+      window.removeEventListener('storage', handleLocalUpdate);
+    }
+  };
+}
+
+/**
+ * Subscribes to real-time task submissions for an instructor reviewing a specific task.
+ * Automatically updates live as students complete the task content!
+ */
+export function subscribeToTaskSubmissions(
+  taskId: string,
+  classId: string | undefined,
+  callback: (submissions: TaskSubmission[]) => void
+): () => void {
+  // Initial fire
+  fetchTaskSubmissions(taskId, classId).then(callback).catch(() => {});
+
+  let unsubFirestore: (() => void) | null = null;
+  try {
+    const subCol = collection(db, 'tasks', taskId, 'submissions');
+    unsubFirestore = onSnapshot(subCol, () => {
+      fetchTaskSubmissions(taskId, classId).then(callback).catch(() => {});
+    }, (err) => {
+      console.warn('Submissions onSnapshot error:', err);
+    });
+  } catch {
+    // Offline
+  }
+
+  const handleLocalUpdate = () => {
+    fetchTaskSubmissions(taskId, classId).then(callback).catch(() => {});
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('igcse_task_submission_updated', handleLocalUpdate);
+  }
+
+  return () => {
+    if (unsubFirestore) unsubFirestore();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('igcse_task_submission_updated', handleLocalUpdate);
+    }
+  };
+}
+
+/**
+ * Subscribes to real-time student roster and quiz results for a class.
+ * Automatically updates live as students complete quizzes and update progress!
+ */
+export function subscribeToClassStudents(
+  classId: string,
+  callback: (students: ClassStudentItem[]) => void
+): () => void {
+  // Initial fire
+  fetchStudentsInClass(classId).then(callback).catch(() => {});
+
+  let unsubFirestore: (() => void) | null = null;
+  try {
+    const studentsCol = collection(db, 'classes', classId, 'students');
+    unsubFirestore = onSnapshot(studentsCol, (snap) => {
+      const studentKey = `${LOCAL_STUDENTS_PREFIX}${classId}`;
+      const localStudents = getLocalItem<ClassStudentItem[]>(studentKey, []);
+      const map = new Map<string, ClassStudentItem>();
+      localStudents.forEach(s => map.set(s.studentId, s));
+
+      snap.forEach(d => {
+        const data = d.data() as ClassStudentItem;
+        if (data && data.studentId) {
+          map.set(data.studentId, data);
+        }
+      });
+
+      const updated = Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+      setLocalItem(studentKey, updated);
+      callback(updated);
+    }, (err) => {
+      console.warn('Class students onSnapshot error:', err);
+    });
+  } catch {
+    // Offline
+  }
+
+  const handleLocalUpdate = () => {
+    fetchStudentsInClass(classId).then(callback).catch(() => {});
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('igcse_task_submission_updated', handleLocalUpdate);
+    window.addEventListener('storage', handleLocalUpdate);
+  }
+
+  return () => {
+    if (unsubFirestore) unsubFirestore();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('igcse_task_submission_updated', handleLocalUpdate);
+      window.removeEventListener('storage', handleLocalUpdate);
+    }
+  };
+}
+
+/**
+ * Subscribes to real-time tasks for a student.
+ * Updates live as assignments are set or completed.
+ */
+export function subscribeToStudentTasks(
+  student: UserProfile,
+  enrolledClassIds: string[],
+  studentProgress: StudentProgress | undefined,
+  callback: (tasks: TaskWithSubmission[]) => void
+): () => void {
+  // Initial fire
+  fetchTasksForStudent(student, enrolledClassIds, studentProgress).then(callback).catch(() => {});
+
+  let unsubFirestore: (() => void) | null = null;
+  try {
+    const tasksCol = collection(db, 'tasks');
+    unsubFirestore = onSnapshot(tasksCol, () => {
+      fetchTasksForStudent(student, enrolledClassIds, studentProgress).then(callback).catch(() => {});
+    }, (err) => {
+      console.warn('Student tasks onSnapshot error:', err);
+    });
+  } catch {
+    // Offline
+  }
+
+  const handleLocalUpdate = () => {
+    fetchTasksForStudent(student, enrolledClassIds, studentProgress).then(callback).catch(() => {});
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('igcse_task_submission_updated', handleLocalUpdate);
+    window.addEventListener('storage', handleLocalUpdate);
+  }
+
+  return () => {
+    if (unsubFirestore) unsubFirestore();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('igcse_task_submission_updated', handleLocalUpdate);
+      window.removeEventListener('storage', handleLocalUpdate);
+    }
+  };
+}
+

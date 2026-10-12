@@ -32,6 +32,7 @@ import {
   ArrowRight,
   ShieldCheck,
   CheckCircle2,
+  AlertCircle,
   UserCheck,
   Calendar,
   X
@@ -68,8 +69,10 @@ import {
   inviteInstructor, 
   fetchInstructorInvites, 
   deleteInstructorInvite,
-  INITIAL_INSTRUCTOR_EMAILS
+  INITIAL_INSTRUCTOR_EMAILS,
+  subscribeToClassStudents
 } from '../services/firestoreService';
+import { allSubtopicsData } from '../data/subtopicSlidesData';
 import { UserProfile, ScienceSubject } from '../types';
 
 interface StudentRosterItem {
@@ -111,6 +114,10 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   const [loadingStudents, setLoadingStudents] = useState<boolean>(false);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
+  // Student individual analysis modal state
+  const [selectedStudentForAnalysis, setSelectedStudentForAnalysis] = useState<ClassStudentItem | null>(null);
+  const [analysisSubjectFilter, setAnalysisSubjectFilter] = useState<'all' | 'biology' | 'chemistry' | 'physics'>('all');
+
   // Create class modal state
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [newClassName, setNewClassName] = useState<string>('');
@@ -139,28 +146,24 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
     loadInstructorClasses();
   }, [currentUser.id]);
 
-  // Load students for selected class
+  // Real-time live subscription for students in selected class
   useEffect(() => {
-    let isMounted = true;
-    async function loadStudents() {
-      if (!selectedClass) {
-        setClassStudents([]);
-        return;
-      }
-      setLoadingStudents(true);
-      try {
-        const students = await fetchStudentsInClass(selectedClass.id);
-        if (isMounted) {
-          setClassStudents(students);
-        }
-      } catch (err) {
-        console.error('Failed to load students in class:', err);
-      } finally {
-        if (isMounted) setLoadingStudents(false);
-      }
+    if (!selectedClass) {
+      setClassStudents([]);
+      return;
     }
-    loadStudents();
-    return () => { isMounted = false; };
+    setLoadingStudents(true);
+    const unsubscribe = subscribeToClassStudents(selectedClass.id, (liveStudents) => {
+      setClassStudents(liveStudents);
+      setLoadingStudents(false);
+      // If student analysis modal is open, keep student object in sync
+      setSelectedStudentForAnalysis(current => {
+        if (!current) return null;
+        return liveStudents.find(s => s.studentId === current.studentId) || current;
+      });
+    });
+
+    return () => unsubscribe();
   }, [selectedClass?.id]);
 
   const handleCreateClass = async (e: React.FormEvent) => {
@@ -845,8 +848,17 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                               return (
                                 <tr key={std.studentId} className="hover:bg-slate-800/40 transition">
                                   <td className="p-3">
-                                    <div className="font-semibold text-white">{std.name}</div>
-                                    <div className="text-[10px] text-slate-400 font-mono">{std.email}</div>
+                                    <button
+                                      onClick={() => setSelectedStudentForAnalysis(std)}
+                                      className="text-left group/std hover:opacity-90 transition"
+                                      title="Click to view detailed quiz results & syllabus analysis"
+                                    >
+                                      <div className="font-semibold text-white group-hover/std:text-purple-300 flex items-center gap-1.5">
+                                        <span>{std.name}</span>
+                                        <Eye className="w-3 h-3 text-purple-400 opacity-0 group-hover/std:opacity-100 transition" />
+                                      </div>
+                                      <div className="text-[10px] text-slate-400 font-mono">{std.email}</div>
+                                    </button>
                                   </td>
                                   <td className="p-3">
                                     <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
@@ -887,13 +899,23 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                                     {std.lastActive ? new Date(std.lastActive).toLocaleDateString() : 'Recently'}
                                   </td>
                                   <td className="p-3">
-                                    <button
-                                      onClick={() => handleRemoveStudent(std.studentId, std.name)}
-                                      className="p-1 text-slate-500 hover:text-rose-400 transition"
-                                      title="Remove from class"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        onClick={() => setSelectedStudentForAnalysis(std)}
+                                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 border border-purple-500/30 text-[11px] font-bold transition"
+                                        title="View individual practice quiz results & syllabus analysis"
+                                      >
+                                        <Eye className="w-3 h-3 text-purple-400" />
+                                        <span>Analysis</span>
+                                      </button>
+                                      <button
+                                        onClick={() => handleRemoveStudent(std.studentId, std.name)}
+                                        className="p-1 text-slate-500 hover:text-rose-400 transition"
+                                        title="Remove from class"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               );
@@ -1210,7 +1232,40 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
 
                       return (
                         <tr key={std.id} className="hover:bg-slate-800/40 transition">
-                          <td className="p-3 font-semibold text-white">{std.name}</td>
+                          <td className="p-3">
+                            <button
+                              onClick={() => {
+                                const found = classStudents.find(cs => cs.studentId === std.id);
+                                if (found) {
+                                  setSelectedStudentForAnalysis(found);
+                                } else {
+                                  setSelectedStudentForAnalysis({
+                                    studentId: std.id,
+                                    name: std.name,
+                                    email: '',
+                                    tier: std.tier,
+                                    joinedAt: '',
+                                    lastActive: '',
+                                    completedLessonsCount: Math.round((std.progressPct / 100) * 33),
+                                    quizScores: {
+                                      biology: { score: std.bioScore, total: 100, date: '' },
+                                      chemistry: { score: std.chemScore, total: 100, date: '' },
+                                      physics: { score: std.physScore, total: 100, date: '' }
+                                    },
+                                    subtopicQuizScores: {},
+                                    topicConfidence: {},
+                                    trafficLights: {},
+                                    weakTopics: std.weakArea !== 'None identified' ? std.weakArea.split(', ') : []
+                                  });
+                                }
+                              }}
+                              className="text-left font-semibold text-white hover:text-purple-300 flex items-center gap-1.5 transition group/name"
+                              title="Click to view student's individual practice quiz results"
+                            >
+                              <span>{std.name}</span>
+                              <Eye className="w-3 h-3 text-purple-400 opacity-0 group-hover/name:opacity-100 transition" />
+                            </button>
+                          </td>
                           <td className="p-3">
                             <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
                               std.tier === 'Extended' ? 'bg-amber-500/20 text-amber-300' : 'bg-blue-500/20 text-blue-300'
@@ -1229,12 +1284,46 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                             </span>
                           </td>
                           <td className="p-3">
-                            <button
-                              onClick={() => handleSendReminder(std.name)}
-                              className="text-[11px] px-2.5 py-1 bg-purple-600/30 text-purple-300 border border-purple-500/40 rounded hover:bg-purple-600/50 transition font-medium"
-                            >
-                              Nudge / Assign
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => {
+                                  const found = classStudents.find(cs => cs.studentId === std.id);
+                                  if (found) {
+                                    setSelectedStudentForAnalysis(found);
+                                  } else {
+                                    setSelectedStudentForAnalysis({
+                                      studentId: std.id,
+                                      name: std.name,
+                                      email: '',
+                                      tier: std.tier,
+                                      joinedAt: '',
+                                      lastActive: '',
+                                      completedLessonsCount: Math.round((std.progressPct / 100) * 33),
+                                      quizScores: {
+                                        biology: { score: std.bioScore, total: 100, date: '' },
+                                        chemistry: { score: std.chemScore, total: 100, date: '' },
+                                        physics: { score: std.physScore, total: 100, date: '' }
+                                      },
+                                      subtopicQuizScores: {},
+                                      topicConfidence: {},
+                                      trafficLights: {},
+                                      weakTopics: std.weakArea !== 'None identified' ? std.weakArea.split(', ') : []
+                                    });
+                                  }
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-600/25 hover:bg-purple-600/45 text-purple-300 border border-purple-500/30 text-[11px] font-bold transition"
+                                title="View individual practice quiz results"
+                              >
+                                <Eye className="w-3 h-3 text-purple-400" />
+                                <span>Analysis</span>
+                              </button>
+                              <button
+                                onClick={() => handleSendReminder(std.name)}
+                                className="text-[11px] px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded transition font-medium"
+                              >
+                                Nudge
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1577,6 +1666,346 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
           </div>
         </div>
       )}
+
+      {/* ============================================================= */}
+      {/* MODAL: INDIVIDUAL STUDENT ANALYSIS & QUIZ RESULTS             */}
+      {/* ============================================================= */}
+      {selectedStudentForAnalysis && (() => {
+        // Prepare list of subtopic practice quizzes
+        const subtopicQuizzes = Object.entries(selectedStudentForAnalysis.subtopicQuizScores || {}).map(([code, res]) => {
+          const subInfo = allSubtopicsData.find(s => s.subtopicCode.toLowerCase() === code.toLowerCase());
+          const pct = typeof res.percentage === 'number' ? res.percentage : (res.total > 0 ? Math.round((res.score / res.total) * 100) : 0);
+          return {
+            id: `sub-${code}`,
+            code: code.toUpperCase(),
+            title: subInfo ? subInfo.title : `Subtopic ${code}`,
+            subject: subInfo ? subInfo.subject : (code.toUpperCase().startsWith('B') ? 'biology' : code.toUpperCase().startsWith('C') ? 'chemistry' : 'physics'),
+            score: res.score,
+            total: res.total,
+            percentage: pct,
+            passed: res.passed ?? (pct >= 80),
+            date: res.date
+          };
+        });
+
+        // Prepare subject-level arena quiz scores
+        const subjectQuizzes = Object.entries(selectedStudentForAnalysis.quizScores || {}).map(([subKey, res]) => {
+          const pct = res.total > 0 ? Math.round((res.score / res.total) * 100) : 0;
+          return {
+            id: `arena-${subKey}`,
+            code: subKey.toUpperCase().slice(0, 4),
+            title: `${subKey.charAt(0).toUpperCase() + subKey.slice(1)} Arena Checkpoint Quiz`,
+            subject: subKey.toLowerCase() as ScienceSubject,
+            score: res.score,
+            total: res.total,
+            percentage: pct,
+            passed: pct >= 80,
+            date: res.date
+          };
+        });
+
+        const allQuizzes = [...subtopicQuizzes, ...subjectQuizzes];
+        const filteredQuizzes = allQuizzes.filter(q => {
+          if (analysisSubjectFilter === 'all') return true;
+          return q.subject === analysisSubjectFilter;
+        });
+
+        // Summary calculations
+        const totalQuizzes = allQuizzes.length;
+        const avgQuizScore = totalQuizzes > 0
+          ? Math.round(allQuizzes.reduce((acc, q) => acc + q.percentage, 0) / totalQuizzes)
+          : 0;
+        const passedQuizzes = allQuizzes.filter(q => q.passed).length;
+        const passRate = totalQuizzes > 0 ? Math.round((passedQuizzes / totalQuizzes) * 100) : 0;
+
+        // Traffic lights count
+        const trafficLights = selectedStudentForAnalysis.trafficLights || {};
+        const redLights = Object.entries(trafficLights).filter(([, v]) => v === 'red');
+        const orangeLights = Object.entries(trafficLights).filter(([, v]) => v === 'orange');
+        const greenLights = Object.entries(trafficLights).filter(([, v]) => v === 'green');
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in">
+            <div className="bg-slate-900 border border-purple-500/40 rounded-3xl max-w-4xl w-full max-h-[92vh] overflow-y-auto shadow-2xl p-6 sm:p-8 space-y-6 text-slate-100">
+              {/* Modal Header */}
+              <div className="flex items-start justify-between gap-4 pb-4 border-b border-slate-800">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-purple-600/25 shrink-0">
+                    {selectedStudentForAnalysis.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-xl font-bold text-white">{selectedStudentForAnalysis.name}</h3>
+                      <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
+                        selectedStudentForAnalysis.tier === 'Extended' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                      }`}>
+                        {selectedStudentForAnalysis.tier} Tier
+                      </span>
+                      <span className="text-xs text-slate-400 font-mono">
+                        {selectedStudentForAnalysis.email || 'Student Email'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Individual Performance Diagnostic • Last Active: {selectedStudentForAnalysis.lastActive ? new Date(selectedStudentForAnalysis.lastActive).toLocaleDateString() : 'Recently'}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setSelectedStudentForAnalysis(null)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Top KPI Metrics Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3.5">
+                  <div className="text-[11px] text-slate-400 font-medium">Practice Quizzes Taken</div>
+                  <div className="text-2xl font-bold font-mono text-purple-400 mt-1">{totalQuizzes}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">Completed checkpoints</div>
+                </div>
+
+                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3.5">
+                  <div className="text-[11px] text-slate-400 font-medium">Average Quiz Score</div>
+                  <div className={`text-2xl font-bold font-mono mt-1 ${
+                    avgQuizScore >= 80 ? 'text-emerald-400' : avgQuizScore >= 60 ? 'text-amber-400' : 'text-rose-400'
+                  }`}>
+                    {avgQuizScore}%
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">Across all science topics</div>
+                </div>
+
+                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3.5">
+                  <div className="text-[11px] text-slate-400 font-medium">Green Light Pass Rate</div>
+                  <div className="text-2xl font-bold font-mono text-emerald-400 mt-1">{passRate}%</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{passedQuizzes} of {totalQuizzes} passed (≥80%)</div>
+                </div>
+
+                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3.5">
+                  <div className="text-[11px] text-slate-400 font-medium">Lessons Mastered</div>
+                  <div className="text-2xl font-bold font-mono text-sky-400 mt-1">
+                    {selectedStudentForAnalysis.completedLessonsCount || 0} <span className="text-xs font-normal text-slate-400">/ 33</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">Syllabus slide decks</div>
+                </div>
+              </div>
+
+              {/* INDIVIDUAL PRACTICE QUIZ RESULTS SECTION */}
+              <div className="space-y-4 bg-slate-950/40 border border-slate-800 rounded-2xl p-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Award className="w-4 h-4 text-purple-400" />
+                      <span>Individual Practice Quiz Results ({filteredQuizzes.length})</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Live record of every practice quiz completed by this student.
+                    </p>
+                  </div>
+
+                  {/* Subject Filter Pills */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      onClick={() => setAnalysisSubjectFilter('all')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                        analysisSubjectFilter === 'all'
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      All ({allQuizzes.length})
+                    </button>
+                    <button
+                      onClick={() => setAnalysisSubjectFilter('biology')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                        analysisSubjectFilter === 'biology'
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Biology ({allQuizzes.filter(q => q.subject === 'biology').length})
+                    </button>
+                    <button
+                      onClick={() => setAnalysisSubjectFilter('chemistry')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                        analysisSubjectFilter === 'chemistry'
+                          ? 'bg-sky-600 text-white'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Chemistry ({allQuizzes.filter(q => q.subject === 'chemistry').length})
+                    </button>
+                    <button
+                      onClick={() => setAnalysisSubjectFilter('physics')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                        analysisSubjectFilter === 'physics'
+                          ? 'bg-amber-600 text-white'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Physics ({allQuizzes.filter(q => q.subject === 'physics').length})
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quizzes List or Empty State */}
+                {filteredQuizzes.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-900/60 border border-dashed border-slate-800 rounded-xl space-y-2">
+                    <Award className="w-8 h-8 text-slate-600 mx-auto" />
+                    <p className="text-xs font-semibold text-slate-300">No practice quizzes completed yet</p>
+                    <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                      {selectedStudentForAnalysis.name} has not finished any quizzes in this category. You can set a practice quiz task using the button below.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-800">
+                    <table className="min-w-full text-xs text-left text-slate-200">
+                      <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800 font-semibold">
+                        <tr>
+                          <th className="p-3">Topic / Quiz</th>
+                          <th className="p-3">Subject</th>
+                          <th className="p-3">Score</th>
+                          <th className="p-3">Percentage</th>
+                          <th className="p-3">Result</th>
+                          <th className="p-3">Date Completed</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/80 bg-slate-900/40">
+                        {filteredQuizzes.map(quiz => {
+                          const subjectColor = quiz.subject === 'biology' 
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                            : quiz.subject === 'chemistry'
+                              ? 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+                              : 'bg-amber-500/20 text-amber-300 border-amber-500/30';
+
+                          return (
+                            <tr key={quiz.id} className="hover:bg-slate-800/40 transition">
+                              <td className="p-3">
+                                <div className="font-semibold text-white flex items-center gap-2">
+                                  <span className="font-mono text-purple-400 font-bold">{quiz.code}</span>
+                                  <span>{quiz.title}</span>
+                                </div>
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded capitalize font-medium text-[10px] border ${subjectColor}`}>
+                                  {quiz.subject}
+                                </span>
+                              </td>
+                              <td className="p-3 font-mono font-bold text-white">
+                                {quiz.score} / {quiz.total}
+                              </td>
+                              <td className="p-3 font-mono font-bold">
+                                <span className={
+                                  quiz.percentage >= 80 ? 'text-emerald-400' : quiz.percentage >= 60 ? 'text-amber-400' : 'text-rose-400'
+                                }>
+                                  {quiz.percentage}%
+                                </span>
+                              </td>
+                              <td className="p-3">
+                                {quiz.passed ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                    <span>Green Light (Passed)</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                    <AlertCircle className="w-3 h-3 text-rose-400" />
+                                    <span>Needs Review</span>
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3 text-slate-400 text-[11px] font-mono">
+                                {quiz.date ? new Date(quiz.date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recorded'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* TRAFFIC LIGHT STATUS & WEAK AREAS */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Traffic Light Ratings */}
+                <div className="p-4 rounded-2xl bg-slate-950/40 border border-slate-800 space-y-3">
+                  <h4 className="text-xs font-bold text-white flex items-center justify-between">
+                    <span>Self-Rated Traffic Lights</span>
+                    <span className="text-[10px] text-slate-400">{Object.keys(trafficLights).length} rated</span>
+                  </h4>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-center">
+                      <div className="text-lg font-bold text-emerald-400 font-mono">{greenLights.length}</div>
+                      <div className="text-[10px] text-emerald-300/80 font-medium">Green (Confident)</div>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-center">
+                      <div className="text-lg font-bold text-amber-400 font-mono">{orangeLights.length}</div>
+                      <div className="text-[10px] text-amber-300/80 font-medium">Amber (Partial)</div>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-rose-950/30 border border-rose-500/30 text-center">
+                      <div className="text-lg font-bold text-rose-400 font-mono">{redLights.length}</div>
+                      <div className="text-[10px] text-rose-300/80 font-medium">Red (Needs Help)</div>
+                    </div>
+                  </div>
+                  {redLights.length > 0 && (
+                    <div className="text-[11px] text-rose-300/90 pt-1">
+                      <strong>Red topics requiring intervention:</strong> {redLights.map(([code]) => code).join(', ')}
+                    </div>
+                  )}
+                </div>
+
+                {/* Priority Weak Areas */}
+                <div className="p-4 rounded-2xl bg-slate-950/40 border border-slate-800 space-y-2">
+                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Identified Weak Areas</span>
+                  </h4>
+                  {selectedStudentForAnalysis.weakTopics && selectedStudentForAnalysis.weakTopics.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {selectedStudentForAnalysis.weakTopics.map((wt, i) => (
+                        <span key={i} className="px-2 py-0.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-semibold">
+                          {wt}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-emerald-400 pt-2 font-medium">
+                      No critical weak topics flagged. Student is performing consistently across evaluated topics.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Modal Actions Footer */}
+              <div className="flex items-center justify-between pt-3 border-t border-slate-800 flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedStudentForAnalysis(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition"
+                >
+                  Close Analysis
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const studentId = selectedStudentForAnalysis.studentId;
+                    setSelectedStudentForAnalysis(null);
+                    setDashboardTab('tasks');
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 transition flex items-center gap-1.5 shadow-md shadow-purple-600/30"
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>Assign Task to This Student</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

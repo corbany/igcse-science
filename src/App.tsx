@@ -10,10 +10,11 @@ import { RevisionSchedule } from './components/RevisionSchedule';
 import { AIRecommendations } from './components/AIRecommendations';
 import { InstructorDashboard } from './components/InstructorDashboard';
 import { StudentClassesView } from './components/StudentClassesView';
+import { StudentTasksPanel } from './components/StudentTasksPanel';
 import { AIChatTutor } from './components/AIChatTutor';
 import { GoogleSignInGate } from './components/GoogleSignInGate';
 import { ClassCodeGateModal } from './components/ClassCodeGateModal';
-import { ScienceSubject, UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult } from './types';
+import { ScienceSubject, UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, TaskWithSubmission } from './types';
 import { 
   Sparkles, 
   Users,
@@ -26,7 +27,8 @@ import {
   getOrCreateUserProfile, 
   syncStudentProgressToClasses, 
   fetchStudentEnrolledClasses,
-  autoCheckTaskCompletion
+  autoCheckTaskCompletion,
+  subscribeToStudentTasks
 } from './services/firestoreService';
 
 const STORAGE_KEY_USER = 'igcse_0653_user_profile';
@@ -102,6 +104,23 @@ export default function App() {
 
   // Chat query passed between components
   const [chatInitialQuery, setChatInitialQuery] = useState<string>('');
+
+  // Live real-time student tasks state
+  const [studentTasks, setStudentTasks] = useState<TaskWithSubmission[]>([]);
+
+  // Real-time live subscription for student tasks
+  useEffect(() => {
+    if (!user || user.role !== 'student') {
+      setStudentTasks([]);
+      return;
+    }
+    const unsubscribe = subscribeToStudentTasks(user, enrolledClassIds, progress, (tasks) => {
+      setStudentTasks(tasks);
+    });
+    return () => unsubscribe();
+  }, [user?.id, user?.role, enrolledClassIds.length, progress]);
+
+  const pendingTasksCount = studentTasks.filter(t => t.submission?.status !== 'completed').length;
 
   // Firebase Auth listener
   useEffect(() => {
@@ -356,6 +375,7 @@ export default function App() {
         onSignOut={handleSignOut}
         enrolledClassIds={enrolledClassIds}
         progress={progress}
+        pendingTasksCount={pendingTasksCount}
         onNavigateToLessons={handleOpenLesson}
         onNavigateToQuizzes={() => setCurrentTab('quizzes')}
       />
@@ -417,9 +437,48 @@ export default function App() {
         </div>
       )}
 
+      {/* Student Pending Tasks Alert Banner */}
+      {user.role === 'student' && pendingTasksCount > 0 && currentTab !== 'assignments' && (
+        <div className="bg-amber-950/40 border-b border-amber-500/40 px-4 sm:px-6 lg:px-8 py-2.5 animate-in fade-in">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+            <div className="flex items-center gap-2.5 text-amber-300 font-semibold">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse shrink-0"></span>
+              <span>
+                Task Notice: You have <strong>{pendingTasksCount}</strong> assignment{pendingTasksCount === 1 ? '' : 's'} set by your teacher!
+              </span>
+            </div>
+            <button
+              onClick={() => setCurrentTab('assignments')}
+              className="px-3.5 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition text-xs shadow-xs flex items-center gap-1.5 self-start sm:self-auto"
+            >
+              <span>Open Assignments Tab</span>
+              <span>&rarr;</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {/* Render Tab Views */}
+        {currentTab === 'assignments' && (
+          user.role === 'student' ? (
+            <StudentTasksPanel
+              user={user}
+              progress={progress}
+              enrolledClassIds={enrolledClassIds}
+              onNavigateToLessons={handleOpenLesson}
+              onNavigateToQuizzes={() => setCurrentTab('quizzes')}
+            />
+          ) : (
+            <InstructorDashboard
+              currentUser={user}
+              onSwitchToStudentMode={() => setCurrentTab('lessons')}
+              onNavigateToLessons={() => setCurrentTab('lessons')}
+            />
+          )
+        )}
+
         {currentTab === 'lessons' && (
           <LessonSlidesViewer
             isInstructor={user.role === 'instructor'}

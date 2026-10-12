@@ -59,25 +59,37 @@ async function callGeminiWithFallback(
 
   let lastError: any = null;
   for (const model of uniqueModels) {
-    try {
-      const generatePromise = ai.models.generateContent({
-        model,
-        contents: params.contents,
-        config: params.config,
-      });
+    // Attempt with retry for transient 503 (high demand) or 429 rate limit
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const generatePromise = ai.models.generateContent({
+          model,
+          contents: params.contents,
+          config: params.config,
+        });
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Timeout waiting for model "${model}"`)), 12000)
-      );
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Timeout waiting for model "${model}"`)), 12000)
+        );
 
-      const response = await Promise.race([generatePromise, timeoutPromise]);
-      if (response && response.text) {
-        return { text: response.text, model };
+        const response = await Promise.race([generatePromise, timeoutPromise]);
+        if (response && response.text) {
+          return { text: response.text, model };
+        }
+      } catch (err: any) {
+        lastError = err;
+        const is503Or429 = err?.status === 503 || err?.status === 429 || 
+          (err?.message && (err.message.includes('503') || err.message.includes('overloaded') || err.message.includes('429')));
+        
+        if (is503Or429 && attempt < 2) {
+          // Exponential backoff before retry on same model
+          await new Promise(r => setTimeout(r, 600 * attempt));
+          continue;
+        }
+        // Brief backoff before trying next candidate model
+        await new Promise(r => setTimeout(r, 350));
+        break;
       }
-    } catch (err: any) {
-      lastError = err;
-      // Brief jitter/backoff before trying next candidate
-      await new Promise(r => setTimeout(r, 350));
     }
   }
   throw lastError || new Error('All candidate models currently unavailable');

@@ -28,13 +28,21 @@ export const WORKSPACE_DRIVE_SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly'
 ];
 
+// Standard provider for general student and instructor sign-in: ONLY requests basic profile and email.
+// This prevents Google's "Google hasn't verified this app" blocking screen on personal Gmail accounts!
 const provider = new GoogleAuthProvider();
-// Request standard profile plus Google Drive access scopes
 provider.addScope('email');
 provider.addScope('profile');
-WORKSPACE_DRIVE_SCOPES.forEach(scope => provider.addScope(scope));
-
 provider.setCustomParameters({
+  prompt: 'select_account'
+});
+
+// Dedicated provider with Drive scopes for optional Google Drive sync (instructors only)
+const driveProvider = new GoogleAuthProvider();
+driveProvider.addScope('email');
+driveProvider.addScope('profile');
+WORKSPACE_DRIVE_SCOPES.forEach(scope => driveProvider.addScope(scope));
+driveProvider.setCustomParameters({
   prompt: 'consent select_account',
   access_type: 'offline'
 });
@@ -43,6 +51,7 @@ provider.setCustomParameters({
 let isSigningIn = false;
 // Cache the access token in memory (never localStorage per workspace guidelines)
 let cachedAccessToken: string | null = null;
+let cachedDriveToken: string | null = null;
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
@@ -89,10 +98,12 @@ export const getAccessToken = async (): Promise<string | null> => {
   return cachedAccessToken;
 };
 
-export const getCachedDriveToken = getAccessToken;
+export const getCachedDriveToken = async (): Promise<string | null> => {
+  return cachedDriveToken || cachedAccessToken;
+};
 
 export const clearCachedDriveToken = () => {
-  cachedAccessToken = null;
+  cachedDriveToken = null;
 };
 
 export const signInWithGoogle = async (): Promise<string | null> => {
@@ -108,7 +119,25 @@ export const signInWithGoogle = async (): Promise<string | null> => {
   }
 };
 
+/**
+ * Incremental sign-in requesting Google Drive scopes when an instructor explicitly syncs Drive folders.
+ */
+export const signInWithDriveScope = async (): Promise<string | null> => {
+  try {
+    const result = await signInWithPopup(auth, driveProvider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    cachedDriveToken = credential?.accessToken || null;
+    return cachedDriveToken;
+  } catch (error: any) {
+    if (error?.code === 'auth/popup-closed-by-user' || error?.code === 'auth/cancelled-popup-request') {
+      return null;
+    }
+    throw error;
+  }
+};
+
 export const logout = async () => {
   await signOut(auth);
   cachedAccessToken = null;
+  cachedDriveToken = null;
 };

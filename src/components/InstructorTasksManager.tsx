@@ -43,7 +43,9 @@ import {
   deleteClassTask, 
   updateClassTaskDueDate,
   fetchStudentsInClass,
-  notifyStudentsOfTaskAssignment
+  notifyStudentsOfTaskAssignment,
+  subscribeToClassTasks,
+  subscribeToTaskSubmissions
 } from '../services/firestoreService';
 import { CAMBRIDGE_0653_TOPIC_SUBTOPICS } from '../services/googleDriveService';
 import { allSubtopicsData, SubtopicTopicGroup } from '../data/subtopicSlidesData';
@@ -176,21 +178,18 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
     }
   };
 
-  // Load tasks
-  const loadTasks = async () => {
-    setLoading(true);
-    try {
-      const fetched = await fetchClassTasks(selectedClassId === 'all' ? undefined : selectedClassId, currentUser.id);
-      setTasks(fetched);
-    } catch (err) {
-      console.error('Failed to load class tasks:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Subscribe to real-time live updates for tasks
   useEffect(() => {
-    loadTasks();
+    setLoading(true);
+    const unsubscribe = subscribeToClassTasks(
+      selectedClassId === 'all' ? undefined : selectedClassId,
+      currentUser.id,
+      (liveTasks) => {
+        setTasks(liveTasks);
+        setLoading(false);
+      }
+    );
+    return () => unsubscribe();
   }, [selectedClassId, currentUser.id]);
 
   // Load students when target class changes for modal
@@ -210,24 +209,27 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
     }
   }, [newClassId]);
 
-  // Load submissions when expanding a task
-  const toggleExpandTask = async (taskId: string, classId: string) => {
+  // Live real-time subscription for expanded task submissions
+  useEffect(() => {
+    if (!expandedTaskId) return;
+    const task = tasks.find(t => t.id === expandedTaskId);
+    const classId = task?.classId || 'all';
+
+    setLoadingSubmissions(prev => ({ ...prev, [expandedTaskId]: true }));
+    const unsubscribe = subscribeToTaskSubmissions(expandedTaskId, classId, (subs) => {
+      setTaskSubmissions(prev => ({ ...prev, [expandedTaskId]: subs }));
+      setLoadingSubmissions(prev => ({ ...prev, [expandedTaskId]: false }));
+    });
+
+    return () => unsubscribe();
+  }, [expandedTaskId, tasks]);
+
+  // Toggle expanded task
+  const toggleExpandTask = (taskId: string, classId: string) => {
     if (expandedTaskId === taskId) {
       setExpandedTaskId(null);
-      return;
-    }
-
-    setExpandedTaskId(taskId);
-    if (!taskSubmissions[taskId]) {
-      setLoadingSubmissions(prev => ({ ...prev, [taskId]: true }));
-      try {
-        const subs = await fetchTaskSubmissions(taskId, classId);
-        setTaskSubmissions(prev => ({ ...prev, [taskId]: subs }));
-      } catch (err) {
-        console.error('Failed to load task submissions:', err);
-      } finally {
-        setLoadingSubmissions(prev => ({ ...prev, [taskId]: false }));
-      }
+    } else {
+      setExpandedTaskId(taskId);
     }
   };
 

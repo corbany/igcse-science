@@ -18,7 +18,8 @@ import {
   LayoutDashboard,
   Compass,
   Users,
-  LogOut
+  LogOut,
+  ClipboardCheck
 } from 'lucide-react';
 import { ScienceSubject, UserProfile, StudentProgress } from '../types';
 import { TaskNotificationBell } from './TaskNotificationBell';
@@ -37,6 +38,7 @@ interface NavbarProps {
   onSignOut?: () => void;
   enrolledClassIds?: string[];
   progress?: StudentProgress;
+  pendingTasksCount?: number;
   onNavigateToLessons?: (subtopicCode?: string) => void;
   onNavigateToQuizzes?: (topicCode?: string) => void;
 }
@@ -55,6 +57,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSignOut,
   enrolledClassIds = [],
   progress,
+  pendingTasksCount = 0,
   onNavigateToLessons,
   onNavigateToQuizzes
 }) => {
@@ -419,7 +422,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* OPTION 5: Syllabus Notebook (Instructor) or Progress Tracker (Student) */}
+            {/* OPTION 5: Assignments (Student) or Syllabus Notebook (Instructor) */}
             {!isStudent ? (
               <button
                 onClick={() => setCurrentTab('notebook')}
@@ -434,6 +437,50 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
                 <span className="truncate">Syllabus Notebook</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setCurrentTab('assignments')}
+                title="Assignments, Class Tasks & Homework Set by Teacher"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none relative ${
+                  currentTab === 'assignments'
+                    ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50'
+                    : (pendingTasksCount || 0) > 0
+                      ? theme === 'dark'
+                        ? 'text-amber-300 hover:text-white hover:bg-slate-800/80 bg-amber-950/30 border border-amber-500/40 shadow-xs'
+                        : 'text-amber-900 hover:text-slate-950 hover:bg-amber-100/80 bg-amber-50 border border-amber-300'
+                      : theme === 'dark'
+                        ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                        : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                }`}
+              >
+                <ClipboardCheck className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${
+                  (pendingTasksCount || 0) > 0 ? 'text-amber-400' : 'text-emerald-400'
+                }`} />
+                <span className="truncate font-semibold">Assignments</span>
+                {(pendingTasksCount || 0) > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-amber-400 text-slate-950 shadow-xs animate-pulse shrink-0">
+                    {pendingTasksCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* OPTION 6: Cohort Progress (Instructor) or Progress Tracker (Student) */}
+            {!isStudent ? (
+              <button
+                onClick={() => setCurrentTab('tracker')}
+                title="Cohort Progress & Confidence Analytics"
+                className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                  currentTab === 'tracker'
+                    ? 'bg-purple-600 text-white font-semibold shadow-xs ring-1 ring-purple-500/50'
+                    : theme === 'dark'
+                      ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                }`}
+              >
+                <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span className="truncate">Cohort Progress</span>
               </button>
             ) : (
               <button
@@ -452,21 +499,21 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* OPTION 6: Cohort Progress (Instructor) or My Classes (Student) */}
+            {/* OPTION 7: Teaching Hub Tasks (Instructor) or My Classes (Student) */}
             {!isStudent ? (
               <button
-                onClick={() => setCurrentTab('tracker')}
-                title="Cohort Progress & Confidence Analytics"
+                onClick={() => setCurrentTab('instructor')}
+                title="Class Tasks & Homework Assignments"
                 className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
-                  currentTab === 'tracker'
+                  currentTab === 'instructor'
                     ? 'bg-purple-600 text-white font-semibold shadow-xs ring-1 ring-purple-500/50'
                     : theme === 'dark'
                       ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
                       : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
                 }`}
               >
-                <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                <span className="truncate">Cohort Progress</span>
+                <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-400 shrink-0" />
+                <span className="truncate">Class Tasks</span>
               </button>
             ) : (
               <button
@@ -485,13 +532,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* OPTION 7: Study Tools Suite Dropdown (Schedule, AI Path, Guidelines) */}
+            {/* OPTION 8: Study Tools & AI Suite Dropdown */}
             <div className="relative w-full" ref={dropdownRef}>
               <button
                 onClick={() => setShowMoreTools(prev => !prev)}
-                title="Revision Schedule, AI Learning Path & Exam Guidelines"
+                title="Study Tools Suite & AI Revision Assistant"
                 className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1 transition-all duration-150 select-none ${
-                  isExtraStudentTab
+                  isExtraStudentTab || currentTab === 'chat'
                     ? (isStudent 
                         ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50' 
                         : 'bg-purple-600 text-white font-semibold shadow-xs ring-1 ring-purple-500/50'
@@ -505,7 +552,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className="truncate">
                   {currentTab === 'schedule' ? 'Schedule' :
                    currentTab === 'recommendations' ? 'AI Path' :
-                   currentTab === 'guidelines' ? 'Guidelines' : 'Study Tools'}
+                   currentTab === 'guidelines' ? 'Guidelines' :
+                   currentTab === 'chat' ? 'AI Tutor' : 'Study Tools'}
                 </span>
                 <ChevronDown className={`w-3 h-3 shrink-0 opacity-70 transition-transform ${showMoreTools ? 'rotate-180' : ''}`} />
               </button>
@@ -561,25 +609,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <div className="text-[10px] text-slate-400 font-normal">Core vs Extended criteria</div>
                     </div>
                   </button>
+
+                  <button
+                    onClick={() => { setCurrentTab('chat'); setShowMoreTools(false); }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition border-t border-slate-800/60 mt-1 pt-1.5 ${
+                      currentTab === 'chat' 
+                        ? (isStudent ? 'bg-indigo-500/20 text-indigo-400' : 'bg-purple-500/20 text-purple-400')
+                        : theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
+                    }`}
+                  >
+                    <MessageSquare className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <div className="text-left">
+                      <div className="font-semibold text-indigo-300">Ask 0653 AI Tutor</div>
+                      <div className="text-[10px] text-slate-400 font-normal">Cambridge examiner guidance</div>
+                    </div>
+                  </button>
                 </div>
               )}
             </div>
-
-            {/* OPTION 8: Ask AI Tutor */}
-            <button
-              onClick={() => setCurrentTab('chat')}
-              title="24/7 Cambridge Science AI Tutor"
-              className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
-                currentTab === 'chat'
-                  ? 'bg-indigo-600 text-white font-semibold shadow-xs ring-1 ring-indigo-500/50'
-                  : theme === 'dark'
-                    ? 'text-indigo-300 hover:text-white hover:bg-indigo-950/50 bg-indigo-950/20 border border-indigo-500/20'
-                    : 'text-indigo-700 hover:text-indigo-950 hover:bg-indigo-100/80 bg-indigo-50 border border-indigo-200'
-              }`}
-            >
-              <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-400 shrink-0" />
-              <span className="truncate">Ask AI Tutor</span>
-            </button>
           </div>
         </div>
       </nav>

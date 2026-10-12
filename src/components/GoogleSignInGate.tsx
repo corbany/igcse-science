@@ -145,9 +145,8 @@ export const GoogleSignInGate: React.FC<GoogleSignInGateProps> = ({
               <strong>To enable Google OAuth:</strong> Open <em>Firebase Console → Authentication → Settings → Authorized domains</em> and paste this domain.
             </div>
 
-            <div className="pt-1 border-t border-amber-500/20 flex items-center justify-between text-xs">
-              <span className="font-semibold text-amber-300">Instant Access:</span>
-              <span className="text-amber-200/80">Use the direct sign-in options below to continue immediately!</span>
+            <div className="pt-1 border-t border-amber-500/20 text-xs text-amber-200/90">
+              After adding the domain in Firebase Console, click the button below to sign in.
             </div>
           </div>
         )}
@@ -215,6 +214,19 @@ export const GoogleSignInGate: React.FC<GoogleSignInGateProps> = ({
                 </>
               )}
             </button>
+
+            {/* Helpful Notice for Personal Gmail Accounts */}
+            <div className={`p-3.5 rounded-2xl text-xs space-y-1.5 border ${
+              theme === 'dark' ? 'bg-sky-950/20 border-sky-500/30 text-sky-200' : 'bg-sky-50 border-sky-200 text-sky-900'
+            }`}>
+              <div className="flex items-center gap-2 font-bold text-sky-300">
+                <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                <span>Signing in with personal Gmail:</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-sky-200/90">
+                If Google displays <em>"Google hasn't verified this app"</em> on the sign-in screen, click <strong className="underline">Advanced</strong> at the bottom-left, then select <strong className="underline">Go to Combined Science Hub (unsafe)</strong> to proceed.
+              </p>
+            </div>
 
             {/* Role Expectations Explanation */}
             <div className={`p-4 rounded-2xl text-xs space-y-2 ${
