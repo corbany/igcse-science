@@ -24,8 +24,8 @@ export const SYLLABUS_TOPICS_META: Record<string, DynamicTopicMeta> = {
   'B12': { code: 'B12', subject: 'biology', title: 'Respiration', syllabusRef: 'B12.1' },
   'B13': { code: 'B13', subject: 'biology', title: 'Coordination & Response', syllabusRef: 'B13.1' },
   'B14': { code: 'B14', subject: 'biology', title: 'Reproduction', syllabusRef: 'B14.1' },
-  'B15': { code: 'B15', subject: 'biology', title: 'Inheritance & Genetics', syllabusRef: 'B15.1' },
-  'B16': { code: 'B16', subject: 'biology', title: 'Ecosystems & Environment', syllabusRef: 'B16.1' },
+  'B15': { code: 'B15', subject: 'biology', title: 'Organisms & Environment', syllabusRef: 'B15.1' },
+  'B16': { code: 'B16', subject: 'biology', title: 'Human Influences on Ecosystems', syllabusRef: 'B16.1' },
 
   // CHEMISTRY (C1 - C12)
   'C1': { code: 'C1', subject: 'chemistry', title: 'States of Matter', syllabusRef: 'C1.1' },
@@ -431,21 +431,21 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
     }
   ],
 
-  // B15 Inheritance
+  // B15 Organisms & Environment
   'B15': [
     {
-      stem: 'Two heterozygous brown-eyed parents (genotype Bb, where B = brown dominant, b = blue recessive) have a child. What is the probability that the child has blue eyes?',
-      correct: '25% (1 in 4)',
-      distractors: ['50% (1 in 2)', '75% (3 in 4)', '0% (0 in 4)'],
-      explanation: 'Punnett square of Bb × Bb yields genotypes 1 BB : 2 Bb : 1 bb. Only homozygous recessive (bb) exhibits blue eyes = 1/4 (25%).',
+      stem: 'What is the principal source of energy input to biological ecosystems according to Cambridge 0653?',
+      correct: 'Sunlight / Solar energy',
+      distractors: ['Geothermal heat from Earth’s core', 'Chemical energy in fossil fuels', 'Nutrients absorbed from soil'],
+      explanation: 'The Sun is the principal source of energy input to biological systems; light energy is captured by producers via photosynthesis.',
       ref: 'B15.1'
     },
     {
-      stem: 'In human genetics, what combination of sex chromosomes determines a biological male?',
-      correct: 'XY',
-      distractors: ['XX', 'YY', 'XO'],
-      explanation: 'Females have two X chromosomes (XX); males have one X and one Y chromosome (XY).',
-      ref: 'B15.1'
+      stem: 'Which biological process removes carbon dioxide from the atmosphere in the carbon cycle?',
+      correct: 'Photosynthesis by green plants and algae',
+      distractors: ['Respiration by animals and plants', 'Combustion of fossil fuels', 'Decomposition by bacteria and fungi'],
+      explanation: 'Photosynthesis is the only biological process that takes in carbon dioxide from the atmosphere to produce carbohydrates.',
+      ref: 'B15.3'
     }
   ],
 

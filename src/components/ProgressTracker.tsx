@@ -20,7 +20,8 @@ import {
   GraduationCap,
   ChevronDown,
   ArrowLeft,
-  RefreshCw
+  RefreshCw,
+  Trophy
 } from 'lucide-react';
 import { StudentProgress, UserProfile, TrafficLightStatus } from '../types';
 import { syllabusItems } from '../data/syllabusData';
@@ -28,6 +29,7 @@ import { allSubtopicsData } from '../data/subtopicSlidesData';
 import { 
   fetchClassesByInstructor, 
   fetchStudentsInClass, 
+  subscribeToClassStudents,
   ClassItem, 
   ClassStudentItem 
 } from '../services/firestoreService';
@@ -37,6 +39,7 @@ interface ProgressTrackerProps {
   user: UserProfile;
   onUpdateConfidence: (topicCode: string, rating: number) => void;
   onNavigateToTopic: (topicCode: string) => void;
+  onNavigateToLeaderboard?: () => void;
 }
 
 interface EnrichedStudentItem extends ClassStudentItem {
@@ -49,7 +52,8 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
   progress,
   user,
   onUpdateConfidence,
-  onNavigateToTopic
+  onNavigateToTopic,
+  onNavigateToLeaderboard
 }) => {
   const isInstructor = user.role === 'instructor';
 
@@ -64,28 +68,34 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
   const [studentSearchQuery, setStudentSearchQuery] = useState<string>('');
   const [isLoadingCohort, setIsLoadingCohort] = useState<boolean>(isInstructor);
 
-  // Load instructor classes & students
+  // Load instructor classes & students with real-time live sync
   const loadInstructorData = async () => {
     if (!isInstructor) return;
     setIsLoadingCohort(true);
     try {
-      const clsList = await fetchClassesByInstructor(user.id);
+      // Pass both user.id and user.email so classes shared with this instructor are fully included
+      const clsList = await fetchClassesByInstructor(user.id, user.email);
       setClasses(clsList);
 
       const studentMap = new Map<string, EnrichedStudentItem>();
 
-      // Fetch students from each class
+      // Fetch students from each owned or shared class
       for (const cls of clsList) {
         const students = await fetchStudentsInClass(cls.id);
         students.forEach(st => {
-          if (!studentMap.has(st.studentId)) {
-            studentMap.set(st.studentId, {
-              ...st,
-              className: cls.name,
-              classCode: cls.classCode,
-              classId: cls.id
-            });
-          }
+          const completedSet = new Set<string>([
+            ...(st.completedLessons || []),
+            ...Object.keys(st.trafficLights || {}),
+            ...Object.keys(st.subtopicQuizScores || {})
+          ]);
+          studentMap.set(st.studentId, {
+            ...st,
+            className: cls.name,
+            classCode: cls.classCode,
+            classId: cls.id,
+            completedLessonsCount: Math.max(st.completedLessonsCount || 0, completedSet.size),
+            completedLessons: Array.from(completedSet)
+          });
         });
       }
 
@@ -102,7 +112,53 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
     if (isInstructor) {
       loadInstructorData();
     }
-  }, [isInstructor, user.id]);
+  }, [isInstructor, user.id, user.email]);
+
+  // Real-time live Firestore subscriptions for each class
+  useEffect(() => {
+    if (!isInstructor || classes.length === 0) return;
+
+    const unsubs: (() => void)[] = [];
+
+    classes.forEach(cls => {
+      const unsub = subscribeToClassStudents(cls.id, (liveClassStudents) => {
+        setAllCohortStudents(prev => {
+          const map = new Map<string, EnrichedStudentItem>();
+          prev.forEach(st => map.set(st.studentId, st));
+          liveClassStudents.forEach(st => {
+            const completedSet = new Set<string>([
+              ...(st.completedLessons || []),
+              ...Object.keys(st.trafficLights || {}),
+              ...Object.keys(st.subtopicQuizScores || {})
+            ]);
+            map.set(st.studentId, {
+              ...st,
+              className: cls.name,
+              classCode: cls.classCode,
+              classId: cls.id,
+              completedLessonsCount: Math.max(st.completedLessonsCount || 0, completedSet.size),
+              completedLessons: Array.from(completedSet)
+            });
+          });
+          return Array.from(map.values());
+        });
+      });
+      unsubs.push(unsub);
+    });
+
+    const handleLiveSyncEvent = () => {
+      loadInstructorData();
+    };
+
+    window.addEventListener('igcse_student_progress_synced', handleLiveSyncEvent);
+    window.addEventListener('storage', handleLiveSyncEvent);
+
+    return () => {
+      unsubs.forEach(u => u());
+      window.removeEventListener('igcse_student_progress_synced', handleLiveSyncEvent);
+      window.removeEventListener('storage', handleLiveSyncEvent);
+    };
+  }, [isInstructor, classes]);
 
   // Derive selected student if viewing an individual student as instructor
   const selectedStudent = useMemo(() => {
@@ -113,8 +169,13 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
   // Determine active progress to display: student's progress or logged-in user's progress
   const activeProgress: StudentProgress = useMemo(() => {
     if (isInstructor && selectedStudent) {
+      const studentDecks = new Set<string>([
+        ...(selectedStudent.completedLessons || []),
+        ...Object.keys(selectedStudent.trafficLights || {}),
+        ...Object.keys(selectedStudent.subtopicQuizScores || {})
+      ]);
       return {
-        completedLessons: [],
+        completedLessons: Array.from(studentDecks),
         topicConfidence: selectedStudent.topicConfidence || {},
         trafficLights: selectedStudent.trafficLights || {},
         subtopicQuizScores: selectedStudent.subtopicQuizScores || {},
@@ -123,7 +184,15 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
         lastActive: selectedStudent.lastActive
       };
     }
-    return progress;
+    const studentDecks = new Set<string>([
+      ...(progress.completedLessons || []),
+      ...Object.keys(progress.trafficLights || {}),
+      ...Object.keys(progress.subtopicQuizScores || {})
+    ]);
+    return {
+      ...progress,
+      completedLessons: Array.from(studentDecks)
+    };
   }, [isInstructor, selectedStudent, progress]);
 
   // Subject and traffic filters
@@ -132,6 +201,7 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
 
   const trafficLights = activeProgress.trafficLights || {};
   const quizScores = activeProgress.subtopicQuizScores || {};
+  const completedLessons = activeProgress.completedLessons || [];
 
   // Compute Traffic Light statistics across all subtopics
   const stats = useMemo(() => {
@@ -170,6 +240,20 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
 
     return { total, green, orange, red, unranked, masteryPct, subjectStats };
   }, [trafficLights]);
+
+  const completedDecksCount = completedLessons.length;
+  const slideDeckPct = stats.total > 0 ? Math.min(100, Math.round((completedDecksCount / stats.total) * 100)) : 0;
+
+  const coveredCodes = useMemo(() => {
+    return new Set<string>([
+      ...completedLessons,
+      ...Object.keys(trafficLights),
+      ...Object.keys(quizScores)
+    ]);
+  }, [completedLessons, trafficLights, quizScores]);
+  
+  const syllabusCoveredCount = coveredCodes.size;
+  const syllabusPct = stats.total > 0 ? Math.min(100, Math.round((syllabusCoveredCount / stats.total) * 100)) : 0;
 
   // Filtered subtopics based on subject tab and traffic light status
   const displayedSubtopics = useMemo(() => {
@@ -398,6 +482,28 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
                       </div>
                     )}
 
+                    {/* Live Slide Decks & Syllabus % Stats */}
+                    <div className="grid grid-cols-2 gap-2 pt-1 text-xs">
+                      <div className="p-2 rounded-xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between">
+                        <span className="text-slate-400 text-[11px] flex items-center gap-1">
+                          <BookOpen className="w-3 h-3 text-emerald-400" />
+                          <span>Slide Decks:</span>
+                        </span>
+                        <span className="font-mono font-bold text-emerald-400">
+                          {student.completedLessonsCount || 0} / {totalSubtopics}
+                        </span>
+                      </div>
+                      <div className="p-2 rounded-xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between">
+                        <span className="text-slate-400 text-[11px] flex items-center gap-1">
+                          <GraduationCap className="w-3 h-3 text-sky-400" />
+                          <span>Syllabus:</span>
+                        </span>
+                        <span className="font-mono font-bold text-sky-400">
+                          {Math.min(100, Math.round(((student.completedLessonsCount || 0) / totalSubtopics) * 100))}%
+                        </span>
+                      </div>
+                    </div>
+
                     {/* Green Mastery Bar */}
                     <div className="space-y-1.5 pt-1">
                       <div className="flex items-center justify-between text-xs">
@@ -534,37 +640,85 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
               Track traffic light rankings across all {stats.total} subtopics in Biology, Chemistry, and Physics. 
               Earn <span className="text-emerald-400 font-bold">Green status</span> by scoring ≥80% on each subtopic's 10-Question Knowledge Check.
             </p>
+
+            {!isInstructor && onNavigateToLeaderboard && (
+              <div className="pt-2">
+                <button
+                  onClick={onNavigateToLeaderboard}
+                  className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold text-xs transition shadow-xs"
+                >
+                  <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Compare Rank in Class Leaderboard</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
           </div>
 
-          {/* Traffic Light Mastery Circular Gauge */}
-          <div className="flex items-center gap-4 bg-slate-950/70 p-4 rounded-xl border border-slate-800 shrink-0">
-            <div className="relative w-16 h-16 flex items-center justify-center">
-              <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-                <path
-                  className="text-slate-800"
-                  strokeWidth="3.5"
-                  stroke="currentColor"
-                  fill="none"
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                />
-                <path
-                  className="text-emerald-500 transition-all duration-500"
-                  strokeDasharray={`${stats.masteryPct}, 100`}
-                  strokeWidth="3.5"
-                  strokeLinecap="round"
-                  stroke="currentColor"
-                  fill="none"
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                />
-              </svg>
-              <span className="absolute text-sm font-bold text-white font-mono">{stats.masteryPct}%</span>
+          {/* Live Progress Gauges: Slide Decks, Syllabus %, Green Mastery */}
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
+            {/* Slide Deck Completion */}
+            <div className="flex items-center gap-3 bg-slate-950/70 px-4 py-3 rounded-xl border border-slate-800 min-w-[170px]">
+              <div className="p-2 rounded-lg bg-emerald-500/15 text-emerald-400 shrink-0">
+                <BookOpen className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Slide Decks Read</div>
+                <div className="text-sm font-bold text-white font-mono mt-0.5">
+                  {completedDecksCount} / {stats.total} <span className="text-emerald-400 text-xs font-semibold">({slideDeckPct}%)</span>
+                </div>
+                <div className="w-24 bg-slate-800 h-1.5 rounded-full mt-1 overflow-hidden">
+                  <div className="h-full bg-emerald-500 rounded-full transition-all duration-300" style={{ width: `${slideDeckPct}%` }} />
+                </div>
+              </div>
             </div>
-            <div>
-              <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Green Mastery Rate</div>
-              <div className="text-sm font-bold text-white mt-0.5">{stats.green} of {stats.total} subtopics</div>
-              <div className="text-[11px] text-emerald-400 font-medium mt-0.5 flex items-center gap-1">
-                <Flame className="w-3.5 h-3.5" />
-                <span>{stats.green} verified green badges</span>
+
+            {/* Syllabus % Coverage */}
+            <div className="flex items-center gap-3 bg-slate-950/70 px-4 py-3 rounded-xl border border-slate-800 min-w-[170px]">
+              <div className="p-2 rounded-lg bg-sky-500/15 text-sky-400 shrink-0">
+                <GraduationCap className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Syllabus Covered</div>
+                <div className="text-sm font-bold text-white font-mono mt-0.5">
+                  {syllabusPct}% <span className="text-slate-400 text-xs font-normal">({syllabusCoveredCount}/{stats.total})</span>
+                </div>
+                <div className="w-24 bg-slate-800 h-1.5 rounded-full mt-1 overflow-hidden">
+                  <div className="h-full bg-sky-500 rounded-full transition-all duration-300" style={{ width: `${syllabusPct}%` }} />
+                </div>
+              </div>
+            </div>
+
+            {/* Traffic Light Mastery Circular Gauge */}
+            <div className="flex items-center gap-3 bg-slate-950/70 px-4 py-3 rounded-xl border border-slate-800 shrink-0">
+              <div className="relative w-12 h-12 flex items-center justify-center shrink-0">
+                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                  <path
+                    className="text-slate-800"
+                    strokeWidth="3.5"
+                    stroke="currentColor"
+                    fill="none"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                  />
+                  <path
+                    className="text-emerald-500 transition-all duration-500"
+                    strokeDasharray={`${stats.masteryPct}, 100`}
+                    strokeWidth="3.5"
+                    strokeLinecap="round"
+                    stroke="currentColor"
+                    fill="none"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                  />
+                </svg>
+                <span className="absolute text-xs font-bold text-white font-mono">{stats.masteryPct}%</span>
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Green Mastery</div>
+                <div className="text-sm font-bold text-white mt-0.5">{stats.green} of {stats.total}</div>
+                <div className="text-[10px] text-emerald-400 font-medium mt-0.5 flex items-center gap-1">
+                  <Flame className="w-3 h-3" />
+                  <span>≥80% certified</span>
+                </div>
               </div>
             </div>
           </div>
@@ -717,6 +871,12 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
                     {quizResult && (
                       <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-mono">
                         Quiz: {quizResult.score}/10 ({quizResult.percentage}%)
+                      </span>
+                    )}
+                    {completedLessons.includes(sub.subtopicCode) && (
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium flex items-center gap-1">
+                        <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                        <span>Deck Read</span>
                       </span>
                     )}
                   </div>

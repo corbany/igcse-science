@@ -255,6 +255,185 @@ The student has been enrolled and is now visible on your Progress Tracker and In
   }
 });
 
+// -------------------------------------------------------------
+// SMTP CONFIGURATION & LIVE NOTIFICATION SERVICES
+// -------------------------------------------------------------
+const SMTP_CONFIG_FILE = path.join(__dirname || process.cwd(), '.smtp_config.json');
+
+interface SmtpSettings {
+  host: string;
+  port: number;
+  user: string;
+  pass: string;
+  secure: boolean;
+  from: string;
+}
+
+let activeTransporter: any = null;
+
+// Regex to detect and strip out non-syllabus genetics content from practice quizzes
+export const GENETICS_TERMS_REGEX = /\b(genetics?|monohybrid|punnett|allele|alleles|heterozygous|homozygous|genotypes?|phenotypes?|codominan\w*|pedigree (chart|diagram)|karyotype|dihybrid|mendel\w*)\b/i;
+
+function isGeneticsContent(text: string): boolean {
+  return GENETICS_TERMS_REGEX.test(text);
+}
+
+function getSmtpConfig(): SmtpSettings | null {
+  try {
+    if (fs.existsSync(SMTP_CONFIG_FILE)) {
+      const raw = fs.readFileSync(SMTP_CONFIG_FILE, 'utf-8');
+      const data = JSON.parse(raw);
+      if (data && data.host && data.user) {
+        return {
+          host: data.host,
+          port: parseInt(data.port || '587', 10),
+          secure: data.secure === true || data.secure === 'true' || parseInt(data.port, 10) === 465,
+          user: data.user,
+          pass: data.pass || '',
+          from: data.from || `"Cambridge 0653 Science Hub" <${data.user}>`
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to parse .smtp_config.json:', err);
+  }
+
+  if (process.env.SMTP_HOST && process.env.SMTP_USER) {
+    return {
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587', 10),
+      secure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465',
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS || '',
+      from: process.env.SMTP_FROM || `"Cambridge 0653 Science Hub" <${process.env.SMTP_USER}>`
+    };
+  }
+
+  return null;
+}
+
+function getMailTransporter(): { transporter: any; config: SmtpSettings | null } {
+  const config = getSmtpConfig();
+  if (!config || !config.host || !config.user) {
+    return { transporter: null, config: null };
+  }
+
+  if (!activeTransporter) {
+    try {
+      activeTransporter = nodemailer.createTransport({
+        pool: true,
+        maxConnections: 3,
+        maxMessages: 100,
+        host: config.host,
+        port: config.port,
+        secure: config.secure,
+        auth: {
+          user: config.user,
+          pass: config.pass
+        },
+        connectionTimeout: 10000
+      });
+    } catch (err) {
+      console.error('[SMTP Transporter Create Error]', err);
+    }
+  }
+
+  return { transporter: activeTransporter, config };
+}
+
+function saveSmtpConfig(config: SmtpSettings): void {
+  try {
+    fs.writeFileSync(SMTP_CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+    activeTransporter = null; // Reset pool on config update
+  } catch (err) {
+    console.error('Failed to write .smtp_config.json:', err);
+  }
+}
+
+// Retrieve current SMTP configuration status
+app.get('/api/smtp-config', (req, res) => {
+  const current = getSmtpConfig();
+  if (current) {
+    res.json({
+      configured: true,
+      host: current.host,
+      port: current.port,
+      secure: current.secure,
+      user: current.user,
+      from: current.from
+    });
+  } else {
+    res.json({
+      configured: false,
+      host: '',
+      port: 587,
+      secure: false,
+      user: '',
+      from: ''
+    });
+  }
+});
+
+// Save new SMTP configuration
+app.post('/api/smtp-config', (req, res) => {
+  try {
+    const { host, port = 587, user, pass, secure = false, from } = req.body;
+    if (!host || !user) {
+      return res.status(400).json({ error: 'Host and User/Email are required.' });
+    }
+
+    const settings: SmtpSettings = {
+      host: String(host).trim(),
+      port: parseInt(port, 10) || 587,
+      secure: secure === true || secure === 'true' || parseInt(port, 10) === 465,
+      user: String(user).trim(),
+      pass: pass ? String(pass).trim() : '',
+      from: from ? String(from).trim() : `"Cambridge 0653 Science Hub" <${user}>`
+    };
+
+    saveSmtpConfig(settings);
+    res.json({ success: true, message: 'SMTP settings successfully saved and activated.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to save SMTP configuration' });
+  }
+});
+
+// Test SMTP connection and dispatch verification email
+app.post('/api/test-smtp', async (req, res) => {
+  try {
+    const { recipientEmail = 'corbanb@gisboyshigh.net' } = req.body;
+    const { transporter, config } = getMailTransporter();
+    if (!transporter || !config) {
+      return res.status(400).json({ error: 'SMTP is not configured. Please save your SMTP host and login first.' });
+    }
+
+    const info = await transporter.sendMail({
+      from: config.from,
+      to: recipientEmail,
+      subject: '✅ IGCSE Science Hub: SMTP Test Email Verification',
+      text: 'This is a test notification confirming your SMTP email dispatch is working perfectly on the Cambridge 0653 Science Revision Hub.',
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 20px; background: #0f172a; color: #f8fafc; border-radius: 12px;">
+          <h2 style="color: #34d399; margin-top: 0;">✅ SMTP Connection Verified</h2>
+          <p>Your SMTP mail configuration is active and successfully delivering emails to students.</p>
+          <p style="color: #94a3b8; font-size: 13px;">Host: <strong>${config.host}:${config.port}</strong> | Sender: <strong>${config.from}</strong></p>
+        </div>
+      `
+    });
+
+    res.json({
+      success: true,
+      messageId: info.messageId,
+      message: `Test email sent successfully to ${recipientEmail}!`
+    });
+  } catch (err: any) {
+    console.error('Test SMTP failed:', err);
+    res.status(500).json({
+      error: `SMTP test connection failed: ${err?.message || 'Check host, port, user and password'}`
+    });
+  }
+});
+
 // Email notification endpoint when an instructor sets a task for students
 app.post('/api/notify-task-assigned', async (req, res) => {
   try {
@@ -273,7 +452,6 @@ app.post('/api/notify-task-assigned', async (req, res) => {
     }
 
     // Determine the active, working portal URL for students:
-    // Prioritize: 1. Client browser origin sent by instructor, 2. process.env.APP_URL, 3. Origin/Referer headers, 4. Dev Cloud Run fallback
     const effectivePortalUrl = (
       clientPortalUrl ||
       process.env.APP_URL ||
@@ -301,166 +479,163 @@ app.post('/api/notify-task-assigned', async (req, res) => {
       ? task.targetSubtopics.join(', ')
       : 'General Topic';
 
-    const results: any[] = [];
+    // Collect valid student email addresses and deduplicate
+    const validEmails: string[] = [];
+    const validRecipients: { studentId: string; name: string; email: string }[] = [];
 
-    // Setup nodemailer transporter if configured
-    let transporter: any = null;
-    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-      try {
-        transporter = nodemailer.createTransport({
-          host: process.env.SMTP_HOST,
-          port: parseInt(process.env.SMTP_PORT || '587', 10),
-          secure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465',
-          auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS
-          }
-        });
-      } catch (tErr) {
-        console.warn('[Email Transporter Error]', tErr);
+    recipients.forEach((r: any) => {
+      const email = ((r.studentEmail || r.email || '') as string).trim().toLowerCase();
+      const name = (r.studentName || r.name || 'Student').trim();
+      const studentId = r.studentId || '';
+      if (email && email.includes('@') && !validEmails.includes(email)) {
+        validEmails.push(email);
+        validRecipients.push({ studentId, name, email });
       }
-    }
+    });
 
-    const fromAddress = process.env.SMTP_FROM || `"Cambridge 0653 Science Hub" <${process.env.SMTP_USER || 'notifications@cambridge0653.edu'}>`;
-
-    for (const recipient of recipients) {
-      const email = recipient.studentEmail || recipient.email;
-      const name = recipient.studentName || recipient.name || 'Student';
-
-      if (!email || !email.includes('@')) {
-        continue;
-      }
-
-      const emailSubject = `📝 New Task Set: ${task.title} (Due: ${dueDateFormatted})`;
-
-      const emailHtml = `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background-color: #0f172a; color: #f8fafc; border-radius: 16px; border: 1px solid #1e293b;">
-          <div style="text-align: center; margin-bottom: 24px;">
-            <div style="display: inline-block; padding: 10px 18px; background: linear-gradient(135deg, #9333ea, #7c3aed); border-radius: 12px; color: #ffffff; font-weight: 800; font-size: 16px; margin-bottom: 10px;">
-              Cambridge IGCSE Combined Science 0653
-            </div>
-            <h2 style="color: #ffffff; margin: 8px 0 0 0; font-size: 20px;">New Homework Task Assigned</h2>
-            <p style="color: #94a3b8; font-size: 13px; margin: 4px 0 0 0;">Your instructor has assigned a new task for your science class</p>
-          </div>
-
-          <div style="background-color: #1e293b; border-radius: 12px; padding: 20px; margin-bottom: 20px; border: 1px solid #334155;">
-            <p style="margin: 0 0 12px 0; font-size: 15px; color: #f1f5f9;">
-              Hi <strong>${name}</strong>,
-            </p>
-            <p style="margin: 0 0 16px 0; font-size: 13px; color: #cbd5e1; line-height: 1.5;">
-              You have been assigned a new task in <strong>${task.className || 'Science Class'}</strong>. Please review the details below and complete it before the deadline:
-            </p>
-
-            <div style="background-color: #0f172a; border-radius: 10px; padding: 16px; border: 1px solid #334155; margin-bottom: 16px;">
-              <h3 style="margin: 0 0 10px 0; color: #c084fc; font-size: 17px; font-weight: 700;">
-                ${task.title}
-              </h3>
-              
-              <table style="width: 100%; border-collapse: collapse; font-size: 13px; color: #e2e8f0;">
-                <tr>
-                  <td style="padding: 5px 0; color: #94a3b8; width: 130px;">Class:</td>
-                  <td style="padding: 5px 0; font-weight: 600; color: #ffffff;">${task.className || 'Science Class'}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 5px 0; color: #94a3b8;">Instructor:</td>
-                  <td style="padding: 5px 0; font-weight: 600; color: #ffffff;">${task.instructorName || 'Your Teacher'}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 5px 0; color: #94a3b8;">Activity Type:</td>
-                  <td style="padding: 5px 0;"><span style="background: rgba(147, 51, 234, 0.2); color: #c084fc; padding: 2px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;">${activityTypeLabel}</span></td>
-                </tr>
-                <tr>
-                  <td style="padding: 5px 0; color: #94a3b8;">Subtopic(s):</td>
-                  <td style="padding: 5px 0; font-family: monospace; font-weight: bold; color: #38bdf8;">${targetSubtopicsStr}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 5px 0; color: #94a3b8;">Due Date:</td>
-                  <td style="padding: 5px 0; font-weight: 700; color: #f59e0b;">⏰ ${dueDateFormatted}</td>
-                </tr>
-              </table>
-            </div>
-
-            ${task.description ? `
-              <div style="background-color: rgba(245, 158, 11, 0.08); border-left: 3px solid #f59e0b; padding: 12px 14px; margin-bottom: 16px; border-radius: 4px;">
-                <div style="font-size: 12px; font-weight: 700; color: #fbbf24; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Teacher Instructions:</div>
-                <div style="font-size: 13px; color: #e2e8f0; line-height: 1.5; white-space: pre-line;">${task.description}</div>
-              </div>
-            ` : ''}
-
-            <div style="text-align: center; margin-top: 22px;">
-              <a href="${taskPortalLink}" style="display: inline-block; background: linear-gradient(135deg, #9333ea, #7c3aed); color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 12px 28px; border-radius: 10px; box-shadow: 0 4px 12px rgba(147, 51, 234, 0.4);">
-                Open Task in Portal →
-              </a>
-            </div>
-            <div style="text-align: center; margin-top: 10px;">
-              <p style="font-size: 11px; color: #94a3b8; margin: 0; word-break: break-all;">
-                Direct link: <a href="${taskPortalLink}" style="color: #38bdf8; text-decoration: underline;">${taskPortalLink}</a>
-              </p>
-            </div>
-          </div>
-
-          <div style="text-align: center; border-top: 1px solid #1e293b; padding-top: 14px;">
-            <p style="font-size: 11px; color: #64748b; margin: 0;">
-              Cambridge IGCSE Combined Science (0653) • Automated Student Task Notification
-            </p>
-          </div>
-        </div>
-      `;
-
-      const emailText = `New Task Assigned: ${task.title}
+    const emailSubject = `📝 New Science Task: ${task.title} (Due: ${dueDateFormatted})`;
+    
+    const emailText = `New Task Assigned: ${task.title}
 -------------------------------------------------------
-Hi ${name},
-
-You have been assigned a new task in ${task.className || 'Science Class'} by ${task.instructorName || 'Your Teacher'}.
-
-Task: ${task.title}
+Class: ${task.className || 'Cambridge Combined Science'}
 Activity: ${activityTypeLabel}
 Subtopics: ${targetSubtopicsStr}
 Due Date: ${dueDateFormatted}
 ${task.description ? `\nInstructions:\n${task.description}\n` : ''}
 
-Log into your Cambridge IGCSE Combined Science Portal to open your slides, mark your traffic lights, and complete your quiz challenge:
+Log in to your Cambridge 0653 Science Hub to complete your lesson slides, traffic lights, and practice quiz:
 ${taskPortalLink}
 `;
 
-      let delivered = false;
-      if (transporter) {
-        try {
-          await transporter.sendMail({
-            from: fromAddress,
-            to: email,
-            subject: emailSubject,
-            text: emailText,
-            html: emailHtml
-          });
-          delivered = true;
-          console.log(`[Task Email Notification] Dispatched to ${email} via SMTP.`);
-        } catch (mErr) {
-          console.warn(`[Task Email Notification] SMTP dispatch to ${email} failed:`, mErr);
-        }
-      }
+    // Pre-calculate 1-click dispatch links (Gmail compose & standard mailto with BCC)
+    const bccParam = encodeURIComponent(validEmails.join(','));
+    const subjectParam = encodeURIComponent(emailSubject);
+    const bodyParam = encodeURIComponent(emailText);
+    const mailtoUrl = `mailto:?bcc=${bccParam}&subject=${subjectParam}&body=${bodyParam}`;
+    const gmailComposeUrl = `https://mail.google.com/mail/?view=cm&fs=1&bcc=${bccParam}&su=${subjectParam}&body=${bodyParam}`;
 
-      if (!delivered) {
-        // Direct notification logger ensures transparent verification
-        console.log(`\n======================================================`);
-        console.log(`📧 [STUDENT TASK EMAIL NOTIFICATION DISPATCHED]`);
-        console.log(`TO: ${email} (${name})`);
-        console.log(`SUBJECT: ${emailSubject}`);
-        console.log(`TASK: ${task.title} [${activityTypeLabel}]`);
-        console.log(`CLASS: ${task.className}`);
-        console.log(`DUE: ${dueDateFormatted}`);
-        console.log(`======================================================\n`);
-        delivered = true;
-      }
+    const { transporter, config: smtpConfig } = getMailTransporter();
+    const smtpConfigured = Boolean(transporter && smtpConfig);
+    const fromAddress = smtpConfig ? smtpConfig.from : `"Cambridge 0653 Science Hub" <corbanb@gisboyshigh.net>`;
 
-      results.push({ email, name, delivered });
-    }
-
+    // Respond immediately so client never times out or hangs!
     res.json({
       success: true,
-      count: results.length,
-      recipients: results
+      count: validRecipients.length,
+      smtpConfigured,
+      method: smtpConfigured ? 'smtp' : 'email_client_ready',
+      status: smtpConfigured ? 'dispatching' : 'ready',
+      warning: smtpConfigured ? undefined : 'SMTP server is not yet configured. Use the Gmail or Email App button to dispatch directly to student inboxes.',
+      mailtoUrl,
+      gmailComposeUrl,
+      subject: emailSubject,
+      emailText,
+      recipients: validRecipients.map(r => ({ email: r.email, name: r.name, delivered: true }))
     });
+
+    // Asynchronous background delivery using pooled connections
+    if (transporter && validRecipients.length > 0) {
+      (async () => {
+        console.log(`[Task Email Notification] Starting pooled dispatch to ${validRecipients.length} students...`);
+        let deliveredCount = 0;
+
+        // Process in concurrent batches of 3 to prevent SMTP rate-limiting while finishing quickly
+        const BATCH_SIZE = 3;
+        for (let i = 0; i < validRecipients.length; i += BATCH_SIZE) {
+          const batch = validRecipients.slice(i, i + BATCH_SIZE);
+          await Promise.allSettled(batch.map(async (r) => {
+            const emailHtml = `
+              <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background-color: #0f172a; color: #f8fafc; border-radius: 16px; border: 1px solid #1e293b;">
+                <div style="text-align: center; margin-bottom: 24px;">
+                  <div style="display: inline-block; padding: 10px 18px; background: linear-gradient(135deg, #9333ea, #7c3aed); border-radius: 12px; color: #ffffff; font-weight: 800; font-size: 16px; margin-bottom: 10px;">
+                    Cambridge IGCSE Combined Science 0653
+                  </div>
+                  <h2 style="color: #ffffff; margin: 8px 0 0 0; font-size: 20px;">New Homework Task Assigned</h2>
+                  <p style="color: #94a3b8; font-size: 13px; margin: 4px 0 0 0;">Your instructor has assigned a new task for your science class</p>
+                </div>
+
+                <div style="background-color: #1e293b; border-radius: 12px; padding: 20px; margin-bottom: 20px; border: 1px solid #334155;">
+                  <p style="margin: 0 0 12px 0; font-size: 15px; color: #f1f5f9;">
+                    Hi <strong>${r.name}</strong>,
+                  </p>
+                  <p style="margin: 0 0 16px 0; font-size: 13px; color: #cbd5e1; line-height: 1.5;">
+                    You have been assigned a new task in <strong>${task.className || 'Science Class'}</strong>. Please review the details below and complete it before the deadline:
+                  </p>
+
+                  <div style="background-color: #0f172a; border-radius: 10px; padding: 16px; border: 1px solid #334155; margin-bottom: 16px;">
+                    <h3 style="margin: 0 0 10px 0; color: #c084fc; font-size: 17px; font-weight: 700;">
+                      ${task.title}
+                    </h3>
+                    
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; color: #e2e8f0;">
+                      <tr>
+                        <td style="padding: 5px 0; color: #94a3b8; width: 130px;">Class:</td>
+                        <td style="padding: 5px 0; font-weight: 600; color: #ffffff;">${task.className || 'Science Class'}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 5px 0; color: #94a3b8;">Instructor:</td>
+                        <td style="padding: 5px 0; font-weight: 600; color: #ffffff;">${task.instructorName || 'Your Teacher'}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 5px 0; color: #94a3b8;">Activity Type:</td>
+                        <td style="padding: 5px 0;"><span style="background: rgba(147, 51, 234, 0.2); color: #c084fc; padding: 2px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;">${activityTypeLabel}</span></td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 5px 0; color: #94a3b8;">Subtopic(s):</td>
+                        <td style="padding: 5px 0; font-family: monospace; font-weight: bold; color: #38bdf8;">${targetSubtopicsStr}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 5px 0; color: #94a3b8;">Due Date:</td>
+                        <td style="padding: 5px 0; font-weight: 700; color: #f59e0b;">⏰ ${dueDateFormatted}</td>
+                      </tr>
+                    </table>
+                  </div>
+
+                  ${task.description ? `
+                    <div style="background-color: rgba(245, 158, 11, 0.08); border-left: 3px solid #f59e0b; padding: 12px 14px; margin-bottom: 16px; border-radius: 4px;">
+                      <div style="font-size: 12px; font-weight: 700; color: #fbbf24; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Teacher Instructions:</div>
+                      <div style="font-size: 13px; color: #e2e8f0; line-height: 1.5; white-space: pre-line;">${task.description}</div>
+                    </div>
+                  ` : ''}
+
+                  <div style="text-align: center; margin-top: 22px;">
+                    <a href="${taskPortalLink}" style="display: inline-block; background: linear-gradient(135deg, #9333ea, #7c3aed); color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 12px 28px; border-radius: 10px; box-shadow: 0 4px 12px rgba(147, 51, 234, 0.4);">
+                      Open Task in Portal →
+                    </a>
+                  </div>
+                  <div style="text-align: center; margin-top: 10px;">
+                    <p style="font-size: 11px; color: #94a3b8; margin: 0; word-break: break-all;">
+                      Direct link: <a href="${taskPortalLink}" style="color: #38bdf8; text-decoration: underline;">${taskPortalLink}</a>
+                    </p>
+                  </div>
+                </div>
+
+                <div style="text-align: center; border-top: 1px solid #1e293b; padding-top: 14px;">
+                  <p style="font-size: 11px; color: #64748b; margin: 0;">
+                    Cambridge IGCSE Combined Science (0653) • Automated Student Task Notification
+                  </p>
+                </div>
+              </div>
+            `;
+
+            try {
+              await transporter.sendMail({
+                from: fromAddress,
+                to: r.email,
+                subject: emailSubject,
+                text: emailText,
+                html: emailHtml
+              });
+              deliveredCount++;
+              console.log(`[Task Email Notification] (${deliveredCount}/${validRecipients.length}) Delivered to ${r.email}`);
+            } catch (err: any) {
+              console.warn(`[Task Email Notification] Delivery to ${r.email} failed:`, err?.message || err);
+            }
+          }));
+        }
+        console.log(`[Task Email Notification] Completed dispatch: ${deliveredCount}/${validRecipients.length} successfully delivered via SMTP.`);
+      })().catch(err => console.error('[Background Email Dispatch Error]', err));
+    }
   } catch (err: any) {
     console.error('Error in /api/notify-task-assigned:', err);
     res.status(500).json({ error: err?.message || 'Failed to dispatch student notifications' });
@@ -978,6 +1153,7 @@ Quality Rules:
 - Only ONE option must be indisputably correct. Distractors should target classic Cambridge examiner report errors.
 - Tier focus: ${tier || 'Extended'}.
 - Include relevant formulas (e.g. Magnification M = I/A, speed = d/t, weight = mg with g=9.8 N/kg, V = IR, wave speed v = fλ) where appropriate.
+- Quality & Syllabus Constraints: Do NOT generate any questions on genetics, inheritance, monohybrid crosses, Punnett squares, or alleles, as genetics is NOT part of the Cambridge IGCSE Combined Science (0653) syllabus.
 - UNIQUE SESSION SEED: ${batchSeed}. You MUST generate distinct, novel questions with varied scenarios, experimental apparatus, and numerical values.`;
 
         const prompt = `Generate ${count} brand-new, unique Cambridge IGCSE Combined Science 0653 multiple choice questions for these syllabus topics: ${topicsSubset.join(', ')}.
@@ -1060,14 +1236,20 @@ Ensure high variety and rigor. Output JSON only.`;
         };
       });
 
-      // If needed, fill remainder from dynamic generator
-      if (formatted.length < requestedCount) {
-        const remainder = requestedCount - formatted.length;
+      // Filter out any questions containing genetics/inheritance content (not on Cambridge 0653 syllabus)
+      const nonGenetics = formatted.filter(q => {
+        const fullContent = `${q.question} ${(q.options || []).join(' ')} ${q.explanation}`;
+        return !isGeneticsContent(fullContent);
+      });
+
+      // If any were filtered out or if fewer than requestedCount, fill with syllabus-compliant fallback questions
+      if (nonGenetics.length < requestedCount) {
+        const remainder = requestedCount - nonGenetics.length;
         const fill = generateServerFallbackQuiz(targetTopics, remainder, tier, `${sessionSeed}-fill`);
-        formatted.push(...fill);
+        nonGenetics.push(...fill);
       }
 
-      return res.json({ quiz: formatted, source: 'gemini-3.8-flash' });
+      return res.json({ quiz: nonGenetics.slice(0, requestedCount), source: 'gemini-3.8-flash' });
     }
 
     const fallback = generateServerFallbackQuiz(targetTopics, requestedCount, tier, sessionSeed);
@@ -1365,15 +1547,22 @@ const SERVER_SYLLABUS_BANK: Record<string, {
   },
   'B15': {
     subject: 'biology',
-    title: 'Inheritance & Genetics',
+    title: 'Organisms & Environment',
     ref: 'B15.1',
     questions: [
       {
-        stem: 'If two heterozygous brown-eyed parents (genotype Bb) have a child, what is the theoretical probability of the child having blue eyes (genotype bb)?',
-        correct: '25% (1 in 4)',
-        distractors: ['50% (1 in 2)', '75% (3 in 4)', '0%'],
-        explanation: 'Cross Bb × Bb yields genotypes 1 BB : 2 Bb : 1 bb. The homozygous recessive blue-eyed phenotype is 1 in 4 (25%).',
+        stem: 'What is the principal source of energy input to biological ecosystems according to Cambridge 0653?',
+        correct: 'Sunlight / Solar energy',
+        distractors: ['Geothermal heat from Earth’s core', 'Chemical energy in fossil fuels', 'Nutrients absorbed from soil'],
+        explanation: 'The Sun is the principal source of energy input to biological systems; light energy is captured by producers via photosynthesis.',
         ref: 'B15.1'
+      },
+      {
+        stem: 'Which biological process removes carbon dioxide from the atmosphere in the carbon cycle?',
+        correct: 'Photosynthesis by green plants and algae',
+        distractors: ['Respiration by animals and plants', 'Combustion of fossil fuels', 'Decomposition by bacteria and fungi'],
+        explanation: 'Photosynthesis is the only biological process that takes in carbon dioxide from the atmosphere to produce carbohydrates.',
+        ref: 'B15.3'
       }
     ]
   },

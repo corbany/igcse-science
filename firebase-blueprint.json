@@ -46,7 +46,9 @@
         "instructorName": { "type": "string", "description": "Name of the creator instructor" },
         "instructorEmail": { "type": "string", "description": "Email of the creator instructor" },
         "createdAt": { "type": "string", "description": "Creation timestamp" },
-        "studentCount": { "type": "number", "description": "Current number of enrolled students" }
+        "studentCount": { "type": "number", "description": "Current number of enrolled students" },
+        "sharedInstructorEmails": { "type": "array", "description": "List of co-instructor emails with shared access to this class" },
+        "sharedInstructors": { "type": "array", "description": "Records of shared instructors and when they joined" }
       },
       "required": ["id", "classCode", "name", "instructorId", "instructorName", "createdAt"]
     },
@@ -66,7 +68,13 @@
         "subtopicQuizScores": { "type": "object", "description": "Map of subtopic quiz scores" },
         "topicConfidence": { "type": "object", "description": "Confidence ratings 1-5 per topic" },
         "trafficLights": { "type": "object", "description": "Traffic light status per subtopic" },
-        "weakTopics": { "type": "array", "description": "List of weak topic codes" }
+        "weakTopics": { "type": "array", "description": "List of weak topic codes" },
+        "totalQuizScore": { "type": "number", "description": "Cumulative total score across quizzes completed" },
+        "badgesCount": { "type": "number", "description": "Total number of virtual medal badges unlocked" },
+        "quizzesCompletedCount": { "type": "number", "description": "Number of quizzes taken" },
+        "xp": { "type": "number", "description": "Aggregated experience points" },
+        "streakDays": { "type": "number", "description": "Unbroken active study streak days" },
+        "featuredBadgeId": { "type": "string", "description": "Identifier of the student's featured badge" }
       },
       "required": ["studentId", "name", "email", "joinedAt"]
     },

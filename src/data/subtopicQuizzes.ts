@@ -185,7 +185,7 @@ export const predefinedSubtopicQuizzes: Record<string, QuizQuestion[]> = {
       options: [
         'Taking in materials for energy, growth, and development',
         'Eliminating metabolic waste products to maintain osmotic balance',
-        'Producing genetically identical offspring through binary fission',
+        'Producing clone daughter cells through binary fission',
         'Translocating sucrose and amino acids through phloem tubes'
       ],
       correctIndex: 0,
@@ -278,7 +278,7 @@ export const predefinedSubtopicQuizzes: Record<string, QuizQuestion[]> = {
       options: [
         'It is a partially permeable barrier that controls the entry and exit of substances',
         'It is a fully permeable rigid layer of cellulose providing tensile support',
-        'It contains genetic instructions for the synthesis of all cellular proteins',
+        'It contains nuclear instructions for the synthesis of all cellular proteins',
         'It stores cell sap and maintains hydrostatic turgor pressure'
       ],
       correctIndex: 0,
@@ -291,7 +291,7 @@ export const predefinedSubtopicQuizzes: Record<string, QuizQuestion[]> = {
       topicCode: 'B2',
       question: 'How do bacterial cells (prokaryotes) differ from eukaryotic plant and animal cells according to the slides?',
       options: [
-        'They have no true nucleus; their genetic material consists of a circular loop of DNA and small plasmids',
+        'They have no true nucleus; their DNA is arranged as a circular loop in the cytoplasm and small plasmids',
         'They do not possess a cell wall, cytoplasm, or cell membrane',
         'They lack ribosomes and cannot synthesize proteins',
         'They have large permanent central vacuoles filled with cell sap'

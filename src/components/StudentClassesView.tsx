@@ -11,7 +11,8 @@ import {
   Clock, 
   User, 
   ArrowRight,
-  Sparkles
+  Sparkles,
+  Trophy
 } from 'lucide-react';
 import { UserProfile, StudentProgress } from '../types';
 import { 
@@ -20,6 +21,7 @@ import {
   fetchStudentEnrolledClasses 
 } from '../services/firestoreService';
 import { StudentTasksPanel } from './StudentTasksPanel';
+import { StudentLeaderboard } from './StudentLeaderboard';
 import { Calendar } from 'lucide-react';
 
 interface StudentClassesViewProps {
@@ -27,7 +29,7 @@ interface StudentClassesViewProps {
   progress: StudentProgress;
   onNavigateToLessons?: (subtopicCode?: string) => void;
   onNavigateToQuizzes?: (topicCode?: string) => void;
-  initialTab?: 'tasks' | 'classes';
+  initialTab?: 'tasks' | 'classes' | 'leaderboard';
 }
 
 export const StudentClassesView: React.FC<StudentClassesViewProps> = ({
@@ -37,7 +39,7 @@ export const StudentClassesView: React.FC<StudentClassesViewProps> = ({
   onNavigateToQuizzes,
   initialTab = 'tasks'
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'tasks' | 'classes'>(initialTab);
+  const [activeSubTab, setActiveSubTab] = useState<'tasks' | 'classes' | 'leaderboard'>(initialTab);
   const [classCodeInput, setClassCodeInput] = useState<string>('');
   const [joining, setJoining] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -126,7 +128,7 @@ export const StudentClassesView: React.FC<StudentClassesViewProps> = ({
       </div>
 
       {/* Navigation Sub-Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
         <button
           onClick={() => setActiveSubTab('tasks')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
@@ -150,9 +152,29 @@ export const StudentClassesView: React.FC<StudentClassesViewProps> = ({
           <Users className="w-4 h-4" />
           <span>Enrolled Classes & Join Code ({enrolledClasses.length})</span>
         </button>
+
+        <button
+          onClick={() => setActiveSubTab('leaderboard')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            activeSubTab === 'leaderboard'
+              ? 'bg-amber-500 text-slate-950 font-black shadow-md shadow-amber-500/20'
+              : 'bg-slate-800 text-slate-400 hover:text-white'
+          }`}
+        >
+          <Trophy className="w-4 h-4 text-amber-400" />
+          <span>Class Leaderboard & Ranks</span>
+        </button>
       </div>
 
-      {activeSubTab === 'tasks' ? (
+      {activeSubTab === 'leaderboard' ? (
+        <StudentLeaderboard
+          user={user}
+          progress={progress}
+          enrolledClassIds={enrolledClasses.map(c => c.id)}
+          onNavigateToLessons={onNavigateToLessons}
+          onNavigateToQuizzes={onNavigateToQuizzes}
+        />
+      ) : activeSubTab === 'tasks' ? (
         <StudentTasksPanel
           user={user}
           progress={progress}
@@ -313,7 +335,14 @@ export const StudentClassesView: React.FC<StudentClassesViewProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 pt-1">
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    onClick={() => setActiveSubTab('leaderboard')}
+                    className="w-full py-2 px-3 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-bold text-amber-300 transition text-center flex items-center justify-center gap-1.5"
+                  >
+                    <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                    <span>View Class Leaderboard & Ranks</span>
+                  </button>
                   {onNavigateToLessons && (
                     <button
                       onClick={() => onNavigateToLessons?.()}

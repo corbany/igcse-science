@@ -34,7 +34,8 @@ import {
   ALL_SYLLABUS_TOPICS, 
   SyllabusTopicOption, 
   generateAIQuiz, 
-  estimateCambridgeGrade 
+  estimateCambridgeGrade,
+  isGeneticsQuestion
 } from '../services/quizService';
 
 interface QuizArenaProps {
@@ -142,12 +143,13 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
         tier: tier
       });
 
-      setQuestions(result.questions);
+      const cleanQuestions = (result.questions || []).filter(q => !isGeneticsQuestion(q));
+      setQuestions(cleanQuestions);
       setGenerationSource(result.source);
       setCurrentIdx(0);
       setSelectedOption(null);
       setIsAnswerSubmitted(false);
-      setUserAnswers(new Array(result.questions.length).fill(null));
+      setUserAnswers(new Array(cleanQuestions.length).fill(null));
       setScore(0);
       setTimerSeconds(0);
       setIsTimerRunning(true);
@@ -268,13 +270,16 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
           <div className="bg-gradient-to-r from-emerald-950/60 via-slate-900 to-teal-950/60 border border-emerald-500/30 rounded-3xl p-6 sm:p-8 shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
               <div className="space-y-2">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>Gemini AI Practice Engine</span>
                   </span>
                   <span className="text-xs text-slate-400">
                     Cambridge IGCSE 0653 Multiple Choice (Paper 1 & 2)
+                  </span>
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                    ✓ Official Syllabus Aligned • Genetics Excluded
                   </span>
                 </div>
                 <h1 className="text-xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-3">

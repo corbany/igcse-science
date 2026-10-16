@@ -4,6 +4,27 @@ export type ExamTier = 'Core' | 'Extended';
 
 export type UserRole = 'student' | 'instructor';
 
+export type BadgeCategory = 'streak' | 'topic_module' | 'quiz' | 'milestone';
+export type BadgeRarity = 'bronze' | 'silver' | 'gold' | 'diamond';
+
+export interface StudentBadge {
+  id: string;
+  title: string;
+  description: string;
+  category: BadgeCategory;
+  rarity: BadgeRarity;
+  icon: string;
+  xpReward: number;
+  unlockedAt?: string;
+  progress?: {
+    current: number;
+    max: number;
+    label: string;
+  };
+  topicCode?: string;
+  subject?: ScienceSubject;
+}
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -13,6 +34,10 @@ export interface UserProfile {
   examDate?: string;
   dailyStudyMinutes?: number;
   targetGrade?: string;
+  streakDays?: number;
+  lastActiveDate?: string;
+  featuredBadgeId?: string;
+  xp?: number;
 }
 
 export interface SlideItem {
@@ -175,6 +200,31 @@ export interface StudentProgress {
   savedNotes: Record<string, string>; // syllabus code -> note content
   flaggedQuestions?: string[];
   lastActive?: string;
+  currentStreak?: number;
+  longestStreak?: number;
+  lastStreakDate?: string;
+  activeDates?: string[];
+  earnedBadges?: { badgeId: string; unlockedAt: string }[];
+  featuredBadgeId?: string;
+}
+
+export interface LeaderboardEntry {
+  studentId: string;
+  name: string;
+  email: string;
+  tier: ExamTier;
+  xp: number;
+  rank: number;
+  streakDays: number;
+  completedLessonsCount: number;
+  badgesCount: number;
+  totalQuizScore?: number;
+  quizzesCompletedCount?: number;
+  unlockedBadges?: StudentBadge[];
+  featuredBadge?: StudentBadge;
+  quizAccuracy?: number; // Confidential: only visible to current student on their private stats
+  lastActive: string;
+  isCurrentUser?: boolean;
 }
 
 export interface ClassStudentData {
@@ -264,6 +314,7 @@ export interface ClassTask {
   dueDate: string; // ISO date string (e.g. 2026-10-10T23:59:59Z)
   instructorId: string;
   instructorName: string;
+  instructorEmail?: string;
   createdAt: string;
 }
 
@@ -285,3 +336,11 @@ export interface TaskWithSubmission extends ClassTask {
   submission?: TaskSubmission;
   isOverdue?: boolean;
 }
+
+export interface SharedInstructorRecord {
+  email: string;
+  name?: string;
+  sharedAt: string;
+  addedBy: string;
+}
+

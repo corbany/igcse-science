@@ -566,6 +566,9 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
       const existingScore = subtopicQuizScores[subtopicCode];
       if (existingScore && existingScore.percentage >= 80) {
         onUpdateTrafficLight(subtopicCode, 'green');
+        if (!completedLessons.includes(subtopicCode)) {
+          onToggleCompleteLesson(subtopicCode);
+        }
       } else {
         // Open the 10-question quiz modal
         startQuizForSubtopic(subtopicCode);
@@ -573,6 +576,9 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     } else {
       // Red or Orange can be selected directly based on student self-assessment
       onUpdateTrafficLight(subtopicCode, status);
+      if (!completedLessons.includes(subtopicCode)) {
+        onToggleCompleteLesson(subtopicCode);
+      }
     }
   };
 
@@ -620,8 +626,12 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
     onSaveQuizResult(quizSubtopicCode, result);
 
-    if (passed) {
-      onUpdateTrafficLight(quizSubtopicCode, 'green');
+    const trafficStatus: TrafficLightStatus = percentage >= 80 ? 'green' : percentage >= 50 ? 'orange' : 'red';
+    onUpdateTrafficLight(quizSubtopicCode, trafficStatus);
+
+    // Automatically mark the slide deck as completed so live analytics and syllabus % update instantly
+    if (!completedLessons.includes(quizSubtopicCode)) {
+      onToggleCompleteLesson(quizSubtopicCode);
     }
   };
 
@@ -638,7 +648,13 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
   const goToNextSlide = () => {
     if (currentDeck && activeSlideIndex < currentDeck.slides.length - 1) {
-      setActiveSlideIndex(prev => prev + 1);
+      const nextIdx = activeSlideIndex + 1;
+      setActiveSlideIndex(nextIdx);
+      if (nextIdx === currentDeck.slides.length - 1 && activeDeckIndex === (currentSubtopic?.decks.length || 1) - 1) {
+        if (!completedLessons.includes(currentSubtopic.subtopicCode)) {
+          onToggleCompleteLesson(currentSubtopic.subtopicCode);
+        }
+      }
     } else if (activeDeckIndex < (currentSubtopic?.decks.length || 1) - 1) {
       setActiveDeckIndex(prev => prev + 1);
       setActiveSlideIndex(0);
@@ -1314,14 +1330,35 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                 </button>
               </div>
 
-              {/* Take/Retake Quiz Direct Action Link */}
-              <div className="flex items-center justify-between text-xs pt-1">
-                <span className="text-slate-400 text-[11px]">
-                  Want to verify or improve your knowledge?
-                </span>
+              {/* Slide Deck Read Status & Take/Retake Quiz Action Links */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs pt-2 border-t border-slate-800/60">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => onToggleCompleteLesson(currentSubtopic.subtopicCode)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition ${
+                      completedLessons.includes(currentSubtopic.subtopicCode)
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
+                        : theme === 'dark'
+                          ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
+                    }`}
+                    title="Mark or unmark this slide deck as read & completed"
+                  >
+                    <Check className={`w-3.5 h-3.5 ${completedLessons.includes(currentSubtopic.subtopicCode) ? 'text-white' : 'text-emerald-400'}`} />
+                    <span>
+                      {completedLessons.includes(currentSubtopic.subtopicCode)
+                        ? '✓ Slide Deck Completed'
+                        : 'Mark Slide Deck as Read'}
+                    </span>
+                  </button>
+                  <span className="text-slate-400 text-[11px] hidden sm:inline">
+                    Live slide deck & syllabus tracking
+                  </span>
+                </div>
+
                 <button
                   onClick={() => startQuizForSubtopic(currentSubtopic.subtopicCode)}
-                  className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 transition"
+                  className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 transition self-start sm:self-auto"
                 >
                   <span>Take 10-Question Knowledge Check</span>
                   <ArrowRight className="w-3.5 h-3.5" />

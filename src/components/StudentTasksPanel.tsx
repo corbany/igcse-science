@@ -29,7 +29,8 @@ import {
 } from '../types';
 import { 
   fetchTasksForStudent, 
-  updateTaskSubmission 
+  updateTaskSubmission,
+  subscribeToStudentTasks
 } from '../services/firestoreService';
 
 interface StudentTasksPanelProps {
@@ -54,12 +55,14 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
   const [statusFilter, setStatusFilter] = useState<'all' | 'todo' | 'overdue' | 'completed'>('todo');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string>('Live');
 
   const loadStudentTasks = async () => {
     setLoading(true);
     try {
       const fetched = await fetchTasksForStudent(user, enrolledClassIds, progress);
       setTasks(fetched);
+      setLastRefreshedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     } catch (err) {
       console.error('Failed to load student tasks:', err);
     } finally {
@@ -69,7 +72,31 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
 
   useEffect(() => {
     loadStudentTasks();
-  }, [user.id, enrolledClassIds.length]);
+
+    // Live subscription: receives instant updates when instructor creates tasks in Firestore
+    const unsubscribe = subscribeToStudentTasks(user, enrolledClassIds, progress, (liveTasks) => {
+      setTasks(liveTasks);
+      setLoading(false);
+      setLastRefreshedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    });
+
+    const handleCustomEvents = () => {
+      loadStudentTasks();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('igcse_task_created', handleCustomEvents);
+      window.addEventListener('igcse_task_submission_updated', handleCustomEvents);
+    }
+
+    return () => {
+      unsubscribe();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('igcse_task_created', handleCustomEvents);
+        window.removeEventListener('igcse_task_submission_updated', handleCustomEvents);
+      }
+    };
+  }, [user.id, (enrolledClassIds || []).join(','), progress]);
 
   const handleToggleTaskComplete = async (task: TaskWithSubmission) => {
     setUpdatingTaskId(task.id);
@@ -180,7 +207,7 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
             className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center gap-1.5 text-xs font-semibold self-start sm:self-center"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
+            <span>Refresh ({lastRefreshedAt})</span>
           </button>
         </div>
 
@@ -342,25 +369,32 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
                 <div className="space-y-3">
                   {/* Top Row: Type & Due Badge */}
                   <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1.5 ${
-                      task.type === 'both'
-                        ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
-                        : task.type === 'slides_traffic_light'
-                          ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                          : task.type === 'practice_quiz'
-                            ? 'bg-sky-500/15 text-sky-400 border-sky-500/30'
-                            : 'bg-purple-500/15 text-purple-300 border-purple-500/30'
-                    }`}>
-                      {task.type === 'both' && <Sparkles className="w-3 h-3 text-purple-400" />}
-                      {task.type === 'slides_traffic_light' && <BookOpen className="w-3 h-3 text-emerald-400" />}
-                      {task.type === 'practice_quiz' && <Award className="w-3 h-3 text-sky-400" />}
-                      {task.type === 'exam_paper' && <FileText className="w-3 h-3" />}
-                      <span>
-                        {task.type === 'both' ? 'Both: Slides & Quiz' :
-                         task.type === 'slides_traffic_light' ? 'Slides & Traffic Lights' :
-                         task.type === 'practice_quiz' ? 'Practice Quiz' : 'Assignment'}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {task.className && (
+                        <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                          {task.className}
+                        </span>
+                      )}
+                      <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1.5 ${
+                        task.type === 'both'
+                          ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                          : task.type === 'slides_traffic_light'
+                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                            : task.type === 'practice_quiz'
+                              ? 'bg-sky-500/15 text-sky-400 border-sky-500/30'
+                              : 'bg-purple-500/15 text-purple-300 border-purple-500/30'
+                      }`}>
+                        {task.type === 'both' && <Sparkles className="w-3 h-3 text-purple-400" />}
+                        {task.type === 'slides_traffic_light' && <BookOpen className="w-3 h-3 text-emerald-400" />}
+                        {task.type === 'practice_quiz' && <Award className="w-3 h-3 text-sky-400" />}
+                        {task.type === 'exam_paper' && <FileText className="w-3 h-3" />}
+                        <span>
+                          {task.type === 'both' ? 'Both: Slides & Quiz' :
+                           task.type === 'slides_traffic_light' ? 'Slides & Traffic Lights' :
+                           task.type === 'practice_quiz' ? 'Practice Quiz' : 'Assignment'}
+                        </span>
                       </span>
-                    </span>
+                    </div>
 
                     {/* Due Date Indicator */}
                     <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-lg border flex items-center gap-1 ${

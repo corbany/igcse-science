@@ -70,7 +70,9 @@ import {
   fetchInstructorInvites, 
   deleteInstructorInvite,
   INITIAL_INSTRUCTOR_EMAILS,
-  subscribeToClassStudents
+  subscribeToClassStudents,
+  shareClassWithInstructor,
+  removeSharedInstructorFromClass
 } from '../services/firestoreService';
 import { allSubtopicsData } from '../data/subtopicSlidesData';
 import { UserProfile, ScienceSubject } from '../types';
@@ -80,6 +82,9 @@ interface StudentRosterItem {
   name: string;
   tier: 'Core' | 'Extended';
   progressPct: number;
+  slideDeckCount: number;
+  slideDeckPct: number;
+  syllabusPct: number;
   bioScore: number;
   chemScore: number;
   physScore: number;
@@ -126,14 +131,24 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   const [newClassDesc, setNewClassDesc] = useState<string>('');
   const [creatingClass, setCreatingClass] = useState<boolean>(false);
 
-  // Load classes created by this instructor
+  // Share class with co-instructors modal state
+  const [showShareModal, setShowShareModal] = useState<boolean>(false);
+  const [classToShare, setClassToShare] = useState<ClassItem | null>(null);
+  const [shareEmailInput, setShareEmailInput] = useState<string>('');
+  const [sharingClass, setSharingClass] = useState<boolean>(false);
+  const [shareFeedbackMsg, setShareFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Load classes created by or shared with this instructor
   const loadInstructorClasses = async () => {
     setLoadingClasses(true);
     try {
-      const result = await fetchClassesByInstructor(currentUser.id);
+      const result = await fetchClassesByInstructor(currentUser.id, currentUser.email);
       setClasses(result);
-      if (result.length > 0 && !selectedClass) {
-        setSelectedClass(result[0]);
+      if (result.length > 0) {
+        setSelectedClass(current => {
+          if (!current) return result[0];
+          return result.find(c => c.id === current.id) || result[0];
+        });
       }
     } catch (err) {
       console.error('Failed to load instructor classes:', err);
@@ -144,7 +159,18 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
 
   useEffect(() => {
     loadInstructorClasses();
-  }, [currentUser.id]);
+
+    const handleClassUpdate = () => {
+      loadInstructorClasses();
+    };
+
+    window.addEventListener('igcse_classes_updated', handleClassUpdate);
+    window.addEventListener('storage', handleClassUpdate);
+    return () => {
+      window.removeEventListener('igcse_classes_updated', handleClassUpdate);
+      window.removeEventListener('storage', handleClassUpdate);
+    };
+  }, [currentUser.id, currentUser.email]);
 
   // Real-time live subscription for students in selected class
   useEffect(() => {
@@ -247,6 +273,55 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
     link.download = `${selectedClass.name.replace(/[^a-zA-Z0-9]/g, '_')}_Student_Roster.csv`;
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  // Handlers for sharing classes with co-instructors
+  const handleShareClassSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!classToShare || !shareEmailInput.trim()) return;
+    setSharingClass(true);
+    setShareFeedbackMsg(null);
+    try {
+      const res = await shareClassWithInstructor(classToShare.id, shareEmailInput.trim(), currentUser);
+      if (res.success && res.classItem) {
+        setShareFeedbackMsg({ type: 'success', text: res.message });
+        setShareEmailInput('');
+        setClassToShare(res.classItem);
+        setClasses(prev => prev.map(c => c.id === res.classItem!.id ? res.classItem! : c));
+        if (selectedClass?.id === res.classItem.id) {
+          setSelectedClass(res.classItem);
+        }
+      } else {
+        setShareFeedbackMsg({ type: 'error', text: res.message || 'Failed to share class.' });
+      }
+    } catch (err: any) {
+      setShareFeedbackMsg({ type: 'error', text: err?.message || 'Error sharing class.' });
+    } finally {
+      setSharingClass(false);
+    }
+  };
+
+  const handleRemoveSharedInstructor = async (targetEmail: string) => {
+    if (!classToShare) return;
+    setSharingClass(true);
+    setShareFeedbackMsg(null);
+    try {
+      const res = await removeSharedInstructorFromClass(classToShare.id, targetEmail);
+      if (res.success && res.classItem) {
+        setShareFeedbackMsg({ type: 'success', text: res.message });
+        setClassToShare(res.classItem);
+        setClasses(prev => prev.map(c => c.id === res.classItem!.id ? res.classItem! : c));
+        if (selectedClass?.id === res.classItem.id) {
+          setSelectedClass(res.classItem);
+        }
+      } else {
+        setShareFeedbackMsg({ type: 'error', text: res.message || 'Failed to remove instructor access.' });
+      }
+    } catch (err: any) {
+      setShareFeedbackMsg({ type: 'error', text: err?.message || 'Error removing instructor access.' });
+    } finally {
+      setSharingClass(false);
+    }
   };
 
   // -------------------------------------------------------------
@@ -401,13 +476,22 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
       const chemScore = chemQuiz && chemQuiz.total > 0 ? Math.round((chemQuiz.score / chemQuiz.total) * 100) : 0;
       const physScore = physQuiz && physQuiz.total > 0 ? Math.round((physQuiz.score / physQuiz.total) * 100) : 0;
       
-      const progressPct = Math.min(100, Math.round(((std.completedLessonsCount || 0) / 33) * 100));
+      const completedDecksSet = new Set<string>([
+        ...(std.completedLessons || []),
+        ...Object.keys(std.trafficLights || {}),
+        ...Object.keys(std.subtopicQuizScores || {})
+      ]);
+      const slideDeckCount = Math.max(std.completedLessonsCount || 0, completedDecksSet.size);
+      const slideDeckPct = Math.min(100, Math.round((slideDeckCount / 106) * 100));
+      const syllabusPct = Math.min(100, Math.round((completedDecksSet.size / 106) * 100));
+
+      const progressPct = syllabusPct;
       const weakArea = std.weakTopics && std.weakTopics.length > 0 ? std.weakTopics.join(', ') : 'None identified';
       
       let status: 'Excelling' | 'On Track' | 'Intervention Required' = 'On Track';
-      if (progressPct >= 80) {
+      if (progressPct >= 75) {
         status = 'Excelling';
-      } else if (progressPct < 40 || (std.weakTopics && std.weakTopics.length >= 3)) {
+      } else if (progressPct < 35 || (std.weakTopics && std.weakTopics.length >= 3)) {
         status = 'Intervention Required';
       }
 
@@ -416,6 +500,9 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         name: std.name || 'Student',
         tier: std.tier || 'Extended',
         progressPct,
+        slideDeckCount,
+        slideDeckPct,
+        syllabusPct,
         bioScore,
         chemScore,
         physScore,
@@ -441,6 +528,15 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
 
   const avgProgress = rosterStudents.length > 0
     ? Math.round(rosterStudents.reduce((acc, s) => acc + s.progressPct, 0) / rosterStudents.length)
+    : 0;
+  const avgSlideDeckPct = rosterStudents.length > 0
+    ? Math.round(rosterStudents.reduce((acc, s) => acc + s.slideDeckPct, 0) / rosterStudents.length)
+    : 0;
+  const avgSyllabusPct = rosterStudents.length > 0
+    ? Math.round(rosterStudents.reduce((acc, s) => acc + s.syllabusPct, 0) / rosterStudents.length)
+    : 0;
+  const avgSlideCount = rosterStudents.length > 0
+    ? Math.round(rosterStudents.reduce((acc, s) => acc + s.slideDeckCount, 0) / rosterStudents.length)
     : 0;
   const avgBio = rosterStudents.length > 0
     ? Math.round(rosterStudents.reduce((acc, s) => acc + s.bioScore, 0) / rosterStudents.length)
@@ -653,6 +749,9 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {classes.map(c => {
                   const isSelected = selectedClass?.id === c.id;
+                  const isOwner = c.instructorEmail?.toLowerCase() === currentUser.email?.toLowerCase() || c.instructorId === currentUser.id;
+                  const sharedCount = c.sharedInstructorEmails?.length || 0;
+
                   return (
                     <div
                       key={c.id}
@@ -668,6 +767,13 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40">
                               {c.classCode}
+                            </span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                              isOwner 
+                                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' 
+                                : 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                            }`}>
+                              {isOwner ? 'Class Owner' : 'Co-Instructor'}
                             </span>
                             <span className="text-[10px] uppercase font-semibold text-slate-400">
                               {c.subject}
@@ -691,31 +797,51 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                         </button>
                       </div>
 
-                      <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                      <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs gap-2 flex-wrap">
                         <span className="text-slate-400 font-medium">
-                          <span className="font-bold text-white">{c.studentCount || 0}</span> students enrolled
+                          <span className="font-bold text-white">{c.studentCount || 0}</span> enrolled
+                          {sharedCount > 0 ? (
+                            <span className="text-purple-300 ml-1.5">• {sharedCount} co-teacher{sharedCount > 1 ? 's' : ''}</span>
+                          ) : (
+                            <span className="text-slate-500 ml-1.5">• Sole teacher</span>
+                          )}
                         </span>
 
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCopyCode(c.classCode);
-                          }}
-                          className="flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-purple-300 font-medium transition"
-                          title="Copy class code to share with students"
-                        >
-                          {copiedCode === c.classCode ? (
-                            <>
-                              <Check className="w-3 h-3 text-emerald-400" />
-                              <span className="text-emerald-400 font-bold">Copied!</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3 h-3" />
-                              <span>Copy Code</span>
-                            </>
-                          )}
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setClassToShare(c);
+                              setShowShareModal(true);
+                            }}
+                            className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded bg-purple-600/25 hover:bg-purple-600/40 text-purple-200 border border-purple-500/30 font-semibold transition"
+                            title="Share class with other instructors so you can collaborate on tasks & analytics"
+                          >
+                            <Users className="w-3 h-3 text-purple-300" />
+                            <span>Share</span>
+                          </button>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCopyCode(c.classCode);
+                            }}
+                            className="flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition"
+                            title="Copy class code to share with students"
+                          >
+                            {copiedCode === c.classCode ? (
+                              <>
+                                <Check className="w-3 h-3 text-emerald-400" />
+                                <span className="text-emerald-400 font-bold">Copied!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3" />
+                                <span>Code</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -727,25 +853,59 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                 <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm">
                   {/* Class Header Bar */}
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-slate-800">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
                           Class Tracking Dashboard
                         </span>
                         <span className="text-xs font-mono font-bold text-emerald-400">
                           Code: {selectedClass.classCode}
                         </span>
+                        {selectedClass.instructorEmail?.toLowerCase() === currentUser.email?.toLowerCase() ? (
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            You are the Owner
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                            Shared with you
+                          </span>
+                        )}
                       </div>
                       <h2 className="text-xl font-black text-white">{selectedClass.name}</h2>
-                      <p className="text-xs text-slate-400">
-                        Instructor: <strong className="text-slate-200">{selectedClass.instructorName}</strong> • Linked to your account
-                      </p>
+                      <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
+                        <span>
+                          Created by: <strong className="text-slate-200">{selectedClass.instructorName || selectedClass.instructorEmail}</strong>
+                        </span>
+                        {selectedClass.sharedInstructors && selectedClass.sharedInstructors.length > 0 && (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-slate-500">• Co-Teachers:</span>
+                            {selectedClass.sharedInstructors.map(inst => (
+                              <span key={inst.email} className="px-2 py-0.5 rounded-md bg-purple-500/15 border border-purple-500/30 text-purple-300 text-[10px] font-medium flex items-center gap-1">
+                                <UserCheck className="w-3 h-3 text-purple-400" />
+                                <span>{inst.email}</span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-2.5 flex-wrap">
                       <button
+                        onClick={() => {
+                          setClassToShare(selectedClass);
+                          setShowShareModal(true);
+                        }}
+                        className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
+                        title="Share this class with other instructors so they can add tasks and track the same progress"
+                      >
+                        <Users className="w-4 h-4" />
+                        <span>Share Class {selectedClass.sharedInstructorEmails?.length ? `(${selectedClass.sharedInstructorEmails.length})` : ''}</span>
+                      </button>
+
+                      <button
                         onClick={() => handleCopyCode(selectedClass.classCode)}
-                        className="px-3.5 py-2 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/40 text-xs font-bold flex items-center gap-1.5 transition"
+                        className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-purple-300 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition"
                       >
                         {copiedCode === selectedClass.classCode ? (
                           <>
@@ -755,7 +915,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                         ) : (
                           <>
                             <Copy className="w-4 h-4" />
-                            <span>Share Class Code ({selectedClass.classCode})</span>
+                            <span>Copy Code ({selectedClass.classCode})</span>
                           </>
                         )}
                       </button>
@@ -771,44 +931,68 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                     </div>
                   </div>
 
-                  {/* Summary Metric Chips */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
-                      <span className="text-xs text-slate-400">Enrolled Students</span>
-                      <div className="text-2xl font-black text-white mt-1 font-mono">{classStudents.length}</div>
-                      <span className="text-[11px] text-purple-400 mt-0.5 block">Joined with code {selectedClass.classCode}</span>
-                    </div>
+                  {/* Summary Metric Chips with Live Slide Deck Completion & Syllabus % */}
+                  {(() => {
+                    const totalStudents = classStudents.length;
+                    const totalDecksSum = classStudents.reduce((acc, s) => acc + (s.completedLessonsCount || 0), 0);
+                    const avgDecksPerStudent = totalStudents > 0 ? Math.round((totalDecksSum / totalStudents) * 10) / 10 : 0;
+                    const classAvgSlidePct = totalStudents > 0
+                      ? Math.round(classStudents.reduce((acc, s) => acc + Math.min(100, Math.round(((s.completedLessonsCount || 0) / 106) * 100)), 0) / totalStudents)
+                      : 0;
+                    const classAvgSyllabusPct = totalStudents > 0
+                      ? Math.round(classStudents.reduce((acc, s) => {
+                          const covered = Math.max(
+                            s.completedLessonsCount || 0,
+                            Math.max(Object.keys(s.trafficLights || {}).length, Object.keys(s.subtopicQuizScores || {}).length)
+                          );
+                          return acc + Math.min(100, Math.round((covered / 106) * 100));
+                        }, 0) / totalStudents)
+                      : 0;
+                    const classAvgQuiz = totalStudents > 0
+                      ? Math.round(classStudents.reduce((acc, s) => {
+                          const scores = Object.values(s.quizScores || {});
+                          if (scores.length === 0) return acc;
+                          const studentAvg = scores.reduce((a, b) => a + (b.score / (b.total || 1)), 0) / scores.length;
+                          return acc + (studentAvg * 100);
+                        }, 0) / totalStudents)
+                      : 0;
 
-                    <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
-                      <span className="text-xs text-slate-400">Class Average Quiz Score</span>
-                      <div className="text-2xl font-black text-emerald-400 mt-1">
-                        {classStudents.length > 0 
-                          ? Math.round(classStudents.reduce((acc, s) => {
-                              const scores = Object.values(s.quizScores || {});
-                              if (scores.length === 0) return acc;
-                              const studentAvg = scores.reduce((a, b) => a + (b.score / (b.total || 1)), 0) / scores.length;
-                              return acc + (studentAvg * 100);
-                            }, 0) / classStudents.length)
-                          : 0}%
-                      </div>
-                      <span className="text-[11px] text-slate-400 mt-0.5 block">Across Biology, Chemistry & Physics</span>
-                    </div>
+                    return (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
+                          <span className="text-xs text-slate-400">Enrolled Students</span>
+                          <div className="text-2xl font-black text-white mt-1 font-mono">{totalStudents}</div>
+                          <span className="text-[11px] text-purple-400 mt-0.5 block">Joined via code {selectedClass.classCode}</span>
+                        </div>
 
-                    <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
-                      <span className="text-xs text-slate-400">Total Lessons Completed</span>
-                      <div className="text-2xl font-black text-sky-400 mt-1 font-mono">
-                        {classStudents.reduce((acc, s) => acc + (s.completedLessonsCount || 0), 0)}
+                        <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
+                          <span className="text-xs text-slate-400">Avg Slide Deck Completion</span>
+                          <div className="text-2xl font-black text-emerald-400 mt-1 font-mono">{classAvgSlidePct}%</div>
+                          <span className="text-[11px] text-slate-400 mt-0.5 block">{avgDecksPerStudent} of 106 decks read avg</span>
+                        </div>
+
+                        <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
+                          <span className="text-xs text-slate-400">Avg Syllabus Coverage</span>
+                          <div className="text-2xl font-black text-sky-400 mt-1 font-mono">{classAvgSyllabusPct}%</div>
+                          <span className="text-[11px] text-slate-400 mt-0.5 block">Combined slides & quiz checks</span>
+                        </div>
+
+                        <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4">
+                          <span className="text-xs text-slate-400">Class Average Quiz Score</span>
+                          <div className="text-2xl font-black text-amber-400 mt-1 font-mono">{classAvgQuiz}%</div>
+                          <span className="text-[11px] text-slate-400 mt-0.5 block">Across Bio, Chem & Physics</span>
+                        </div>
                       </div>
-                      <span className="text-[11px] text-slate-400 mt-0.5 block">Sum of all student completed decks</span>
-                    </div>
-                  </div>
+                    );
+                  })()}
 
                   {/* Students Table */}
                   <div className="space-y-3">
                     <h3 className="text-sm font-bold text-white flex items-center justify-between">
                       <span>Enrolled Students & Progress Breakdown</span>
-                      <span className="text-xs font-normal text-slate-400">
-                        Live progress synced from student activity
+                      <span className="text-xs font-normal text-emerald-400 flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span>Live real-time student updates</span>
                       </span>
                     </h3>
 
@@ -832,9 +1016,11 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                             <tr>
                               <th className="p-3">Student</th>
                               <th className="p-3">Tier</th>
-                              <th className="p-3">Completed Lessons</th>
+                              <th className="p-3">Slide Decks Completed</th>
+                              <th className="p-3">Syllabus %</th>
+                              <th className="p-3">Traffic Lights</th>
                               <th className="p-3">Quiz Scores</th>
-                              <th className="p-3">Weak Topics (Confidence ≤ 2)</th>
+                              <th className="p-3">Weak Topics</th>
                               <th className="p-3">Last Active</th>
                               <th className="p-3">Action</th>
                             </tr>
@@ -844,6 +1030,19 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                               const bioScore = std.quizScores?.biology ? Math.round((std.quizScores.biology.score / std.quizScores.biology.total) * 100) : '-';
                               const chemScore = std.quizScores?.chemistry ? Math.round((std.quizScores.chemistry.score / std.quizScores.chemistry.total) * 100) : '-';
                               const physScore = std.quizScores?.physics ? Math.round((std.quizScores.physics.score / std.quizScores.physics.total) * 100) : '-';
+
+                              const studentDecksSet = new Set<string>([
+                                ...(std.completedLessons || []),
+                                ...Object.keys(std.trafficLights || {}),
+                                ...Object.keys(std.subtopicQuizScores || {})
+                              ]);
+                              const decksCompleted = Math.max(std.completedLessonsCount || 0, studentDecksSet.size);
+                              const slideDeckPct = Math.min(100, Math.round((decksCompleted / 106) * 100));
+                              const syllabusPct = Math.min(100, Math.round((studentDecksSet.size / 106) * 100));
+
+                              const greenCount = Object.values(std.trafficLights || {}).filter(t => t === 'green').length;
+                              const orangeCount = Object.values(std.trafficLights || {}).filter(t => t === 'orange').length;
+                              const redCount = Object.values(std.trafficLights || {}).filter(t => t === 'red').length;
 
                               return (
                                 <tr key={std.studentId} className="hover:bg-slate-800/40 transition">
@@ -867,8 +1066,39 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                                       {std.tier}
                                     </span>
                                   </td>
-                                  <td className="p-3 font-mono font-bold text-emerald-400">
-                                    {std.completedLessonsCount} Decks
+                                  <td className="p-3">
+                                    <div className="space-y-1">
+                                      <div className="flex items-center justify-between text-[11px] font-mono">
+                                        <span className="font-bold text-emerald-400">{decksCompleted} / 106</span>
+                                        <span className="text-slate-400">{slideDeckPct}%</span>
+                                      </div>
+                                      <div className="w-24 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                                        <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${slideDeckPct}%` }} />
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="p-3">
+                                    <div className="space-y-1">
+                                      <div className="flex items-center justify-between text-[11px] font-mono">
+                                        <span className="font-bold text-sky-400">{syllabusPct}%</span>
+                                      </div>
+                                      <div className="w-20 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                                        <div className="h-full bg-sky-500 rounded-full" style={{ width: `${syllabusPct}%` }} />
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="p-3">
+                                    <div className="flex items-center gap-1.5 text-[11px] font-mono">
+                                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title="Green Mastery">
+                                        🟢 {greenCount}
+                                      </span>
+                                      <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30" title="Orange Needs Revision">
+                                        🟠 {orangeCount}
+                                      </span>
+                                      <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30" title="Red Priority">
+                                        🔴 {redCount}
+                                      </span>
+                                    </div>
                                   </td>
                                   <td className="p-3">
                                     <div className="flex items-center gap-1.5 font-mono text-[11px]">
@@ -1082,13 +1312,21 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
       {/* ============================================================= */}
       {dashboardTab === 'roster' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm">
-              <span className="text-xs text-slate-400 font-medium">Cohort Syllabus Mastery</span>
-              <div className="text-2xl font-black text-white mt-1 font-mono">{avgProgress}%</div>
+              <span className="text-xs text-slate-400 font-medium">Cohort Syllabus Coverage</span>
+              <div className="text-2xl font-black text-sky-400 mt-1 font-mono">{avgSyllabusPct}%</div>
               <div className="text-xs text-slate-400 mt-1 flex items-center gap-1 font-medium">
                 <Users className="w-3.5 h-3.5 text-purple-400" />
                 <span>{rosterStudents.length} student{rosterStudents.length === 1 ? '' : 's'} enrolled</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm">
+              <span className="text-xs text-slate-400 font-medium">Slide Decks Completed</span>
+              <div className="text-2xl font-black text-emerald-400 mt-1 font-mono">{avgSlideDeckPct}%</div>
+              <div className="text-xs text-slate-400 mt-1">
+                {avgSlideCount} of 106 decks read avg
               </div>
             </div>
 
@@ -1212,6 +1450,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                     <tr>
                       <th className="p-3 border-b border-slate-800">Student Name</th>
                       <th className="p-3 border-b border-slate-800">Tier</th>
+                      <th className="p-3 border-b border-slate-800">Slide Decks</th>
                       <th className="p-3 border-b border-slate-800">Syllabus %</th>
                       <th className="p-3 border-b border-slate-800">Biology</th>
                       <th className="p-3 border-b border-slate-800">Chemistry</th>
@@ -1246,7 +1485,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                                     tier: std.tier,
                                     joinedAt: '',
                                     lastActive: '',
-                                    completedLessonsCount: Math.round((std.progressPct / 100) * 33),
+                                    completedLessonsCount: std.slideDeckCount,
                                     quizScores: {
                                       biology: { score: std.bioScore, total: 100, date: '' },
                                       chemistry: { score: std.chemScore, total: 100, date: '' },
@@ -1273,7 +1512,27 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                               {std.tier}
                             </span>
                           </td>
-                          <td className="p-3 font-mono font-bold text-emerald-400">{std.progressPct}%</td>
+                          <td className="p-3">
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between text-[11px] font-mono">
+                                <span className="font-bold text-emerald-400">{std.slideDeckCount} / 106</span>
+                                <span className="text-slate-400">{std.slideDeckPct}%</span>
+                              </div>
+                              <div className="w-20 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                                <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${std.slideDeckPct}%` }} />
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between text-[11px] font-mono">
+                                <span className="font-bold text-sky-400">{std.syllabusPct}%</span>
+                              </div>
+                              <div className="w-16 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                                <div className="h-full bg-sky-500 rounded-full" style={{ width: `${std.syllabusPct}%` }} />
+                              </div>
+                            </div>
+                          </td>
                           <td className="p-3 font-mono">{std.bioScore}%</td>
                           <td className="p-3 font-mono">{std.chemScore}%</td>
                           <td className="p-3 font-mono">{std.physScore}%</td>
@@ -1668,6 +1927,158 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
       )}
 
       {/* ============================================================= */}
+      {/* MODAL: SHARE CLASS WITH CO-INSTRUCTORS                        */}
+      {/* ============================================================= */}
+      {showShareModal && classToShare && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-purple-500/40 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-purple-500/20 text-purple-400">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Share Class with Instructors</h3>
+                  <p className="text-xs text-slate-400">Collaborative class teaching & shared analytics</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowShareModal(false);
+                  setClassToShare(null);
+                  setShareFeedbackMsg(null);
+                }}
+                className="p-1 text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Target Class Info */}
+            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white">{classToShare.name}</span>
+                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                  {classToShare.classCode}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Created by: <span className="text-slate-200 font-semibold">{classToShare.instructorName || classToShare.instructorEmail}</span> ({classToShare.instructorEmail})
+              </p>
+            </div>
+
+            {/* Share Feedback Notice */}
+            {shareFeedbackMsg && (
+              <div className={`p-3 rounded-xl border text-xs flex items-center gap-2 ${
+                shareFeedbackMsg.type === 'success'
+                  ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                  : 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+              }`}>
+                {shareFeedbackMsg.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                )}
+                <span>{shareFeedbackMsg.text}</span>
+              </div>
+            )}
+
+            {/* Existing Shared Co-Instructors */}
+            <div className="space-y-2">
+              <label className="block text-xs font-semibold text-slate-300">
+                Current Co-Instructors with Access
+              </label>
+              {classToShare.sharedInstructors && classToShare.sharedInstructors.length > 0 ? (
+                <div className="space-y-2">
+                  {classToShare.sharedInstructors.map(inst => (
+                    <div
+                      key={inst.email}
+                      className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 text-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full bg-purple-600/30 text-purple-300 font-bold flex items-center justify-center text-xs">
+                          {inst.email.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="font-semibold text-white">{inst.email}</div>
+                          <div className="text-[10px] text-slate-500">
+                            Added {new Date(inst.sharedAt).toLocaleDateString()} by {inst.addedBy}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleRemoveSharedInstructor(inst.email)}
+                        disabled={sharingClass}
+                        className="text-[11px] text-rose-400 hover:text-rose-300 font-medium px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 transition disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500 italic p-3 bg-slate-950/40 rounded-xl border border-dashed border-slate-800">
+                  No co-instructors added to this class yet. Add fellow science teachers below.
+                </p>
+              )}
+            </div>
+
+            {/* Add New Co-Instructor Form */}
+            <form onSubmit={handleShareClassSubmit} className="space-y-3 pt-2 border-t border-slate-800">
+              <label className="block text-xs font-semibold text-slate-300">
+                Add Instructor by Email
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="email"
+                  value={shareEmailInput}
+                  onChange={e => setShareEmailInput(e.target.value)}
+                  placeholder="e.g. colleague.teacher@school.net"
+                  required
+                  className="flex-1 px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <button
+                  type="submit"
+                  disabled={sharingClass || !shareEmailInput.trim()}
+                  className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition shadow-md shadow-purple-600/30 disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>{sharingClass ? 'Adding...' : 'Share Access'}</span>
+                </button>
+              </div>
+            </form>
+
+            {/* Collaborative Features Explanation */}
+            <div className="p-3.5 rounded-xl bg-purple-950/20 border border-purple-500/20 space-y-1.5 text-xs text-purple-200">
+              <div className="font-bold flex items-center gap-1.5 text-purple-300">
+                <ShieldCheck className="w-4 h-4" />
+                <span>Shared Instructor Privileges:</span>
+              </div>
+              <ul className="space-y-1 text-[11px] text-purple-300/80 list-disc list-inside">
+                <li>Create and assign homework tasks & quizzes to this shared class</li>
+                <li>Track live slide deck completion and syllabus % coverage in real time</li>
+                <li>Inspect individual student scores, quiz attempts, and traffic lights</li>
+              </ul>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowShareModal(false);
+                  setClassToShare(null);
+                  setShareFeedbackMsg(null);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================= */}
       {/* MODAL: INDIVIDUAL STUDENT ANALYSIS & QUIZ RESULTS             */}
       {/* ============================================================= */}
       {selectedStudentForAnalysis && (() => {
@@ -1724,9 +2135,18 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         const orangeLights = Object.entries(trafficLights).filter(([, v]) => v === 'orange');
         const greenLights = Object.entries(trafficLights).filter(([, v]) => v === 'green');
 
+        const studentDeckSet = new Set<string>([
+          ...(selectedStudentForAnalysis.completedLessons || []),
+          ...Object.keys(selectedStudentForAnalysis.trafficLights || {}),
+          ...Object.keys(selectedStudentForAnalysis.subtopicQuizScores || {})
+        ]);
+        const effectiveSlideDecks = Math.max(selectedStudentForAnalysis.completedLessonsCount || 0, studentDeckSet.size);
+        const studentSlidePct = Math.min(100, Math.round((effectiveSlideDecks / 106) * 100));
+        const studentSyllabusPct = Math.min(100, Math.round((studentDeckSet.size / 106) * 100));
+
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in">
-            <div className="bg-slate-900 border border-purple-500/40 rounded-3xl max-w-4xl w-full max-h-[92vh] overflow-y-auto shadow-2xl p-6 sm:p-8 space-y-6 text-slate-100">
+            <div className="bg-slate-900 border border-purple-500/40 rounded-3xl max-w-5xl w-full max-h-[92vh] overflow-y-auto shadow-2xl p-6 sm:p-8 space-y-6 text-slate-100">
               {/* Modal Header */}
               <div className="flex items-start justify-between gap-4 pb-4 border-b border-slate-800">
                 <div className="flex items-center gap-3.5">
@@ -1760,7 +2180,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
               </div>
 
               {/* Top KPI Metrics Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3.5">
                   <div className="text-[11px] text-slate-400 font-medium">Practice Quizzes Taken</div>
                   <div className="text-2xl font-bold font-mono text-purple-400 mt-1">{totalQuizzes}</div>
@@ -1784,11 +2204,19 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                 </div>
 
                 <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3.5">
-                  <div className="text-[11px] text-slate-400 font-medium">Lessons Mastered</div>
-                  <div className="text-2xl font-bold font-mono text-sky-400 mt-1">
-                    {selectedStudentForAnalysis.completedLessonsCount || 0} <span className="text-xs font-normal text-slate-400">/ 33</span>
+                  <div className="text-[11px] text-slate-400 font-medium">Slide Decks Read</div>
+                  <div className="text-2xl font-bold font-mono text-emerald-400 mt-1">
+                    {effectiveSlideDecks} <span className="text-xs font-normal text-slate-400">/ 106</span>
                   </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">Syllabus slide decks</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{studentSlidePct}% of curriculum decks</div>
+                </div>
+
+                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3.5">
+                  <div className="text-[11px] text-slate-400 font-medium">Syllabus % Coverage</div>
+                  <div className="text-2xl font-bold font-mono text-sky-400 mt-1">
+                    {studentSyllabusPct}%
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{studentDeckSet.size} of 106 topics covered</div>
                 </div>
               </div>
 

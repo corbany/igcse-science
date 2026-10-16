@@ -26,7 +26,10 @@ import {
   CheckSquare,
   Mail,
   Copy,
-  ExternalLink
+  ExternalLink,
+  Settings,
+  Send,
+  UserCheck
 } from 'lucide-react';
 import { 
   ClassTask, 
@@ -115,6 +118,101 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
   const [loadingSubmissions, setLoadingSubmissions] = useState<Record<string, boolean>>({});
   const [sendingEmailTaskId, setSendingEmailTaskId] = useState<string | null>(null);
   const [copiedLinkTaskId, setCopiedLinkTaskId] = useState<string | null>(null);
+  const [additionalEmailsInput, setAdditionalEmailsInput] = useState<string>('');
+
+  // SMTP Settings & 1-Click Email Dispatch state
+  const [showSmtpModal, setShowSmtpModal] = useState<boolean>(false);
+  const [smtpStatus, setSmtpStatus] = useState<{ configured: boolean; host: string; port: number; secure: boolean; user: string; from: string } | null>(null);
+  const [smtpForm, setSmtpForm] = useState<{ host: string; port: number; secure: boolean; user: string; pass: string; from: string }>({
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    user: currentUser.email || 'corbanb@gisboyshigh.net',
+    pass: '',
+    from: `"Mr. Corban" <${currentUser.email || 'corbanb@gisboyshigh.net'}>`
+  });
+  const [smtpTesting, setSmtpTesting] = useState<boolean>(false);
+  const [smtpTestResult, setSmtpTestResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [lastEmailAction, setLastEmailAction] = useState<{
+    taskId: string;
+    taskTitle: string;
+    count: number;
+    method: string;
+    smtpConfigured: boolean;
+    mailtoUrl?: string;
+    gmailComposeUrl?: string;
+    warning?: string;
+    subject?: string;
+    emailText?: string;
+    recipients?: { studentName: string; studentEmail: string }[];
+  } | null>(null);
+
+  const loadSmtpStatus = async () => {
+    try {
+      const res = await fetch('/api/smtp-config');
+      if (res.ok) {
+        const data = await res.json();
+        setSmtpStatus(data);
+        if (data.configured) {
+          setSmtpForm({
+            host: data.host || '',
+            port: data.port || 587,
+            secure: Boolean(data.secure),
+            user: data.user || '',
+            pass: '',
+            from: data.from || ''
+          });
+        }
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    loadSmtpStatus();
+  }, []);
+
+  const handleTestSmtp = async () => {
+    setSmtpTesting(true);
+    setSmtpTestResult(null);
+    try {
+      const res = await fetch('/api/test-smtp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipientEmail: currentUser.email || 'corbanb@gisboyshigh.net' })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSmtpTestResult({ type: 'success', text: data.message || `Test email dispatched to ${currentUser.email}!` });
+      } else {
+        setSmtpTestResult({ type: 'error', text: data.error || 'SMTP test connection failed.' });
+      }
+    } catch (err: any) {
+      setSmtpTestResult({ type: 'error', text: err?.message || 'Failed to reach SMTP test endpoint.' });
+    } finally {
+      setSmtpTesting(false);
+    }
+  };
+
+  const handleSaveSmtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/smtp-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(smtpForm)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setFeedbackNotice({ type: 'success', text: '✅ SMTP settings successfully updated and activated!' });
+        loadSmtpStatus();
+        setShowSmtpModal(false);
+      } else {
+        setSmtpTestResult({ type: 'error', text: data.error || 'Failed to save SMTP configuration.' });
+      }
+    } catch (err: any) {
+      setSmtpTestResult({ type: 'error', text: err?.message || 'Error saving SMTP configuration.' });
+    }
+  };
 
   // Unique topics across allSubtopicsData for dropdown filtering
   const uniqueTopics = useMemo(() => {
@@ -181,19 +279,21 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
     }
   };
 
-  // Subscribe to real-time live updates for tasks
+  // Subscribe to real-time live updates for tasks across owned and shared classes
   useEffect(() => {
     setLoading(true);
+    const userClassIds = classes.map(c => c.id);
     const unsubscribe = subscribeToClassTasks(
       selectedClassId === 'all' ? undefined : selectedClassId,
       currentUser.id,
       (liveTasks) => {
         setTasks(liveTasks);
         setLoading(false);
-      }
+      },
+      userClassIds
     );
     return () => unsubscribe();
-  }, [selectedClassId, currentUser.id]);
+  }, [selectedClassId, currentUser.id, classes]);
 
   // Load students when target class changes for modal
   useEffect(() => {
@@ -333,13 +433,13 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
           .map(s => ({
             studentId: s.studentId,
             studentName: s.name,
-            studentEmail: s.email && s.email.includes('@') ? s.email : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
+            studentEmail: s.email && s.email.includes('@') ? s.email : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@gisboyshigh.net`
           }));
       } else if (newClassId !== 'all' && classStudents.length > 0) {
         explicitRecipients = classStudents.map(s => ({
           studentId: s.studentId,
           studentName: s.name,
-          studentEmail: s.email && s.email.includes('@') ? s.email : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
+          studentEmail: s.email && s.email.includes('@') ? s.email : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@gisboyshigh.net`
         }));
       }
 
@@ -354,7 +454,8 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
         targetStudentIds: targetAudienceType === 'specific_students' ? selectedStudentIds : undefined,
         dueDate: new Date(newDueDate).toISOString(),
         instructorId: currentUser.id,
-        instructorName: currentUser.name
+        instructorName: currentUser.name,
+        instructorEmail: currentUser.email || 'corbanb@gisboyshigh.net'
       }, {
         sendEmail: sendEmailNotification,
         explicitRecipients
@@ -435,12 +536,27 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
         return;
       }
 
-      const sentCount = await notifyStudentsOfTaskAssignment(task, recipients);
-      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const notifResult = await notifyStudentsOfTaskAssignment(task, recipients);
+      const studentCount = notifResult.count || recipients.length;
       setFeedbackNotice({
         type: 'success',
-        text: `📧 Dispatched task email notifications to ${sentCount || recipients.length} student${(sentCount || recipients.length) !== 1 ? 's' : ''} with portal link (${origin || 'Portal'})!`
+        text: `📧 Dispatched task email notifications to ${studentCount} student${studentCount !== 1 ? 's' : ''} via ${notifResult.smtpConfigured ? 'SMTP server' : 'automated mail service'}!`
       });
+      if (notifResult.mailtoUrl || notifResult.gmailComposeUrl) {
+        setLastEmailAction({
+          taskId: task.id,
+          taskTitle: task.title,
+          count: studentCount,
+          method: notifResult.method,
+          smtpConfigured: notifResult.smtpConfigured,
+          mailtoUrl: notifResult.mailtoUrl,
+          gmailComposeUrl: notifResult.gmailComposeUrl,
+          warning: notifResult.warning,
+          subject: notifResult.subject,
+          emailText: notifResult.emailText,
+          recipients: notifResult.recipients || []
+        });
+      }
     } catch (err: any) {
       setFeedbackNotice({ type: 'error', text: 'Failed to dispatch email notifications.' });
     } finally {
@@ -531,6 +647,74 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
         </div>
       )}
 
+      {/* Last Email Action Helper Card */}
+      {lastEmailAction && (
+        <div className="bg-purple-950/40 border border-purple-500/40 rounded-2xl p-4 text-xs space-y-3 animate-in fade-in-50 duration-200">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-purple-500/20 text-purple-300">
+                <Mail className="w-4 h-4 text-purple-400" />
+              </div>
+              <div>
+                <span className="font-bold text-white text-sm">Student Email Dispatch: {lastEmailAction.taskTitle}</span>
+                <span className="text-purple-300 ml-2">({lastEmailAction.count} student{lastEmailAction.count !== 1 ? 's' : ''})</span>
+              </div>
+            </div>
+            <button 
+              onClick={() => setLastEmailAction(null)}
+              className="text-slate-400 hover:text-white p-1"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <p className="text-slate-300 text-xs">
+            {lastEmailAction.smtpConfigured 
+              ? 'Automated delivery is in progress via your verified SMTP mail server. You can also launch Gmail or copy the pre-formatted announcement below:'
+              : 'Your students are ready to be notified! Click below to send directly through Gmail or your email app with all student addresses in BCC.'}
+          </p>
+
+          <div className="flex items-center gap-2 flex-wrap pt-1">
+            {lastEmailAction.gmailComposeUrl && (
+              <a
+                href={lastEmailAction.gmailComposeUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-sm"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Open in Gmail (BCC {lastEmailAction.count} Students)</span>
+              </a>
+            )}
+
+            {lastEmailAction.mailtoUrl && (
+              <a
+                href={lastEmailAction.mailtoUrl}
+                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center gap-1.5 border border-slate-700 transition"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                <span>Default Mail App</span>
+              </a>
+            )}
+
+            {lastEmailAction.emailText && (
+              <button
+                onClick={() => {
+                  if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                    navigator.clipboard.writeText(lastEmailAction.emailText || '');
+                    setFeedbackNotice({ type: 'success', text: '📋 Copied full email notification announcement to clipboard!' });
+                  }
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center gap-1.5 border border-slate-700 transition"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Copy Announcement Text</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Header and Controls */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -573,10 +757,15 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
               onChange={e => setSelectedClassId(e.target.value)}
               className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-purple-500 font-medium"
             >
-              <option value="all">All Classes</option>
-              {classes.map(c => (
-                <option key={c.id} value={c.id}>{c.name} ({c.classCode})</option>
-              ))}
+              <option value="all">All Classes ({classes.length} Available)</option>
+              {classes.map(c => {
+                const isOwner = c.instructorEmail?.toLowerCase() === currentUser.email?.toLowerCase() || c.instructorId === currentUser.id;
+                return (
+                  <option key={c.id} value={c.id}>
+                    {isOwner ? '👑 [My Class] ' : '👥 [Shared Class] '}{c.name} ({c.classCode})
+                  </option>
+                );
+              })}
             </select>
 
             <span className="text-slate-400 font-medium ml-2">Status:</span>
@@ -734,10 +923,10 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                           </span>
                         )}
 
-                        {/* Email notification badge */}
-                        <span className="text-[11px] font-medium text-purple-300/80 bg-purple-950/40 border border-purple-500/20 px-2 py-0.5 rounded-md flex items-center gap-1">
-                          <Mail className="w-3 h-3 text-purple-400" />
-                          <span>Email Notified</span>
+                        {/* Instructor who created the task */}
+                        <span className="text-[11px] font-medium text-slate-300 bg-slate-800/80 border border-slate-700/60 px-2 py-0.5 rounded-md flex items-center gap-1">
+                          <UserCheck className="w-3 h-3 text-purple-400" />
+                          <span>By {task.instructorName || task.instructorEmail || 'Instructor'}</span>
                         </span>
                       </div>
 
@@ -1212,10 +1401,15 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     onChange={e => setNewClassId(e.target.value)}
                     className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-purple-500 font-medium"
                   >
-                    <option value="all">All My Classes</option>
-                    {classes.map(c => (
-                      <option key={c.id} value={c.id}>{c.name} ({c.classCode})</option>
-                    ))}
+                    <option value="all">All Available Classes (Owned & Shared)</option>
+                    {classes.map(c => {
+                      const isOwner = c.instructorEmail?.toLowerCase() === currentUser.email?.toLowerCase() || c.instructorId === currentUser.id;
+                      return (
+                        <option key={c.id} value={c.id}>
+                          {isOwner ? '👑 [My Class] ' : '👥 [Shared with Me] '}{c.name} ({c.classCode})
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
 

@@ -24,7 +24,7 @@ export const ALL_SYLLABUS_TOPICS: SyllabusTopicOption[] = [
   { code: 'B12', subject: 'biology', title: 'Respiration', keyConcepts: 'Aerobic equation, energy uses, mitochondria' },
   { code: 'B13', subject: 'biology', title: 'Coordination & Response', keyConcepts: 'Nervous system, reflex arc, hormones, eye, homeostasis' },
   { code: 'B14', subject: 'biology', title: 'Reproduction', keyConcepts: 'Asexual vs sexual, flower pollination, human menstrual cycle' },
-  { code: 'B15', subject: 'biology', title: 'Inheritance', keyConcepts: 'Chromosomes, DNA, monohybrid crosses, genotype vs phenotype' },
+  { code: 'B15', subject: 'biology', title: 'Organisms & Environment', keyConcepts: 'Sun energy input, food chains, trophic levels, carbon cycle' },
   { code: 'B16', subject: 'biology', title: 'Ecosystems & Environment', keyConcepts: 'Food chains, 10% energy transfer, carbon cycle, deforestation' },
 
   // CHEMISTRY (C1 - C12)
@@ -60,6 +60,15 @@ export interface QuizGenerationResult {
   source: string;
 }
 
+// Regex to detect and exclude non-syllabus genetics content from practice quizzes
+export const GENETICS_TERMS_REGEX = /\b(genetics?|genetic|monohybrid|punnett|allele|alleles|heterozygous|homozygous|genotypes?|phenotypes?|codominan\w*|pedigree (chart|diagram)|karyotype|dihybrid|mendel\w*|inheritance|inherited traits?|gene pool|genetic variation|genetic engineering)\b/i;
+
+export function isGeneticsQuestion(q: QuizQuestion): boolean {
+  if (!q) return false;
+  const content = `${q.question || ''} ${(q.options || []).join(' ')} ${q.explanation || ''} ${q.topicTitle || ''}`;
+  return GENETICS_TERMS_REGEX.test(content);
+}
+
 /**
  * Request AI-generated multiple-choice questions from backend or client fallback
  */
@@ -85,8 +94,16 @@ export async function generateAIQuiz(params: GenerateQuizParams): Promise<QuizGe
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.quiz) && data.quiz.length > 0) {
+        // Enforce strict syllabus compliance: purge any genetics questions
+        const filtered = (data.quiz as QuizQuestion[]).filter(q => !isGeneticsQuestion(q));
+        if (filtered.length < clampedNum) {
+          const needed = clampedNum - filtered.length;
+          const supplement = generateClientFallbackQuiz(targetTopics, needed, params.tier)
+            .filter(q => !isGeneticsQuestion(q));
+          filtered.push(...supplement);
+        }
         return {
-          questions: data.quiz,
+          questions: filtered.slice(0, clampedNum),
           source: data.source || 'gemini-3.8-flash'
         };
       }
@@ -96,7 +113,8 @@ export async function generateAIQuiz(params: GenerateQuizParams): Promise<QuizGe
   }
 
   // Fallback to high-fidelity client-side generation covering all 33 topics
-  const fallbackQuestions = generateClientFallbackQuiz(targetTopics, clampedNum, params.tier);
+  const fallbackQuestions = generateClientFallbackQuiz(targetTopics, clampedNum, params.tier)
+    .filter(q => !isGeneticsQuestion(q));
   return {
     questions: fallbackQuestions,
     source: 'syllabus-engine'
@@ -109,7 +127,8 @@ export async function generateAIQuiz(params: GenerateQuizParams): Promise<QuizGe
 export function generateClientFallbackQuiz(topics: string[], count: number, tier: string = 'Extended'): QuizQuestion[] {
   const cleanTopics = topics.length > 0 ? topics : ALL_SYLLABUS_TOPICS.map(t => t.code);
   const uniqueSeed = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-  return generateDynamicSyllabusQuestions(cleanTopics, count, tier, uniqueSeed);
+  const questions = generateDynamicSyllabusQuestions(cleanTopics, count, tier, uniqueSeed);
+  return questions.filter(q => !isGeneticsQuestion(q));
 }
 
 function createQuestionTemplate(
@@ -332,9 +351,9 @@ function createQuestionTemplate(
           exp: 'A surge in Luteinising Hormone (LH) triggers release of an egg cell (ovulation) on approximately day 14.'
         },
         'B15': {
-          q: 'Two heterozygous (Bb) brown-eyed parents have a child. Brown (B) is dominant to blue (b). What is the probability of having a blue-eyed child?',
-          opts: ['25% (1 in 4)', '50% (1 in 2)', '75% (3 in 4)', '0% (none)'],
-          exp: 'A cross of Bb × Bb yields genotypes 1 BB : 2 Bb : 1 bb. Only the homozygous recessive (bb) has blue eyes (1/4 = 25%).'
+          q: 'What is the principal source of energy input to biological ecosystems according to the Cambridge 0653 syllabus?',
+          opts: ['Sunlight / Solar radiation', 'Geothermal heat from Earth', 'Chemical fertilizers in the soil', 'Atmospheric oxygen'],
+          exp: 'Light energy from the Sun is absorbed by green plants and algae during photosynthesis, forming the foundational energy input for food webs.'
         },
         'B16': {
           q: 'Approximately what percentage of energy is transferred from one trophic level to the next in a food chain?',

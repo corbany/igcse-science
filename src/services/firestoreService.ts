@@ -43,6 +43,13 @@ export const DEFAULT_CLASS_ITEM: ClassItem = {
   studentCount: 0
 };
 
+export interface SharedInstructorRecord {
+  email: string;
+  name?: string;
+  sharedAt: string;
+  addedBy: string;
+}
+
 export interface ClassItem {
   id: string;
   classCode: string;
@@ -54,6 +61,8 @@ export interface ClassItem {
   instructorEmail: string;
   createdAt: string;
   studentCount: number;
+  sharedInstructorEmails?: string[];
+  sharedInstructors?: SharedInstructorRecord[];
 }
 
 export interface ClassStudentItem {
@@ -64,11 +73,18 @@ export interface ClassStudentItem {
   joinedAt: string;
   lastActive: string;
   completedLessonsCount: number;
+  completedLessons?: string[];
   quizScores: Record<string, { score: number; total: number; date: string }>;
   subtopicQuizScores: Record<string, SubtopicQuizResult>;
   topicConfidence: Record<string, number>;
   trafficLights: Record<string, TrafficLightStatus>;
   weakTopics: string[];
+  badgesCount?: number;
+  totalQuizScore?: number;
+  quizzesCompletedCount?: number;
+  xp?: number;
+  featuredBadgeId?: string;
+  streakDays?: number;
 }
 
 export interface InstructorInviteItem {
@@ -100,6 +116,30 @@ function setLocalItem(key: string, value: any): void {
   } catch {
     // quota exceeded or private mode
   }
+}
+
+/**
+ * Sanitizes object by removing any undefined properties recursively to prevent
+ * FirebaseError: Function setDoc() called with invalid data. Unsupported field value: undefined
+ */
+export function cleanFirestoreData<T extends Record<string, any>>(obj: T): any {
+  if (obj === null || obj === undefined) return null;
+  if (Array.isArray(obj)) {
+    return obj
+      .filter(item => item !== undefined)
+      .map(item => (typeof item === 'object' && item !== null ? cleanFirestoreData(item) : item));
+  }
+  const result: any = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
+        result[key] = cleanFirestoreData(value);
+      } else {
+        result[key] = value;
+      }
+    }
+  }
+  return result;
 }
 
 // -------------------------------------------------------------
@@ -408,7 +448,9 @@ export async function createClass(
     instructorName: instructor.name,
     instructorEmail: instructor.email,
     createdAt: new Date().toISOString(),
-    studentCount: 0
+    studentCount: 0,
+    sharedInstructorEmails: [],
+    sharedInstructors: []
   };
 
   // Save to local storage
@@ -419,9 +461,13 @@ export async function createClass(
   // Try Firestore
   try {
     const classRef = doc(db, 'classes', classId);
-    await setDoc(classRef, classData);
+    await setDoc(classRef, cleanFirestoreData(classData));
   } catch {
     // Offline: saved locally
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('igcse_classes_updated', { detail: { classId } }));
   }
 
   return { 
@@ -432,7 +478,150 @@ export async function createClass(
 }
 
 /**
- * Fetch all classes created by an instructor
+ * Share a class with another instructor by email so they can add tasks and track analytics
+ */
+export async function shareClassWithInstructor(
+  classId: string,
+  targetEmail: string,
+  currentInstructor: UserProfile
+): Promise<{ success: boolean; message: string; classItem?: ClassItem }> {
+  const cleanEmail = targetEmail.toLowerCase().trim();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return { success: false, message: 'Please provide a valid email address.' };
+  }
+
+  const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, [DEFAULT_CLASS_ITEM]);
+  const clsIndex = localClasses.findIndex(c => c.id === classId);
+  let targetClass = clsIndex >= 0 ? localClasses[clsIndex] : null;
+
+  if (!targetClass) {
+    try {
+      const snap = await getDoc(doc(db, 'classes', classId));
+      if (snap.exists()) {
+        targetClass = snap.data() as ClassItem;
+      }
+    } catch {}
+  }
+
+  if (!targetClass) {
+    return { success: false, message: 'Class not found.' };
+  }
+
+  if (targetClass.instructorEmail?.toLowerCase() === cleanEmail) {
+    return { success: false, message: 'This email belongs to the primary creator of the class.' };
+  }
+
+  const existingEmails = (targetClass.sharedInstructorEmails || []).map(e => e.toLowerCase());
+  if (existingEmails.includes(cleanEmail)) {
+    return { success: false, message: `This class is already shared with ${cleanEmail}.` };
+  }
+
+  const newRecord: SharedInstructorRecord = {
+    email: cleanEmail,
+    name: cleanEmail.split('@')[0],
+    sharedAt: new Date().toISOString(),
+    addedBy: currentInstructor.name || currentInstructor.email
+  };
+
+  const updatedClass: ClassItem = {
+    ...targetClass,
+    sharedInstructorEmails: [...existingEmails, cleanEmail],
+    sharedInstructors: [...(targetClass.sharedInstructors || []), newRecord]
+  };
+
+  if (clsIndex >= 0) {
+    localClasses[clsIndex] = updatedClass;
+  } else {
+    localClasses.unshift(updatedClass);
+  }
+  setLocalItem(LOCAL_CLASSES_KEY, localClasses);
+
+  // Upgrade user role to instructor if already registered or invite them
+  try {
+    const usersQ = query(collection(db, 'users'), where('email', '==', cleanEmail));
+    const userSnap = await getDocs(usersQ);
+    for (const u of userSnap.docs) {
+      await updateDoc(u.ref, { role: 'instructor' });
+    }
+  } catch {}
+
+  // Update in Firestore
+  try {
+    const classRef = doc(db, 'classes', classId);
+    await setDoc(classRef, cleanFirestoreData(updatedClass), { merge: true });
+  } catch (err) {
+    console.warn('Firestore write for shared instructor error:', err);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('igcse_classes_updated', { detail: { classId, updatedClass } }));
+  }
+
+  return {
+    success: true,
+    classItem: updatedClass,
+    message: `Class "${updatedClass.name}" successfully shared with ${cleanEmail}! They now have full access to assign tasks and view live progress & analytics.`
+  };
+}
+
+/**
+ * Remove co-instructor access from a class
+ */
+export async function removeSharedInstructorFromClass(
+  classId: string,
+  targetEmail: string
+): Promise<{ success: boolean; message: string; classItem?: ClassItem }> {
+  const cleanEmail = targetEmail.toLowerCase().trim();
+  const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, [DEFAULT_CLASS_ITEM]);
+  const clsIndex = localClasses.findIndex(c => c.id === classId);
+  let targetClass = clsIndex >= 0 ? localClasses[clsIndex] : null;
+
+  if (!targetClass) {
+    try {
+      const snap = await getDoc(doc(db, 'classes', classId));
+      if (snap.exists()) {
+        targetClass = snap.data() as ClassItem;
+      }
+    } catch {}
+  }
+
+  if (!targetClass) {
+    return { success: false, message: 'Class not found.' };
+  }
+
+  const updatedClass: ClassItem = {
+    ...targetClass,
+    sharedInstructorEmails: (targetClass.sharedInstructorEmails || []).filter(e => e.toLowerCase() !== cleanEmail),
+    sharedInstructors: (targetClass.sharedInstructors || []).filter(i => i.email.toLowerCase() !== cleanEmail)
+  };
+
+  if (clsIndex >= 0) {
+    localClasses[clsIndex] = updatedClass;
+  } else {
+    localClasses.unshift(updatedClass);
+  }
+  setLocalItem(LOCAL_CLASSES_KEY, localClasses);
+
+  try {
+    const classRef = doc(db, 'classes', classId);
+    await setDoc(classRef, cleanFirestoreData(updatedClass), { merge: true });
+  } catch (err) {
+    console.warn('Firestore update for removeSharedInstructor error:', err);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('igcse_classes_updated', { detail: { classId, updatedClass } }));
+  }
+
+  return {
+    success: true,
+    classItem: updatedClass,
+    message: `Access for ${cleanEmail} has been removed from this class.`
+  };
+}
+
+/**
+ * Fetch all classes created by or shared with an instructor
  */
 export async function fetchClassesByInstructor(instructorId: string, instructorEmail?: string): Promise<ClassItem[]> {
   const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, [DEFAULT_CLASS_ITEM]);
@@ -442,6 +631,7 @@ export async function fetchClassesByInstructor(instructorId: string, instructorE
   const instructorLocal = localClasses.filter(c => 
     c.instructorId === instructorId || 
     (cleanEmail && c.instructorEmail?.toLowerCase() === cleanEmail) ||
+    (cleanEmail && Array.isArray(c.sharedInstructorEmails) && c.sharedInstructorEmails.map(e => e.toLowerCase()).includes(cleanEmail)) ||
     (isPrimary && (c.id === DEFAULT_CLASS_ITEM.id || c.instructorEmail === 'corbanb@gisboyshigh.net'))
   );
 
@@ -454,6 +644,7 @@ export async function fetchClassesByInstructor(instructorId: string, instructorE
         if (
           c.instructorId === instructorId || 
           (cleanEmail && c.instructorEmail?.toLowerCase() === cleanEmail) ||
+          (cleanEmail && Array.isArray(c.sharedInstructorEmails) && c.sharedInstructorEmails.map(e => e.toLowerCase()).includes(cleanEmail)) ||
           (isPrimary && (c.id === DEFAULT_CLASS_ITEM.id || c.instructorEmail === 'corbanb@gisboyshigh.net'))
         ) {
           remoteClasses.push(c);
@@ -559,6 +750,13 @@ export async function joinClassWithCode(
 
   const joinedTimestamp = new Date().toISOString();
 
+  // Combine completed lessons, traffic lights, and quiz scores for live 100% accurate deck count
+  const completedDecks = Array.from(new Set([
+    ...(progress.completedLessons || []),
+    ...Object.keys(progress.trafficLights || {}),
+    ...Object.keys(progress.subtopicQuizScores || {})
+  ]));
+
   const enrollmentData: ClassStudentItem = {
     studentId: student.id,
     name: student.name,
@@ -566,7 +764,8 @@ export async function joinClassWithCode(
     tier: student.tier,
     joinedAt: joinedTimestamp,
     lastActive: joinedTimestamp,
-    completedLessonsCount: (progress.completedLessons || []).length,
+    completedLessonsCount: completedDecks.length,
+    completedLessons: completedDecks,
     quizScores: progress.quizScores || {},
     subtopicQuizScores: progress.subtopicQuizScores || {},
     topicConfidence: progress.topicConfidence || {},
@@ -853,6 +1052,18 @@ export async function syncStudentProgressToClasses(
     .filter(([_, rating]) => rating <= 2)
     .map(([code]) => code);
 
+  // Unify completed lessons, traffic lights, and quiz scores so slide deck and syllabus tracking is 100% updated live
+  const completedDecks = Array.from(new Set([
+    ...(progress.completedLessons || []),
+    ...Object.keys(progress.trafficLights || {}),
+    ...Object.keys(progress.subtopicQuizScores || {})
+  ]));
+
+  const subScores = Object.values(progress.subtopicQuizScores || {});
+  const mainScores = Object.values(progress.quizScores || {});
+  const totalQuizScore = subScores.reduce((acc, s) => acc + (s.score || 0), 0) + mainScores.reduce((acc, q) => acc + (q.score || 0), 0);
+  const quizzesCompletedCount = subScores.length + mainScores.length;
+
   for (const classId of enrolledClassIds) {
     // Update local cache
     const studentKey = `${LOCAL_STUDENTS_PREFIX}${classId}`;
@@ -865,12 +1076,19 @@ export async function syncStudentProgressToClasses(
       tier: student.tier,
       joinedAt: idx >= 0 ? localStudents[idx].joinedAt : new Date().toISOString(),
       lastActive: new Date().toISOString(),
-      completedLessonsCount: (progress.completedLessons || []).length,
+      completedLessonsCount: completedDecks.length,
+      completedLessons: completedDecks,
       quizScores: progress.quizScores || {},
       subtopicQuizScores: progress.subtopicQuizScores || {},
       topicConfidence: progress.topicConfidence || {},
       trafficLights: progress.trafficLights || {},
-      weakTopics
+      weakTopics,
+      totalQuizScore,
+      quizzesCompletedCount,
+      badgesCount: progress.earnedBadges?.length || (localStudents[idx]?.badgesCount || 0),
+      featuredBadgeId: progress.featuredBadgeId || student.featuredBadgeId,
+      streakDays: progress.currentStreak || 1,
+      xp: student.xp || 0
     };
 
     if (idx >= 0) {
@@ -880,23 +1098,18 @@ export async function syncStudentProgressToClasses(
     }
     setLocalItem(studentKey, localStudents);
 
-    // Try Firestore
+    // Try Firestore with setDoc merge so document is reliably written/updated
     try {
       const studentDocRef = doc(db, 'classes', classId, 'students', student.id);
-      updateDoc(studentDocRef, {
-        name: student.name,
-        email: student.email,
-        tier: student.tier,
-        lastActive: new Date().toISOString(),
-        completedLessonsCount: (progress.completedLessons || []).length,
-        quizScores: progress.quizScores || {},
-        subtopicQuizScores: progress.subtopicQuizScores || {},
-        topicConfidence: progress.topicConfidence || {},
-        trafficLights: progress.trafficLights || {},
-        weakTopics
-      }).catch(() => {});
+      await setDoc(studentDocRef, cleanFirestoreData(updatedRecord), { merge: true });
     } catch {
-      // Offline
+      // Offline fallback
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('igcse_student_progress_synced', {
+        detail: { studentId: student.id, classId, record: updatedRecord }
+      }));
     }
   }
 }
@@ -961,6 +1174,18 @@ export interface CreateClassTaskOptions {
   explicitRecipients?: { studentId: string; studentName: string; studentEmail: string }[];
 }
 
+export interface TaskNotificationResult {
+  count: number;
+  method: 'smtp' | 'email_client_ready' | 'none';
+  smtpConfigured: boolean;
+  mailtoUrl?: string;
+  gmailComposeUrl?: string;
+  warning?: string;
+  subject?: string;
+  emailText?: string;
+  recipients?: { studentName: string; studentEmail: string }[];
+}
+
 /**
  * Creates a new task/assignment for a class and/or individual students.
  */
@@ -971,13 +1196,18 @@ export async function createClassTask(
   const id = `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const createdAt = new Date().toISOString();
 
+  // Ensure ALL fields are defined to prevent Firestore rejection
   const newTask: ClassTask = {
     ...taskData,
+    targetStudentIds: Array.isArray(taskData.targetStudentIds) ? taskData.targetStudentIds : [],
+    targetSubtopics: Array.isArray(taskData.targetSubtopics) ? taskData.targetSubtopics : [],
+    description: taskData.description || '',
+    className: taskData.className || 'Combined Science Class',
     id,
     createdAt
   };
 
-  // 1. Update local storage
+  // 1. Update local storage immediately for zero-delay UX
   const localTasks = getLocalItem<ClassTask[]>(LOCAL_TASKS_KEY, []);
   localTasks.unshift(newTask);
   setLocalItem(LOCAL_TASKS_KEY, localTasks);
@@ -990,19 +1220,33 @@ export async function createClassTask(
       name: r.studentName,
       email: r.studentEmail
     }));
-  } else if (taskData.classId !== 'all') {
+  } else if (taskData.classId && taskData.classId !== 'all') {
     const classStudents = await fetchStudentsInClass(taskData.classId);
     studentList = classStudents
       .filter(s => !taskData.targetStudentIds || taskData.targetStudentIds.length === 0 || taskData.targetStudentIds.includes(s.studentId))
       .map(s => ({ studentId: s.studentId, name: s.name, email: s.email }));
+
+    // If no students enrolled in this specific custom class yet, also fetch registered students so emails are not missed
+    if (studentList.length === 0) {
+      const allReg = await fetchAllRegisteredStudents();
+      studentList = allReg.map(s => ({ studentId: s.studentId, name: s.name, email: s.email }));
+    }
   } else {
-    // Collect students across all classes created by instructor
-    const classes = await fetchClassesByInstructor(taskData.instructorId);
+    // Collect students across all classes created by instructor + all registered students
+    const classes = await fetchClassesByInstructor(taskData.instructorId, taskData.instructorEmail);
     const studentMap = new Map<string, { studentId: string; name: string; email: string }>();
     for (const c of classes) {
       const students = await fetchStudentsInClass(c.id);
       for (const s of students) {
         if (!taskData.targetStudentIds || taskData.targetStudentIds.length === 0 || taskData.targetStudentIds.includes(s.studentId)) {
+          studentMap.set(s.studentId, { studentId: s.studentId, name: s.name, email: s.email });
+        }
+      }
+    }
+    const allReg = await fetchAllRegisteredStudents();
+    for (const s of allReg) {
+      if (!taskData.targetStudentIds || taskData.targetStudentIds.length === 0 || taskData.targetStudentIds.includes(s.studentId)) {
+        if (!studentMap.has(s.studentId)) {
           studentMap.set(s.studentId, { studentId: s.studentId, name: s.name, email: s.email });
         }
       }
@@ -1013,18 +1257,32 @@ export async function createClassTask(
   // 2. Persist to Firestore and initialize submissions
   try {
     const taskRef = doc(db, 'tasks', id);
-    await setDoc(taskRef, newTask);
+    const sanitizedDoc = cleanFirestoreData(newTask);
+    await setDoc(taskRef, sanitizedDoc);
+
+    // Also write an in-app notification document so students see it immediately
+    const notifRef = doc(db, 'notifications', `notif_${id}`);
+    await setDoc(notifRef, cleanFirestoreData({
+      id: `notif_${id}`,
+      taskId: id,
+      title: `New Task: ${newTask.title}`,
+      message: `Your instructor set a new task for ${newTask.className}. Due: ${newTask.dueDate}`,
+      createdAt,
+      type: 'task_assigned',
+      targetStudentIds: newTask.targetStudentIds || []
+    })).catch(() => {});
 
     for (const student of studentList) {
+      if (!student.studentId || typeof student.studentId !== 'string') continue;
       const subRef = doc(db, 'tasks', id, 'submissions', student.studentId);
       const subData: TaskSubmission = {
         studentId: student.studentId,
-        studentName: student.name,
-        studentEmail: student.email,
+        studentName: student.name || 'Student',
+        studentEmail: student.email || '',
         status: 'not_started',
         lastActivityAt: createdAt
       };
-      setDoc(subRef, subData).catch(() => {});
+      setDoc(subRef, cleanFirestoreData(subData)).catch(e => console.warn('Sub write warning:', e));
 
       // Save local sub
       const subKey = `${LOCAL_TASK_SUBMISSIONS_PREFIX}${id}`;
@@ -1033,24 +1291,31 @@ export async function createClassTask(
       setLocalItem(subKey, localSubs);
     }
   } catch (err) {
-    console.warn('Offline mode: Saved task locally.', err);
+    console.error('Firestore write error for task:', err);
   }
 
   // 3. Dispatch automated email notification to all targeted students if requested
   if (options?.sendEmail !== false) {
-    const emailRecipients = studentList.map(s => ({
-      studentId: s.studentId,
-      studentName: s.name,
-      studentEmail: s.email && s.email.includes('@')
-        ? s.email
-        : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
-    }));
+    const emailRecipients = studentList
+      .filter(s => s.email && s.email.includes('@'))
+      .map(s => ({
+        studentId: s.studentId,
+        studentName: s.name,
+        studentEmail: s.email
+      }));
 
     if (emailRecipients.length > 0) {
-      notifyStudentsOfTaskAssignment(newTask, emailRecipients).catch(err => {
+      try {
+        await notifyStudentsOfTaskAssignment(newTask, emailRecipients);
+      } catch (err) {
         console.warn('Failed to dispatch task assignment email notifications:', err);
-      });
+      }
     }
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('igcse_task_created', { detail: { task: newTask } }));
+    window.dispatchEvent(new CustomEvent('igcse_task_submission_updated', { detail: { taskId: id } }));
   }
 
   return newTask;
@@ -1062,7 +1327,14 @@ export async function createClassTask(
 export async function notifyStudentsOfTaskAssignment(
   task: ClassTask,
   explicitRecipients?: { studentId: string; studentName: string; studentEmail: string }[]
-): Promise<number> {
+): Promise<TaskNotificationResult> {
+  const fallbackResult: TaskNotificationResult = {
+    count: 0,
+    method: 'none',
+    smtpConfigured: false,
+    recipients: []
+  };
+
   try {
     let recipients = explicitRecipients || [];
 
@@ -1076,32 +1348,26 @@ export async function notifyStudentsOfTaskAssignment(
             studentName: s.name, 
             studentEmail: s.email && s.email.includes('@')
               ? s.email
-              : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
+              : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@gisboyshigh.net`
           }));
-      } else {
-        const classes = await fetchClassesByInstructor(task.instructorId);
-        const studentMap = new Map<string, { studentId: string; studentName: string; studentEmail: string }>();
-        for (const c of classes) {
-          const students = await fetchStudentsInClass(c.id);
-          for (const s of students) {
-            if (!task.targetStudentIds || task.targetStudentIds.length === 0 || task.targetStudentIds.includes(s.studentId)) {
-              studentMap.set(s.studentId, { 
-                studentId: s.studentId, 
-                studentName: s.name, 
-                studentEmail: s.email && s.email.includes('@')
-                  ? s.email
-                  : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
-              });
-            }
-          }
-        }
-        recipients = Array.from(studentMap.values());
+      }
+      
+      // If still empty, check across all classes & registered users
+      if (recipients.length === 0) {
+        const allStudents = await fetchAllRegisteredStudents();
+        recipients = allStudents
+          .filter(s => !task.targetStudentIds || task.targetStudentIds.length === 0 || task.targetStudentIds.includes(s.studentId))
+          .map(s => ({
+            studentId: s.studentId,
+            studentName: s.name,
+            studentEmail: s.email
+          }));
       }
     }
 
     if (recipients.length === 0) {
       console.log('[notifyStudentsOfTaskAssignment] No student recipients found for task:', task.id);
-      return 0;
+      return fallbackResult;
     }
 
     const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -1118,25 +1384,39 @@ export async function notifyStudentsOfTaskAssignment(
 
     if (res.ok) {
       const data = await res.json();
-      console.log(`[notifyStudentsOfTaskAssignment] Dispatched emails to ${data.count || recipients.length} students.`);
-      return data.count || recipients.length;
+      console.log(`[notifyStudentsOfTaskAssignment] Server dispatch result:`, data);
+      return {
+        count: data.count || recipients.length,
+        method: data.method || (data.smtpConfigured ? 'smtp' : 'email_client_ready'),
+        smtpConfigured: Boolean(data.smtpConfigured),
+        mailtoUrl: data.mailtoUrl,
+        gmailComposeUrl: data.gmailComposeUrl,
+        warning: data.warning,
+        subject: data.subject,
+        emailText: data.emailText,
+        recipients: recipients.map(r => ({ studentName: r.studentName, studentEmail: r.studentEmail }))
+      };
     } else {
       console.warn('[notifyStudentsOfTaskAssignment] Server error response:', await res.text());
     }
   } catch (err) {
     console.warn('[notifyStudentsOfTaskAssignment] Email dispatch failed:', err);
   }
-  return 0;
+  return fallbackResult;
 }
 
 /**
  * Fetch all tasks created by instructor or for specific class.
  */
-export async function fetchClassTasks(classId?: string, instructorId?: string): Promise<ClassTask[]> {
+export async function fetchClassTasks(
+  classId?: string, 
+  instructorId?: string,
+  allowedClassIds?: string[]
+): Promise<ClassTask[]> {
   const localTasks = getLocalItem<ClassTask[]>(LOCAL_TASKS_KEY, []);
 
   try {
-    let q = collection(db, 'tasks');
+    const q = collection(db, 'tasks');
     const snap = await getDocs(q);
     const firestoreTasks: ClassTask[] = [];
 
@@ -1158,9 +1438,18 @@ export async function fetchClassTasks(classId?: string, instructorId?: string): 
       let filtered = combined;
       if (classId && classId !== 'all') {
         filtered = filtered.filter(t => t.classId === classId || t.classId === 'all');
-      }
-      if (instructorId) {
-        filtered = filtered.filter(t => t.instructorId === instructorId);
+      } else if (allowedClassIds && allowedClassIds.length > 0) {
+        filtered = filtered.filter(t => 
+          allowedClassIds.includes(t.classId) || 
+          t.classId === 'all' || 
+          (instructorId && t.instructorId === instructorId)
+        );
+      } else if (instructorId) {
+        const isPrimary = instructorId === 'corbanb_instructor' || instructorId === 'corbanb@gisboyshigh.net';
+        filtered = filtered.filter(t => 
+          t.instructorId === instructorId || 
+          (isPrimary && (t.instructorId === 'corbanb_instructor' || (t as any).instructorEmail === 'corbanb@gisboyshigh.net'))
+        );
       }
       return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
@@ -1171,9 +1460,18 @@ export async function fetchClassTasks(classId?: string, instructorId?: string): 
   let filtered = localTasks;
   if (classId && classId !== 'all') {
     filtered = filtered.filter(t => t.classId === classId || t.classId === 'all');
-  }
-  if (instructorId) {
-    filtered = filtered.filter(t => t.instructorId === instructorId);
+  } else if (allowedClassIds && allowedClassIds.length > 0) {
+    filtered = filtered.filter(t => 
+      allowedClassIds.includes(t.classId) || 
+      t.classId === 'all' || 
+      (instructorId && t.instructorId === instructorId)
+    );
+  } else if (instructorId) {
+    const isPrimary = instructorId === 'corbanb_instructor' || instructorId === 'corbanb@gisboyshigh.net';
+    filtered = filtered.filter(t => 
+      t.instructorId === instructorId || 
+      (isPrimary && (t.instructorId === 'corbanb_instructor' || (t as any).instructorEmail === 'corbanb@gisboyshigh.net'))
+    );
   }
   return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
@@ -1190,14 +1488,48 @@ export async function fetchTasksForStudent(
   const studentTasks: TaskWithSubmission[] = [];
   const now = Date.now();
 
-  for (const task of allTasks) {
-    // Check if task applies to student:
-    // 1. Task is for 'all' classes OR task.classId is in student's enrolled classes
-    // 2. Either no targetStudentIds specified OR student.id is in targetStudentIds
-    const appliesToClass = task.classId === 'all' || enrolledClassIds.includes(task.classId);
-    const appliesToStudent = !task.targetStudentIds || task.targetStudentIds.length === 0 || task.targetStudentIds.includes(student.id);
+  const studentCleanEmail = (student.email || '').toLowerCase().trim();
+  const activeClassIds = new Set(enrolledClassIds || []);
+  activeClassIds.add(DEFAULT_CLASS_ITEM.id);
+  activeClassIds.add('class_default_0653');
 
-    if (appliesToClass && appliesToStudent) {
+  // If student only has default class in local memory, also resolve enrolled classes from Firestore user profile
+  if (activeClassIds.size <= 2 && student.id) {
+    try {
+      const userDoc = await getDoc(doc(db, 'users', student.id));
+      if (userDoc.exists()) {
+        const userClasses: string[] = userDoc.data()?.enrolledClassIds || [];
+        userClasses.forEach(cid => activeClassIds.add(cid));
+      }
+    } catch {}
+  }
+
+  for (const task of allTasks) {
+    // 1. Is student explicitly in targetStudentIds by UID or email?
+    const hasTargetIds = Array.isArray(task.targetStudentIds) && task.targetStudentIds.length > 0;
+    const isTargetedDirectly = hasTargetIds && (
+      task.targetStudentIds!.includes(student.id) ||
+      (studentCleanEmail && task.targetStudentIds!.some(id => id.toLowerCase() === studentCleanEmail))
+    );
+
+    // 2. Class match:
+    // - task applies to 'all' classes
+    // - OR student is enrolled in the task's class
+    // - OR task is for default class
+    const isClassMatch = 
+      task.classId === 'all' || 
+      activeClassIds.has(task.classId) || 
+      task.classId === DEFAULT_CLASS_ITEM.id || 
+      task.classId === 'class_default_0653';
+
+    // If teacher selected specific students, only targeted students see it.
+    // If teacher set task for class (or all classes), all students enrolled in that class see it.
+    // If the student hasn't entered a custom class code yet, show course-wide & syllabus tasks so assignments are never hidden.
+    const appliesToStudent = hasTargetIds 
+      ? isTargetedDirectly 
+      : (isClassMatch || task.classId === 'all' || activeClassIds.size <= 2);
+
+    if (appliesToStudent) {
       // Fetch or derive student's submission status
       let submission: TaskSubmission | undefined = undefined;
 
@@ -1511,10 +1843,11 @@ export async function autoCheckTaskCompletion(
 export function subscribeToClassTasks(
   classId: string | undefined,
   instructorId: string | undefined,
-  callback: (tasks: ClassTask[]) => void
+  callback: (tasks: ClassTask[]) => void,
+  allowedClassIds?: string[]
 ): () => void {
   // Initial fire from local cache
-  fetchClassTasks(classId, instructorId).then(callback).catch(() => {});
+  fetchClassTasks(classId, instructorId, allowedClassIds).then(callback).catch(() => {});
 
   let unsubFirestore: (() => void) | null = null;
   try {
@@ -1536,8 +1869,13 @@ export function subscribeToClassTasks(
       let filtered = combined;
       if (classId && classId !== 'all') {
         filtered = filtered.filter(t => t.classId === classId || t.classId === 'all');
-      }
-      if (instructorId) {
+      } else if (allowedClassIds && allowedClassIds.length > 0) {
+        filtered = filtered.filter(t => 
+          allowedClassIds.includes(t.classId) || 
+          t.classId === 'all' || 
+          (instructorId && t.instructorId === instructorId)
+        );
+      } else if (instructorId) {
         filtered = filtered.filter(t => t.instructorId === instructorId);
       }
       callback(filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
@@ -1550,7 +1888,7 @@ export function subscribeToClassTasks(
 
   // Also listen for local custom events (cross-tab / in-window updates)
   const handleLocalUpdate = () => {
-    fetchClassTasks(classId, instructorId).then(callback).catch(() => {});
+    fetchClassTasks(classId, instructorId, allowedClassIds).then(callback).catch(() => {});
   };
 
   if (typeof window !== 'undefined') {
@@ -1649,6 +1987,7 @@ export function subscribeToClassStudents(
   };
 
   if (typeof window !== 'undefined') {
+    window.addEventListener('igcse_student_progress_synced', handleLocalUpdate);
     window.addEventListener('igcse_task_submission_updated', handleLocalUpdate);
     window.addEventListener('storage', handleLocalUpdate);
   }
@@ -1656,6 +1995,7 @@ export function subscribeToClassStudents(
   return () => {
     if (unsubFirestore) unsubFirestore();
     if (typeof window !== 'undefined') {
+      window.removeEventListener('igcse_student_progress_synced', handleLocalUpdate);
       window.removeEventListener('igcse_task_submission_updated', handleLocalUpdate);
       window.removeEventListener('storage', handleLocalUpdate);
     }

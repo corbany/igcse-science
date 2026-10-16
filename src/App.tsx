@@ -12,6 +12,7 @@ import { InstructorDashboard } from './components/InstructorDashboard';
 import { StudentClassesView } from './components/StudentClassesView';
 import { StudentTasksPanel } from './components/StudentTasksPanel';
 import { AIChatTutor } from './components/AIChatTutor';
+import { StudentLeaderboard } from './components/StudentLeaderboard';
 import { GoogleSignInGate } from './components/GoogleSignInGate';
 import { ClassCodeGateModal } from './components/ClassCodeGateModal';
 import { ScienceSubject, UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, TaskWithSubmission } from './types';
@@ -232,19 +233,35 @@ export default function App() {
       const newCompleted = isCompleted
         ? prev.completedLessons.filter(id => id !== lessonId)
         : [...prev.completedLessons, lessonId];
-      return { ...prev, completedLessons: newCompleted, lastActive: new Date().toISOString() };
+      const updated: StudentProgress = { ...prev, completedLessons: newCompleted, lastActive: new Date().toISOString() };
+      try {
+        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
+      } catch {}
+      if (user && user.role === 'student' && enrolledClassIds.length > 0) {
+        syncStudentProgressToClasses(user, updated, enrolledClassIds);
+      }
+      return updated;
     });
   };
 
   const handleUpdateConfidence = (topicCode: string, rating: number) => {
-    setProgress(prev => ({
-      ...prev,
-      topicConfidence: {
-        ...prev.topicConfidence,
-        [topicCode]: rating
-      },
-      lastActive: new Date().toISOString()
-    }));
+    setProgress(prev => {
+      const updated: StudentProgress = {
+        ...prev,
+        topicConfidence: {
+          ...prev.topicConfidence,
+          [topicCode]: rating
+        },
+        lastActive: new Date().toISOString()
+      };
+      try {
+        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
+      } catch {}
+      if (user && user.role === 'student' && enrolledClassIds.length > 0) {
+        syncStudentProgressToClasses(user, updated, enrolledClassIds);
+      }
+      return updated;
+    });
   };
 
   const handleUpdateNote = (topicCode: string, noteContent: string) => {
@@ -259,14 +276,23 @@ export default function App() {
   };
 
   const handleQuizCompleted = (subject: string, score: number, total: number) => {
-    setProgress(prev => ({
-      ...prev,
-      quizScores: {
-        ...prev.quizScores,
-        [subject]: { score, total, date: new Date().toISOString() }
-      },
-      lastActive: new Date().toISOString()
-    }));
+    setProgress(prev => {
+      const updated: StudentProgress = {
+        ...prev,
+        quizScores: {
+          ...prev.quizScores,
+          [subject]: { score, total, date: new Date().toISOString() }
+        },
+        lastActive: new Date().toISOString()
+      };
+      try {
+        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
+      } catch {}
+      if (user && user.role === 'student' && enrolledClassIds.length > 0) {
+        syncStudentProgressToClasses(user, updated, enrolledClassIds);
+      }
+      return updated;
+    });
 
     if (user && user.role === 'student') {
       autoCheckTaskCompletion(user, enrolledClassIds, 'quiz', subject, { quizScore: Math.round((score / total) * 100) });
@@ -274,14 +300,27 @@ export default function App() {
   };
 
   const handleUpdateTrafficLight = (subtopicCode: string, status: TrafficLightStatus) => {
-    setProgress(prev => ({
-      ...prev,
-      trafficLights: {
-        ...(prev.trafficLights || {}),
-        [subtopicCode]: status
-      },
-      lastActive: new Date().toISOString()
-    }));
+    setProgress(prev => {
+      const completedSet = new Set(prev.completedLessons || []);
+      // If student reviewed slides and completed traffic light rating, mark slide deck as completed
+      completedSet.add(subtopicCode);
+      const updated: StudentProgress = {
+        ...prev,
+        completedLessons: Array.from(completedSet),
+        trafficLights: {
+          ...(prev.trafficLights || {}),
+          [subtopicCode]: status
+        },
+        lastActive: new Date().toISOString()
+      };
+      try {
+        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
+      } catch {}
+      if (user && user.role === 'student' && enrolledClassIds.length > 0) {
+        syncStudentProgressToClasses(user, updated, enrolledClassIds);
+      }
+      return updated;
+    });
 
     if (user && user.role === 'student') {
       autoCheckTaskCompletion(user, enrolledClassIds, 'traffic_light', subtopicCode, { trafficLight: status });
@@ -289,14 +328,27 @@ export default function App() {
   };
 
   const handleSaveSubtopicQuizResult = (subtopicCode: string, result: SubtopicQuizResult) => {
-    setProgress(prev => ({
-      ...prev,
-      subtopicQuizScores: {
-        ...(prev.subtopicQuizScores || {}),
-        [subtopicCode]: result
-      },
-      lastActive: new Date().toISOString()
-    }));
+    setProgress(prev => {
+      const completedSet = new Set(prev.completedLessons || []);
+      // When traffic light quiz is completed, mark slide deck as completed
+      completedSet.add(subtopicCode);
+      const updated: StudentProgress = {
+        ...prev,
+        completedLessons: Array.from(completedSet),
+        subtopicQuizScores: {
+          ...(prev.subtopicQuizScores || {}),
+          [subtopicCode]: result
+        },
+        lastActive: new Date().toISOString()
+      };
+      try {
+        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
+      } catch {}
+      if (user && user.role === 'student' && enrolledClassIds.length > 0) {
+        syncStudentProgressToClasses(user, updated, enrolledClassIds);
+      }
+      return updated;
+    });
 
     if (user && user.role === 'student') {
       autoCheckTaskCompletion(user, enrolledClassIds, 'quiz', subtopicCode, { quizScore: result.score });
@@ -531,6 +583,17 @@ export default function App() {
           />
         )}
 
+        {currentTab === 'leaderboard' && (
+          <StudentLeaderboard
+            user={user}
+            progress={progress}
+            enrolledClassIds={enrolledClassIds}
+            onNavigateToLessons={handleOpenLesson}
+            onNavigateToQuizzes={() => setCurrentTab('quizzes')}
+            onNavigateToProfile={() => setCurrentTab('tracker')}
+          />
+        )}
+
         {currentTab === 'exams' && (
           <PastExamsVault
             isInstructor={user.role === 'instructor'}
@@ -561,6 +624,7 @@ export default function App() {
             user={user}
             onUpdateConfidence={handleUpdateConfidence}
             onNavigateToTopic={handleOpenLesson}
+            onNavigateToLeaderboard={() => setCurrentTab('leaderboard')}
           />
         )}
 
