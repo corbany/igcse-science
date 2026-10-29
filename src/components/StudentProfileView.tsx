@@ -1,10 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   UserProfile, 
   StudentProgress, 
   BadgeCategory, 
   ScienceSubject,
-  StudentBadge 
+  StudentBadge,
+  TaskWithSubmission,
+  CompletedActivity 
 } from '../types';
 import { 
   evaluateStudentBadges, 
@@ -12,6 +14,13 @@ import {
   calculateStreak 
 } from '../services/badgeService';
 import { VirtualMedalBadge } from './VirtualMedalBadge';
+import { 
+  MedalTierIcon, 
+  MedalCountsSummary, 
+  MiniMedalPill, 
+  DynamicCategoryMedalGroup,
+  StudentMedalStrip
+} from './MedalTypeBadge';
 import { 
   Trophy, 
   Flame, 
@@ -27,12 +36,26 @@ import {
   Filter,
   Users,
   ChevronRight,
-  BookOpen
+  BookOpen,
+  Clock,
+  History,
+  ClipboardCheck,
+  ArrowRight,
+  Check
 } from 'lucide-react';
+import { fetchTasksForStudent } from '../services/firestoreService';
+import { 
+  getRecentCompletedActivities, 
+  formatActivityTimestamp, 
+  getActivityRelativeTime, 
+  getActivityExactTooltip 
+} from '../services/activityService';
 
 interface StudentProfileViewProps {
   user: UserProfile;
   progress: StudentProgress;
+  enrolledClassIds?: string[];
+  tasks?: TaskWithSubmission[];
   onUpdateUser?: (updated: UserProfile) => void;
   onUpdateProgress?: (updated: StudentProgress) => void;
   onNavigateToLeaderboard?: () => void;
@@ -43,6 +66,8 @@ interface StudentProfileViewProps {
 export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
   user,
   progress,
+  enrolledClassIds = [],
+  tasks,
   onUpdateUser,
   onUpdateProgress,
   onNavigateToLeaderboard,
@@ -54,6 +79,44 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
   const [filterStatus, setFilterStatus] = useState<'all' | 'unlocked' | 'locked'>('all');
   const [searchBadgeQuery, setSearchBadgeQuery] = useState('');
   const [selectedBadgeForModal, setSelectedBadgeForModal] = useState<StudentBadge | null>(null);
+
+  // Live tasks and real-time activity updates state
+  const [liveTasks, setLiveTasks] = useState<TaskWithSubmission[]>(tasks || []);
+  const [activityRefreshKey, setActivityRefreshKey] = useState<number>(0);
+
+  useEffect(() => {
+    if (tasks && tasks.length > 0) {
+      setLiveTasks(tasks);
+    } else {
+      let isMounted = true;
+      fetchTasksForStudent(user, enrolledClassIds || [], progress)
+        .then(t => {
+          if (isMounted) setLiveTasks(t);
+        })
+        .catch(err => console.warn('Could not load tasks for student profile:', err));
+      return () => { isMounted = false; };
+    }
+  }, [tasks, user.id, (enrolledClassIds || []).join(','), progress]);
+
+  // Listen for real-time task completion and activity events
+  useEffect(() => {
+    const handleActivityUpdate = () => {
+      setActivityRefreshKey(k => k + 1);
+    };
+    window.addEventListener('igcse_activity_logged', handleActivityUpdate);
+    window.addEventListener('igcse_task_submission_updated', handleActivityUpdate);
+    window.addEventListener('storage', handleActivityUpdate);
+    return () => {
+      window.removeEventListener('igcse_activity_logged', handleActivityUpdate);
+      window.removeEventListener('igcse_task_submission_updated', handleActivityUpdate);
+      window.removeEventListener('storage', handleActivityUpdate);
+    };
+  }, []);
+
+  // Compute the last 5 completed tasks or quizzes with their respective timestamps
+  const recentActivities = useMemo(() => {
+    return getRecentCompletedActivities(user, progress, liveTasks, 5);
+  }, [user, progress, liveTasks, activityRefreshKey]);
 
   // Compute live badge evaluation, XP, and Level
   const { allBadges, unlockedBadges, lockedBadges, totalXP } = useMemo(() => {
@@ -225,6 +288,9 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
             </div>
             <div className="text-xl font-black text-white">{unlockedBadges.length} <span className="text-xs font-normal text-slate-400">/ {allBadges.length}</span></div>
             <p className="text-[10px] text-emerald-400 mt-0.5 font-medium">{Math.round((unlockedBadges.length / allBadges.length) * 100)}% unlocked</p>
+            <div className="mt-2 pt-2 border-t border-slate-800/60">
+              <StudentMedalStrip badges={unlockedBadges} compact={true} showCategoryBreakdown={false} />
+            </div>
           </div>
 
           <div className="bg-slate-950/50 rounded-2xl p-3.5 border border-slate-800/60">
@@ -249,7 +315,208 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
         </div>
       </div>
 
-      {/* 3. FEATURED MEDAL SPOTLIGHT */}
+      {/* 3. RECENT ACTIVITY (Last 5 completed tasks or quizzes with respective timestamps) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-5 shadow-lg">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 shadow-inner">
+              <History className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-black text-white tracking-tight">Recent Activity</h2>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono">
+                  Last 5 Completed
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                The last 5 tasks or quizzes you completed with verified completion timestamps, scores, and mastery statuses.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-emerald-400 shadow-xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>Live Synced Activity</span>
+            </div>
+          </div>
+        </div>
+
+        {recentActivities.length === 0 ? (
+          <div className="text-center py-10 px-4 bg-slate-950/50 rounded-2xl border border-slate-800/80 space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 mx-auto">
+              <Clock className="w-6 h-6" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-sm font-bold text-white">No Completed Activities Recorded Yet</h3>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                Once you complete your assigned class homework, review lesson slides, or take 10-question practice quizzes, your 5 most recent completions will appear here with exact timestamps.
+              </p>
+            </div>
+            <div className="pt-2 flex flex-wrap items-center justify-center gap-2">
+              {onNavigateToQuizzes && (
+                <button
+                  onClick={() => onNavigateToQuizzes()}
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-xs"
+                >
+                  <Award className="w-3.5 h-3.5" />
+                  <span>Take a Practice Quiz</span>
+                </button>
+              )}
+              {onNavigateToLessons && (
+                <button
+                  onClick={() => onNavigateToLessons()}
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition flex items-center gap-1.5 border border-slate-700"
+                >
+                  <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Browse Lesson Slides</span>
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {recentActivities.map((act, idx) => {
+              const isTask = act.type === 'task';
+              const isSubtopicQuiz = act.type === 'subtopic_quiz';
+              const isSubjectQuiz = act.type === 'subject_quiz';
+
+              return (
+                <div
+                  key={act.id || idx}
+                  className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 hover:border-slate-700 transition flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs group"
+                >
+                  {/* Left: Indicator, Title, Topic & Subject Tags */}
+                  <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-[11px] font-mono font-bold text-slate-400 flex items-center justify-center">
+                        #{idx + 1}
+                      </span>
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                        isTask 
+                          ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                          : isSubtopicQuiz
+                            ? 'bg-sky-500/15 text-sky-400 border-sky-500/30'
+                            : 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+                      }`}>
+                        {isTask && <ClipboardCheck className="w-4 h-4" />}
+                        {isSubtopicQuiz && <Award className="w-4 h-4" />}
+                        {isSubjectQuiz && <Trophy className="w-4 h-4" />}
+                      </div>
+                    </div>
+
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border ${
+                          isTask 
+                            ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25'
+                            : isSubtopicQuiz
+                              ? 'bg-sky-500/10 text-sky-300 border-sky-500/25'
+                              : 'bg-purple-500/10 text-purple-300 border-purple-500/25'
+                        }`}>
+                          {isTask ? 'Class Task' : isSubtopicQuiz ? '10-Q Knowledge Check' : 'Subject Practice Quiz'}
+                        </span>
+
+                        {act.code && (
+                          <span className={`px-2 py-0.2 rounded-md font-mono text-[11px] font-bold border ${
+                            act.subject === 'biology' 
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                              : act.subject === 'chemistry'
+                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
+                          }`}>
+                            {act.code}
+                          </span>
+                        )}
+
+                        <span className="text-[11px] text-slate-500 hidden sm:inline">•</span>
+                        <span className="text-[11px] text-slate-400 truncate hidden sm:inline">
+                          {act.subtitle || 'Completed Activity'}
+                        </span>
+                      </div>
+
+                      <h4 className="text-sm font-bold text-white tracking-tight truncate group-hover:text-emerald-300 transition">
+                        {act.title}
+                      </h4>
+                    </div>
+                  </div>
+
+                  {/* Middle: Performance / Score & Status */}
+                  <div className="flex items-center gap-3 shrink-0 self-start md:self-center">
+                    {/* Score / Percentage Badge */}
+                    {act.score !== undefined && (
+                      <div className={`px-2.5 py-1 rounded-xl border text-xs font-mono font-bold flex items-center gap-1.5 ${
+                        (act.percentage !== undefined ? act.percentage >= 80 : act.score >= 8)
+                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                          : (act.percentage !== undefined ? act.percentage >= 50 : act.score >= 5)
+                            ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                            : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                      }`}>
+                        <Award className="w-3.5 h-3.5" />
+                        <span>
+                          {act.total !== undefined ? `${act.score}/${act.total}` : `${act.score}%`}
+                          {act.percentage !== undefined && ` (${act.percentage}%)`}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Traffic Light Dot */}
+                    {act.trafficLight && (
+                      <div 
+                        className={`w-3.5 h-3.5 rounded-full shadow-xs ${
+                          act.trafficLight === 'green' ? 'bg-emerald-400 shadow-emerald-500/40' :
+                          act.trafficLight === 'orange' ? 'bg-amber-400 shadow-amber-500/40' : 'bg-rose-500 shadow-rose-500/40'
+                        }`}
+                        title={`Traffic light status: ${act.trafficLight}`}
+                      />
+                    )}
+
+                    {/* Auto-Verified Complete Badge */}
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="hidden sm:inline">Completed</span>
+                    </span>
+                  </div>
+
+                  {/* Right: Respective Timestamps & Navigation Link */}
+                  <div className="flex items-center justify-between md:justify-end gap-3 pt-2 md:pt-0 border-t md:border-t-0 border-slate-800/80 shrink-0">
+                    <div 
+                      className="text-left md:text-right space-y-0.5 cursor-help"
+                      title={`Completed on: ${getActivityExactTooltip(act.completedAt)}`}
+                    >
+                      <div className="flex items-center md:justify-end gap-1.5 text-xs font-mono font-bold text-slate-200">
+                        <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{formatActivityTimestamp(act.completedAt)}</span>
+                      </div>
+                      <div className="flex items-center md:justify-end gap-1.5 text-[10px]">
+                        <span className="text-slate-400">Timestamp:</span>
+                        <span className="px-2 py-0.2 rounded-full font-semibold bg-slate-800 text-emerald-300 border border-slate-700">
+                          {getActivityRelativeTime(act.completedAt)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Quick navigation shortcut button */}
+                    {act.code && onNavigateToLessons && (
+                      <button
+                        onClick={() => onNavigateToLessons(act.code)}
+                        className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition flex items-center gap-1 border border-slate-700 shrink-0"
+                        title={`Review ${act.code} lesson slides`}
+                      >
+                        <span>Review</span>
+                        <ArrowRight className="w-3 h-3 text-emerald-400" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 4. FEATURED MEDAL SPOTLIGHT */}
       {featuredBadge && (
         <div className="bg-gradient-to-r from-amber-950/30 via-slate-900 to-indigo-950/30 border border-amber-500/30 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-5 shadow-lg">
           <div className="flex items-center gap-4">
@@ -286,7 +553,53 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
         </div>
       )}
 
-      {/* 4. MEDAL TROPHY CABINET & FILTER CONTROLS */}
+      {/* 4. DYNAMIC EARNED VIRTUAL MEDALS BY ACHIEVEMENT */}
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-5 shadow-lg">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div className="flex items-center gap-2.5">
+            <Award className="w-6 h-6 text-amber-400" />
+            <div>
+              <h2 className="text-xl font-black text-white tracking-tight">Earned Virtual Badges & Medals</h2>
+              <p className="text-xs text-slate-400">
+                Dynamically tracked achievements for revision streaks, topic module completions, and quiz performance.
+              </p>
+            </div>
+          </div>
+          <MedalCountsSummary badges={unlockedBadges} size="md" />
+        </div>
+
+        {/* Dynamic earned virtual badges summary strip */}
+        <StudentMedalStrip badges={unlockedBadges} compact={false} showCategoryBreakdown={true} />
+
+        {/* 3 Categories with icons for each medal type */}
+        <div className="space-y-3.5">
+          {/* Streaks */}
+          <DynamicCategoryMedalGroup
+            title="Revision Streaks"
+            category="streak"
+            badges={allBadges}
+            onBadgeClick={(b) => setSelectedBadgeForModal(b)}
+          />
+
+          {/* Module Completions */}
+          <DynamicCategoryMedalGroup
+            title="Topic Module Completions"
+            category="topic_module"
+            badges={allBadges}
+            onBadgeClick={(b) => setSelectedBadgeForModal(b)}
+          />
+
+          {/* Quiz Performance */}
+          <DynamicCategoryMedalGroup
+            title="Quiz Performance & Mastery"
+            category="quiz"
+            badges={allBadges}
+            onBadgeClick={(b) => setSelectedBadgeForModal(b)}
+          />
+        </div>
+      </div>
+
+      {/* 5. MEDAL TROPHY CABINET & FILTER CONTROLS */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>

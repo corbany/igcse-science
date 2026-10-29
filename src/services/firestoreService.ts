@@ -1172,6 +1172,8 @@ export async function removeStudentFromClass(classId: string, studentId: string)
 export interface CreateClassTaskOptions {
   sendEmail?: boolean;
   explicitRecipients?: { studentId: string; studentName: string; studentEmail: string }[];
+  additionalEmails?: string[];
+  onNotificationDispatched?: (result: TaskNotificationResult) => void;
 }
 
 export interface TaskNotificationResult {
@@ -1192,7 +1194,7 @@ export interface TaskNotificationResult {
 export async function createClassTask(
   taskData: Omit<ClassTask, 'id' | 'createdAt'>,
   options?: CreateClassTaskOptions
-): Promise<ClassTask> {
+): Promise<ClassTask & { notificationResult?: TaskNotificationResult }> {
   const id = `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const createdAt = new Date().toISOString();
 
@@ -1294,22 +1296,28 @@ export async function createClassTask(
     console.error('Firestore write error for task:', err);
   }
 
-  // 3. Dispatch automated email notification to all targeted students if requested
+  // 3. Dispatch automated email notification to all targeted students + additional emails if requested
+  let notifResult: TaskNotificationResult | undefined = undefined;
   if (options?.sendEmail !== false) {
     const emailRecipients = studentList
-      .filter(s => s.email && s.email.includes('@'))
-      .map(s => ({
-        studentId: s.studentId,
-        studentName: s.name,
-        studentEmail: s.email
-      }));
+      .map(s => {
+        const email = s.email && s.email.includes('@')
+          ? s.email
+          : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@gisboyshigh.net`;
+        return {
+          studentId: s.studentId,
+          studentName: s.name || 'Student',
+          studentEmail: email
+        };
+      });
 
-    if (emailRecipients.length > 0) {
-      try {
-        await notifyStudentsOfTaskAssignment(newTask, emailRecipients);
-      } catch (err) {
-        console.warn('Failed to dispatch task assignment email notifications:', err);
+    try {
+      notifResult = await notifyStudentsOfTaskAssignment(newTask, emailRecipients, options?.additionalEmails);
+      if (options?.onNotificationDispatched && notifResult) {
+        options.onNotificationDispatched(notifResult);
       }
+    } catch (err) {
+      console.warn('Failed to dispatch task assignment email notifications:', err);
     }
   }
 
@@ -1318,7 +1326,10 @@ export async function createClassTask(
     window.dispatchEvent(new CustomEvent('igcse_task_submission_updated', { detail: { taskId: id } }));
   }
 
-  return newTask;
+  return {
+    ...newTask,
+    notificationResult: notifResult
+  };
 }
 
 /**
@@ -1326,7 +1337,8 @@ export async function createClassTask(
  */
 export async function notifyStudentsOfTaskAssignment(
   task: ClassTask,
-  explicitRecipients?: { studentId: string; studentName: string; studentEmail: string }[]
+  explicitRecipients?: { studentId: string; studentName: string; studentEmail: string }[],
+  additionalEmails?: string[]
 ): Promise<TaskNotificationResult> {
   const fallbackResult: TaskNotificationResult = {
     count: 0,
@@ -1336,7 +1348,7 @@ export async function notifyStudentsOfTaskAssignment(
   };
 
   try {
-    let recipients = explicitRecipients || [];
+    let recipients = explicitRecipients ? [...explicitRecipients] : [];
 
     if (recipients.length === 0) {
       if (task.classId !== 'all') {
@@ -1360,9 +1372,25 @@ export async function notifyStudentsOfTaskAssignment(
           .map(s => ({
             studentId: s.studentId,
             studentName: s.name,
-            studentEmail: s.email
+            studentEmail: s.email && s.email.includes('@')
+              ? s.email
+              : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@gisboyshigh.net`
           }));
       }
+    }
+
+    // Merge any additional custom notification emails (e.g. instructor, parents, test address)
+    if (Array.isArray(additionalEmails) && additionalEmails.length > 0) {
+      additionalEmails.forEach(extra => {
+        const clean = (extra || '').trim().toLowerCase();
+        if (clean && clean.includes('@') && !recipients.some(r => r.studentEmail.toLowerCase() === clean)) {
+          recipients.push({
+            studentId: `custom_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            studentName: clean.split('@')[0],
+            studentEmail: clean
+          });
+        }
+      });
     }
 
     if (recipients.length === 0) {
@@ -1552,61 +1580,100 @@ export async function fetchTasksForStudent(
         // use local
       }
 
-      // If no recorded submission yet, verify if student's progress already completed it!
-      if (!submission) {
-        let initialStatus: TaskProgressStatus = 'not_started';
-        let trafficLightVal: TrafficLightStatus | undefined = undefined;
-        let quizScoreVal: number | undefined = undefined;
+      // Automatically evaluate if student's progress satisfies completion criteria
+      if (studentProgress && (!submission || submission.status !== 'completed')) {
+        let shouldAutoMarkCompleted = false;
+        let trafficLightVal: TrafficLightStatus | undefined = submission?.trafficLight;
+        let quizScoreVal: number | undefined = submission?.quizScore;
+        let slidesDone = submission?.slidesCompleted || false;
+        let quizDone = submission?.quizCompleted || false;
 
-        if (studentProgress) {
-          if (task.type === 'both' && task.targetSubtopics?.length > 0) {
-            const hasSlides = task.targetSubtopics.every(
-              sub => studentProgress.trafficLights && studentProgress.trafficLights[sub]
-            );
-            const hasQuiz = task.targetSubtopics.some(
-              sub => studentProgress.subtopicQuizScores && studentProgress.subtopicQuizScores[sub]
-            );
-
-            if (hasSlides) trafficLightVal = studentProgress.trafficLights[task.targetSubtopics[0]];
-            if (hasQuiz) quizScoreVal = studentProgress.subtopicQuizScores[task.targetSubtopics[0]]?.score;
-
-            if (hasSlides && hasQuiz) {
-              initialStatus = 'completed';
-            } else if (hasSlides || hasQuiz) {
-              initialStatus = 'incomplete';
-            }
-          } else if (task.type === 'slides_traffic_light' && task.targetSubtopics?.length > 0) {
-            const hasAllLights = task.targetSubtopics.every(
-              sub => studentProgress.trafficLights && studentProgress.trafficLights[sub]
-            );
-            if (hasAllLights) {
-              initialStatus = 'completed';
-              trafficLightVal = studentProgress.trafficLights[task.targetSubtopics[0]];
-            } else if (task.targetSubtopics.some(sub => studentProgress.trafficLights && studentProgress.trafficLights[sub])) {
-              initialStatus = 'incomplete';
-            }
-          } else if (task.type === 'practice_quiz' && task.targetSubtopics?.length > 0) {
-            const hasQuiz = task.targetSubtopics.some(
-              sub => studentProgress.subtopicQuizScores && studentProgress.subtopicQuizScores[sub]
-            );
-            if (hasQuiz) {
-              initialStatus = 'completed';
-              quizScoreVal = studentProgress.subtopicQuizScores[task.targetSubtopics[0]]?.score;
-            }
+        const targets = task.targetSubtopics || [];
+        
+        // 1. Check slides / traffic light
+        const hasSlidesOrLight = targets.length === 0 ? false : targets.some(sub => {
+          const hasLight = !!(studentProgress.trafficLights && studentProgress.trafficLights[sub]);
+          const hasCompletedLesson = !!(studentProgress.completedLessons && studentProgress.completedLessons.includes(sub));
+          return hasLight || hasCompletedLesson;
+        });
+        if (hasSlidesOrLight) {
+          slidesDone = true;
+          if (targets[0] && studentProgress.trafficLights?.[targets[0]]) {
+            trafficLightVal = studentProgress.trafficLights[targets[0]];
           }
         }
 
+        // 2. Check quiz score
+        const hasQuiz = targets.length === 0 ? false : targets.some(sub => {
+          const hasSubScore = !!(studentProgress.subtopicQuizScores && studentProgress.subtopicQuizScores[sub]);
+          const topicPrefix = sub.split('.')[0] || sub;
+          const hasTopicScore = !!(studentProgress.quizScores && (studentProgress.quizScores[sub] || studentProgress.quizScores[topicPrefix]));
+          return hasSubScore || hasTopicScore;
+        });
+        if (hasQuiz) {
+          quizDone = true;
+          if (targets[0] && studentProgress.subtopicQuizScores?.[targets[0]]) {
+            quizScoreVal = studentProgress.subtopicQuizScores[targets[0]].score;
+          }
+        }
+
+        // 3. Evaluate completion based on task type
+        if (task.type === 'both') {
+          shouldAutoMarkCompleted = slidesDone && quizDone;
+        } else if (task.type === 'slides_traffic_light') {
+          shouldAutoMarkCompleted = slidesDone;
+        } else if (task.type === 'practice_quiz') {
+          shouldAutoMarkCompleted = quizDone;
+        } else if (task.type === 'exam_paper') {
+          shouldAutoMarkCompleted = quizDone;
+        } else if (task.type === 'custom') {
+          shouldAutoMarkCompleted = slidesDone || quizDone;
+        }
+
+        if (shouldAutoMarkCompleted) {
+          submission = {
+            studentId: student.id,
+            studentName: student.name,
+            studentEmail: student.email,
+            status: 'completed',
+            trafficLight: trafficLightVal,
+            quizScore: quizScoreVal,
+            slidesCompleted: slidesDone,
+            quizCompleted: quizDone,
+            completedAt: submission?.completedAt || new Date().toISOString()
+          };
+          localSubs[student.id] = submission;
+          setLocalItem(subKey, localSubs);
+          // Persist in background to Firestore
+          try {
+            const subRef = doc(db, 'tasks', task.id, 'submissions', student.id);
+            setDoc(subRef, submission, { merge: true }).catch(() => {});
+          } catch {}
+        } else if (slidesDone || quizDone) {
+          submission = {
+            studentId: student.id,
+            studentName: student.name,
+            studentEmail: student.email,
+            status: 'incomplete',
+            trafficLight: trafficLightVal,
+            quizScore: quizScoreVal,
+            slidesCompleted: slidesDone,
+            quizCompleted: quizDone,
+            completedAt: undefined
+          };
+          localSubs[student.id] = submission;
+          setLocalItem(subKey, localSubs);
+        }
+      }
+
+      if (!submission) {
         submission = {
           studentId: student.id,
           studentName: student.name,
           studentEmail: student.email,
-          status: initialStatus,
-          trafficLight: trafficLightVal,
-          quizScore: quizScoreVal,
-          completedAt: initialStatus === 'completed' ? new Date().toISOString() : undefined
+          status: 'not_started',
+          completedAt: undefined
         };
-
-        // Cache submission
         localSubs[student.id] = submission;
         setLocalItem(subKey, localSubs);
       }
@@ -1772,8 +1839,20 @@ export async function updateClassTaskDueDate(taskId: string, newDueDate: string)
   return true;
 }
 
+function isTargetSubtopicMatched(targets: string[], subtopicCode: string): boolean {
+  if (!targets || targets.length === 0) return true;
+  const cleanCode = subtopicCode.trim().toUpperCase();
+  return targets.some(target => {
+    const cleanTarget = target.trim().toUpperCase();
+    return cleanTarget === cleanCode || 
+           cleanCode.startsWith(cleanTarget) || 
+           cleanTarget.startsWith(cleanCode);
+  });
+}
+
 /**
  * Checks if a student's newly updated traffic light or quiz score completes any assigned tasks.
+ * Automatically marks tasks as completed without manual intervention.
  */
 export async function autoCheckTaskCompletion(
   student: UserProfile,
@@ -1787,52 +1866,134 @@ export async function autoCheckTaskCompletion(
     for (const task of studentTasks) {
       if (task.submission?.status === 'completed') continue;
 
+      const matches = isTargetSubtopicMatched(task.targetSubtopics, subtopicCode);
+      if (!matches) continue;
+
       if (task.type === 'both') {
-        const matchesSubtopic = task.targetSubtopics.includes(subtopicCode) || 
-          task.targetSubtopics.some(s => subtopicCode.startsWith(s));
+        const currentSub = task.submission;
+        const slidesDone = actionType === 'traffic_light' ? true : (currentSub?.slidesCompleted || currentSub?.trafficLight !== undefined);
+        const quizDone = actionType === 'quiz' ? true : (currentSub?.quizCompleted || currentSub?.quizScore !== undefined);
 
-        if (matchesSubtopic) {
-          const currentSub = task.submission;
-          const slidesDone = actionType === 'traffic_light' ? true : (currentSub?.slidesCompleted || currentSub?.trafficLight !== undefined);
-          const quizDone = actionType === 'quiz' ? true : (currentSub?.quizCompleted || currentSub?.quizScore !== undefined);
+        const isFullyCompleted = slidesDone && quizDone;
 
-          const isFullyCompleted = slidesDone && quizDone;
+        await updateTaskSubmission(task.id, student.id, {
+          status: isFullyCompleted ? 'completed' : 'incomplete',
+          trafficLight: actionType === 'traffic_light' ? extra?.trafficLight : currentSub?.trafficLight,
+          quizScore: actionType === 'quiz' ? extra?.quizScore : currentSub?.quizScore,
+          slidesCompleted: slidesDone,
+          quizCompleted: quizDone,
+          studentName: student.name,
+          studentEmail: student.email,
+          completedAt: isFullyCompleted ? (currentSub?.completedAt || new Date().toISOString()) : undefined
+        });
+      } else if (actionType === 'traffic_light' && (task.type === 'slides_traffic_light' || task.type === 'custom')) {
+        await updateTaskSubmission(task.id, student.id, {
+          status: 'completed',
+          trafficLight: extra?.trafficLight,
+          slidesCompleted: true,
+          studentName: student.name,
+          studentEmail: student.email,
+          completedAt: new Date().toISOString()
+        });
+      } else if (actionType === 'quiz' && (task.type === 'practice_quiz' || task.type === 'exam_paper' || task.type === 'custom')) {
+        await updateTaskSubmission(task.id, student.id, {
+          status: 'completed',
+          quizScore: extra?.quizScore,
+          quizCompleted: true,
+          studentName: student.name,
+          studentEmail: student.email,
+          completedAt: new Date().toISOString()
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('Auto task check error:', err);
+  }
+}
 
+/**
+ * Automatically evaluates all assigned tasks for a student against their current StudentProgress.
+ * Auto-marks any task whose completion criteria (slides/traffic lights and/or quiz scores)
+ * are met in studentProgress, ensuring students don't need to manually click complete.
+ */
+export async function autoEvaluateAllTasksForStudent(
+  student: UserProfile,
+  enrolledClassIds: string[],
+  studentProgress: StudentProgress
+): Promise<void> {
+  if (!student || student.role !== 'student' || !studentProgress) return;
+  try {
+    const studentTasks = await fetchTasksForStudent(student, enrolledClassIds, studentProgress);
+    for (const task of studentTasks) {
+      if (task.submission?.status === 'completed') continue;
+
+      const targets = task.targetSubtopics || [];
+      if (targets.length === 0) continue;
+
+      // Check slides / traffic light status
+      const hasSlidesOrLight = targets.some(sub => {
+        const hasLight = !!(studentProgress.trafficLights && studentProgress.trafficLights[sub]);
+        const hasCompletedLesson = !!(studentProgress.completedLessons && studentProgress.completedLessons.includes(sub));
+        return hasLight || hasCompletedLesson;
+      });
+
+      // Check quiz status
+      const hasQuiz = targets.some(sub => {
+        const hasSubScore = !!(studentProgress.subtopicQuizScores && studentProgress.subtopicQuizScores[sub]);
+        const topicPrefix = sub.split('.')[0] || sub;
+        const hasTopicScore = !!(studentProgress.quizScores && (studentProgress.quizScores[sub] || studentProgress.quizScores[topicPrefix]));
+        return hasSubScore || hasTopicScore;
+      });
+
+      let shouldComplete = false;
+      let slidesDone = false;
+      let quizDone = false;
+
+      if (task.type === 'both') {
+        slidesDone = hasSlidesOrLight;
+        quizDone = hasQuiz;
+        shouldComplete = slidesDone && quizDone;
+      } else if (task.type === 'slides_traffic_light') {
+        slidesDone = hasSlidesOrLight;
+        shouldComplete = slidesDone;
+      } else if (task.type === 'practice_quiz') {
+        quizDone = hasQuiz;
+        shouldComplete = quizDone;
+      } else if (task.type === 'exam_paper') {
+        shouldComplete = hasQuiz;
+      } else if (task.type === 'custom') {
+        shouldComplete = slidesDone || quizDone;
+      }
+
+      if (shouldComplete) {
+        const firstTarget = targets[0];
+        const trafficVal = studentProgress.trafficLights?.[firstTarget];
+        const quizVal = studentProgress.subtopicQuizScores?.[firstTarget]?.score;
+
+        await updateTaskSubmission(task.id, student.id, {
+          status: 'completed',
+          trafficLight: trafficVal,
+          quizScore: quizVal,
+          slidesCompleted: slidesDone || undefined,
+          quizCompleted: quizDone || undefined,
+          studentName: student.name,
+          studentEmail: student.email,
+          completedAt: task.submission?.completedAt || new Date().toISOString()
+        });
+      } else if (slidesDone || quizDone) {
+        if (task.submission?.status !== 'incomplete') {
           await updateTaskSubmission(task.id, student.id, {
-            status: isFullyCompleted ? 'completed' : 'incomplete',
-            trafficLight: actionType === 'traffic_light' ? extra?.trafficLight : currentSub?.trafficLight,
-            quizScore: actionType === 'quiz' ? extra?.quizScore : currentSub?.quizScore,
+            status: 'incomplete',
             slidesCompleted: slidesDone,
             quizCompleted: quizDone,
             studentName: student.name,
-            studentEmail: student.email,
-            completedAt: isFullyCompleted ? new Date().toISOString() : undefined
-          });
-        }
-      } else if (actionType === 'traffic_light' && task.type === 'slides_traffic_light') {
-        if (task.targetSubtopics.includes(subtopicCode)) {
-          await updateTaskSubmission(task.id, student.id, {
-            status: 'completed',
-            trafficLight: extra?.trafficLight,
-            studentName: student.name,
-            studentEmail: student.email,
-            completedAt: new Date().toISOString()
-          });
-        }
-      } else if (actionType === 'quiz' && task.type === 'practice_quiz') {
-        if (task.targetSubtopics.includes(subtopicCode) || task.targetSubtopics.some(s => subtopicCode.startsWith(s))) {
-          await updateTaskSubmission(task.id, student.id, {
-            status: 'completed',
-            quizScore: extra?.quizScore,
-            studentName: student.name,
-            studentEmail: student.email,
-            completedAt: new Date().toISOString()
+            studentEmail: student.email
           });
         }
       }
     }
   } catch (err) {
-    console.warn('Auto task check error:', err);
+    console.warn('Error in autoEvaluateAllTasksForStudent:', err);
   }
 }
 
@@ -2044,4 +2205,300 @@ export function subscribeToStudentTasks(
     }
   };
 }
+
+/**
+ * Calculates traffic light status according to the new parameters:
+ * - 80%+ -> 'green' (Mastered)
+ * - 50%, 60%, 70% (50% to 79%) -> 'orange' (Amber/Orange Grade)
+ * - 40% or less (<50%) -> 'red' (Red Grade - Needs revision)
+ */
+export function calculateTrafficLightFromPercentage(percentage: number): TrafficLightStatus {
+  if (percentage >= 80) return 'green';
+  if (percentage >= 50) return 'orange';
+  return 'red';
+}
+
+export interface UpdatePastQuizResultsSummary {
+  studentsUpdatedCount: number;
+  subtopicResultsUpdatedCount: number;
+  taskSubmissionsUpdatedCount: number;
+  activityLogsUpdatedCount: number;
+  details: string[];
+}
+
+/**
+ * Migrates and recalculates all past student quiz results, traffic light grades,
+ * task submissions, and activity logs across Firestore and local storage caches
+ * to match the new traffic light thresholds:
+ * - 50%, 60%, 70% -> Amber/Orange Grade ('orange')
+ * - 40% or less -> Red Grade ('red')
+ * - 80%+ -> Green Grade ('green')
+ */
+export async function updatePastStudentQuizResultsWithNewTrafficLightParameters(): Promise<UpdatePastQuizResultsSummary> {
+  const summary: UpdatePastQuizResultsSummary = {
+    studentsUpdatedCount: 0,
+    subtopicResultsUpdatedCount: 0,
+    taskSubmissionsUpdatedCount: 0,
+    activityLogsUpdatedCount: 0,
+    details: []
+  };
+
+  // 1. Update current student's local progress in localStorage
+  if (typeof window !== 'undefined') {
+    try {
+      const storedProgressStr = localStorage.getItem('igcse_0653_student_progress');
+      if (storedProgressStr) {
+        const storedProgress: StudentProgress = JSON.parse(storedProgressStr);
+        let progressChanged = false;
+        const updatedLights: Record<string, TrafficLightStatus> = { ...(storedProgress.trafficLights || {}) };
+
+        if (storedProgress.subtopicQuizScores) {
+          for (const [code, res] of Object.entries(storedProgress.subtopicQuizScores)) {
+            if (res) {
+              const pct = res.percentage !== undefined 
+                ? res.percentage 
+                : Math.round(((res.score || 0) / (res.total || 10)) * 100);
+              const newLight = calculateTrafficLightFromPercentage(pct);
+              if (updatedLights[code] !== newLight) {
+                updatedLights[code] = newLight;
+                progressChanged = true;
+                summary.subtopicResultsUpdatedCount++;
+              }
+            }
+          }
+        }
+
+        if (progressChanged) {
+          storedProgress.trafficLights = updatedLights;
+          localStorage.setItem('igcse_0653_student_progress', JSON.stringify(storedProgress));
+          summary.details.push(`Updated local student progress with ${Object.keys(updatedLights).length} recalculated traffic lights.`);
+        }
+      }
+    } catch (err) {
+      console.warn('Error migrating local student progress:', err);
+    }
+  }
+
+  // 2. Scan and update all enrolled students in classes (Firestore + localStorage)
+  try {
+    const classIdsToProcess = new Set<string>();
+    classIdsToProcess.add(DEFAULT_CLASS_ITEM.id);
+
+    // Read local classes
+    const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, []);
+    localClasses.forEach(c => classIdsToProcess.add(c.id));
+
+    // Read Firestore classes
+    try {
+      const classesSnap = await getDocs(collection(db, 'classes'));
+      classesSnap.forEach(d => classIdsToProcess.add(d.id));
+    } catch {}
+
+    for (const classId of classIdsToProcess) {
+      const studentKey = `${LOCAL_STUDENTS_PREFIX}${classId}`;
+      const localStudents = getLocalItem<ClassStudentItem[]>(studentKey, []);
+      let classStudentsChanged = false;
+
+      // Check Firestore students subcollection
+      try {
+        const subSnap = await getDocs(collection(db, 'classes', classId, 'students'));
+        for (const studentDoc of subSnap.docs) {
+          const sData = studentDoc.data() as ClassStudentItem;
+          let studentChanged = false;
+          const updatedLights: Record<string, TrafficLightStatus> = { ...(sData.trafficLights || {}) };
+
+          if (sData.subtopicQuizScores) {
+            for (const [code, res] of Object.entries(sData.subtopicQuizScores)) {
+              if (res) {
+                const pct = res.percentage !== undefined 
+                  ? res.percentage 
+                  : Math.round(((res.score || 0) / (res.total || 10)) * 100);
+                const newLight = calculateTrafficLightFromPercentage(pct);
+                if (updatedLights[code] !== newLight) {
+                  updatedLights[code] = newLight;
+                  studentChanged = true;
+                  summary.subtopicResultsUpdatedCount++;
+                }
+              }
+            }
+          }
+
+          if (studentChanged) {
+            summary.studentsUpdatedCount++;
+            summary.details.push(`Updated student ${sData.name} (${sData.email || sData.studentId}) in class ${classId}`);
+            await updateDoc(studentDoc.ref, { trafficLights: updatedLights });
+
+            // Sync with local student cache
+            const lIdx = localStudents.findIndex(s => s.studentId === sData.studentId);
+            if (lIdx >= 0) {
+              localStudents[lIdx].trafficLights = updatedLights;
+              classStudentsChanged = true;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`Error reading class ${classId} students from Firestore:`, err);
+      }
+
+      // Also process any local-only students
+      localStudents.forEach(s => {
+        let studentChanged = false;
+        const updatedLights: Record<string, TrafficLightStatus> = { ...(s.trafficLights || {}) };
+        if (s.subtopicQuizScores) {
+          for (const [code, res] of Object.entries(s.subtopicQuizScores)) {
+            if (res) {
+              const pct = res.percentage !== undefined 
+                ? res.percentage 
+                : Math.round(((res.score || 0) / (res.total || 10)) * 100);
+              const newLight = calculateTrafficLightFromPercentage(pct);
+              if (updatedLights[code] !== newLight) {
+                updatedLights[code] = newLight;
+                studentChanged = true;
+              }
+            }
+          }
+        }
+        if (studentChanged) {
+          s.trafficLights = updatedLights;
+          classStudentsChanged = true;
+        }
+      });
+
+      if (classStudentsChanged) {
+        setLocalItem(studentKey, localStudents);
+      }
+    }
+  } catch (err) {
+    console.warn('Error updating class students:', err);
+  }
+
+  // 3. Scan and update all User Profiles (users collection)
+  try {
+    const usersSnap = await getDocs(collection(db, 'users'));
+    for (const uDoc of usersSnap.docs) {
+      const uData = uDoc.data();
+      if (uData?.progress?.subtopicQuizScores) {
+        let userChanged = false;
+        const updatedLights: Record<string, TrafficLightStatus> = { ...(uData.progress.trafficLights || {}) };
+
+        for (const [code, res] of Object.entries(uData.progress.subtopicQuizScores as Record<string, SubtopicQuizResult>)) {
+          if (res) {
+            const pct = res.percentage !== undefined 
+              ? res.percentage 
+              : Math.round(((res.score || 0) / (res.total || 10)) * 100);
+            const newLight = calculateTrafficLightFromPercentage(pct);
+            if (updatedLights[code] !== newLight) {
+              updatedLights[code] = newLight;
+              userChanged = true;
+            }
+          }
+        }
+
+        if (userChanged) {
+          await updateDoc(uDoc.ref, {
+            'progress.trafficLights': updatedLights
+          });
+          summary.details.push(`Updated user progress for ${uData.name || uDoc.id}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Error updating users collection:', err);
+  }
+
+  // 4. Scan and update all Task Submissions
+  try {
+    const tasks = await fetchClassTasks();
+    for (const task of tasks) {
+      const subKey = `${LOCAL_TASK_SUBMISSIONS_PREFIX}${task.id}`;
+      const localSubs = getLocalItem<Record<string, TaskSubmission>>(subKey, {});
+      let taskSubsChanged = false;
+
+      // Update Firestore task submissions
+      try {
+        const subsSnap = await getDocs(collection(db, 'tasks', task.id, 'submissions'));
+        for (const subDoc of subsSnap.docs) {
+          const sub = subDoc.data() as TaskSubmission;
+          if (sub.quizScore !== undefined) {
+            const newLight = calculateTrafficLightFromPercentage(sub.quizScore);
+            if (sub.trafficLight !== newLight) {
+              summary.taskSubmissionsUpdatedCount++;
+              await updateDoc(subDoc.ref, { trafficLight: newLight });
+
+              if (localSubs[sub.studentId]) {
+                localSubs[sub.studentId].trafficLight = newLight;
+                taskSubsChanged = true;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`Error reading task ${task.id} submissions:`, err);
+      }
+
+      // Check local task submissions
+      for (const [studentId, sub] of Object.entries(localSubs)) {
+        if (sub.quizScore !== undefined) {
+          const newLight = calculateTrafficLightFromPercentage(sub.quizScore);
+          if (sub.trafficLight !== newLight) {
+            sub.trafficLight = newLight;
+            taskSubsChanged = true;
+          }
+        }
+      }
+
+      if (taskSubsChanged) {
+        setLocalItem(subKey, localSubs);
+      }
+    }
+  } catch (err) {
+    console.warn('Error updating task submissions:', err);
+  }
+
+  // 5. Scan and update all persistent activity logs in localStorage
+  if (typeof window !== 'undefined') {
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('igcse_0653_activity_log_')) {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const activities = JSON.parse(raw);
+            let actChanged = false;
+            if (Array.isArray(activities)) {
+              activities.forEach((act: any) => {
+                if (act.percentage !== undefined || act.score !== undefined) {
+                  const pct = act.percentage !== undefined 
+                    ? act.percentage 
+                    : Math.round(((act.score || 0) / (act.total || 10)) * 100);
+                  const newLight = calculateTrafficLightFromPercentage(pct);
+                  if (act.trafficLight !== newLight) {
+                    act.trafficLight = newLight;
+                    actChanged = true;
+                    summary.activityLogsUpdatedCount++;
+                  }
+                }
+              });
+              if (actChanged) {
+                localStorage.setItem(key, JSON.stringify(activities));
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Error updating activity logs:', err);
+    }
+  }
+
+  // 6. Notify the application of changes via global events
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('igcse_classes_updated'));
+    window.dispatchEvent(new CustomEvent('igcse_task_submission_updated'));
+    window.dispatchEvent(new CustomEvent('igcse_progress_updated'));
+  }
+
+  return summary;
+}
+
 

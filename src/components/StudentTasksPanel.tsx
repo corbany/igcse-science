@@ -18,7 +18,8 @@ import {
   ChevronRight,
   TrendingUp,
   RefreshCw,
-  Bell
+  Bell,
+  ShieldCheck
 } from 'lucide-react';
 import { 
   TaskWithSubmission, 
@@ -29,7 +30,7 @@ import {
 } from '../types';
 import { 
   fetchTasksForStudent, 
-  updateTaskSubmission,
+  autoEvaluateAllTasksForStudent,
   subscribeToStudentTasks
 } from '../services/firestoreService';
 
@@ -54,12 +55,13 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [statusFilter, setStatusFilter] = useState<'all' | 'todo' | 'overdue' | 'completed'>('todo');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string>('Live');
 
   const loadStudentTasks = async () => {
     setLoading(true);
     try {
+      // Auto-evaluate tasks against student progress before displaying
+      await autoEvaluateAllTasksForStudent(user, enrolledClassIds, progress);
       const fetched = await fetchTasksForStudent(user, enrolledClassIds, progress);
       setTasks(fetched);
       setLastRefreshedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
@@ -97,27 +99,6 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
       }
     };
   }, [user.id, (enrolledClassIds || []).join(','), progress]);
-
-  const handleToggleTaskComplete = async (task: TaskWithSubmission) => {
-    setUpdatingTaskId(task.id);
-    const newStatus: TaskProgressStatus = task.submission?.status === 'completed' ? 'incomplete' : 'completed';
-    
-    try {
-      const updated = await updateTaskSubmission(task.id, user.id, {
-        status: newStatus,
-        studentName: user.name,
-        studentEmail: user.email,
-        completedAt: newStatus === 'completed' ? new Date().toISOString() : undefined
-      });
-
-      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, submission: updated, isOverdue: t.isOverdue && newStatus !== 'completed' } : t));
-      if (onTaskUpdated) onTaskUpdated();
-    } catch (err) {
-      console.error('Failed to update task submission:', err);
-    } finally {
-      setUpdatingTaskId(null);
-    }
-  };
 
   const handleStartTask = (task: TaskWithSubmission) => {
     const subtopic = task.targetSubtopics[0] || '';
@@ -197,7 +178,7 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
               <span>Teacher Assignments & Due Dates</span>
             </h2>
             <p className="text-xs text-slate-400 max-w-2xl">
-              Tasks set specifically for your science class. Complete slide deck reading, mark your traffic light confidence, and complete practice quizzes before the due date.
+              Tasks set specifically for your science class. Tasks are automatically verified and marked as complete when you finish the assigned slide deck, set your traffic light rating, or complete practice quizzes.
             </p>
           </div>
 
@@ -459,7 +440,7 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
                                 submission.trafficLight === 'green' ? 'bg-emerald-400' :
                                 submission.trafficLight === 'orange' ? 'bg-amber-400' : 'bg-rose-500'
                               }`}></span>
-                              <span className="capitalize">{submission.trafficLight}</span>
+                              <span className="capitalize">{submission.trafficLight === 'orange' ? 'Amber / Orange' : submission.trafficLight}</span>
                             </span>
                           ) : (
                             <span className="text-[10px] text-slate-500 shrink-0">Pending</span>
@@ -512,9 +493,12 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
 
                 {/* Bottom Action Section */}
                 <div className="pt-3 border-t border-slate-800 space-y-2.5">
-                  {/* Status Indicator Card */}
+                  {/* Automatic Status Indicator Card */}
                   <div className="bg-slate-950 p-2.5 rounded-2xl border border-slate-800/80 flex items-center justify-between text-xs">
-                    <span className="text-slate-400">Your Status:</span>
+                    <div className="flex items-center gap-1.5 text-slate-400">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Automatic Status:</span>
+                    </div>
                     <div className="flex items-center gap-2">
                       <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold flex items-center gap-1 ${
                         isCompleted
@@ -525,7 +509,7 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
                       }`}>
                         {isCompleted && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
                         <span>
-                          {isCompleted ? 'Completed' :
+                          {isCompleted ? 'Automatically Completed' :
                            submission?.status === 'incomplete' ? 'In Progress' : 'Not Started'}
                         </span>
                       </span>
@@ -539,53 +523,69 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
                     </div>
                   </div>
 
-                  {/* Action Buttons */}
-                  {task.type === 'both' ? (
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                      <button
-                        onClick={() => onNavigateToLessons && onNavigateToLessons(task.targetSubtopics[0])}
-                        className="flex-1 py-2 px-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-xs"
-                      >
-                        <BookOpen className="w-3.5 h-3.5" />
-                        <span>1. Open Slides & Set Light</span>
-                      </button>
+                  {/* Action Section - Purely automatic, no manual student completion buttons */}
+                  {isCompleted ? (
+                    <div className="space-y-2">
+                      <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-xs flex items-center justify-between">
+                        <div className="flex items-center gap-2 font-semibold">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span>Verified Complete via Syllabus Progress</span>
+                        </div>
+                        {submission?.completedAt && (
+                          <span className="text-[10px] text-emerald-400/80 font-mono">
+                            {new Date(submission.completedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                          </span>
+                        )}
+                      </div>
 
-                      <button
-                        onClick={() => onNavigateToQuizzes && onNavigateToQuizzes(task.targetSubtopics[0])}
-                        className="flex-1 py-2 px-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-xs"
-                      >
-                        <Award className="w-3.5 h-3.5" />
-                        <span>2. Take Practice Quiz</span>
-                      </button>
-
-                      <button
-                        onClick={() => handleToggleTaskComplete(task)}
-                        disabled={updatingTaskId === task.id}
-                        title={isCompleted ? 'Mark as Incomplete' : 'Mark as Completed'}
-                        className={`p-2 rounded-xl border text-xs font-semibold transition shrink-0 self-center sm:self-auto ${
-                          isCompleted 
-                            ? 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white' 
-                            : 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/60'
-                        }`}
-                      >
-                        {isCompleted ? <Check className="w-4 h-4 text-emerald-400" /> : <Check className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
                       <button
                         onClick={() => handleStartTask(task)}
-                        className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-xs"
+                        className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-xs transition flex items-center justify-center gap-1.5 border border-slate-700 cursor-pointer"
+                      >
+                        <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Review Lesson & Practice Content</span>
+                      </button>
+                    </div>
+                  ) : task.type === 'both' ? (
+                    <div className="space-y-2">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <button
+                          onClick={() => onNavigateToLessons && onNavigateToLessons(task.targetSubtopics[0])}
+                          className="flex-1 py-2 px-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                        >
+                          <BookOpen className="w-3.5 h-3.5" />
+                          <span>1. Open Slides & Set Light</span>
+                        </button>
+
+                        <button
+                          onClick={() => onNavigateToQuizzes && onNavigateToQuizzes(task.targetSubtopics[0])}
+                          className="flex-1 py-2 px-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                        >
+                          <Award className="w-3.5 h-3.5" />
+                          <span>2. Take Practice Quiz</span>
+                        </button>
+                      </div>
+
+                      <div className="p-2 rounded-xl bg-purple-950/20 border border-purple-500/30 text-purple-300 text-[11px] flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                        <span>Automatically marks complete once you review slides, set your traffic light, and finish the quiz.</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => handleStartTask(task)}
+                        className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
                       >
                         {task.type === 'slides_traffic_light' ? (
                           <>
                             <BookOpen className="w-3.5 h-3.5" />
-                            <span>Open Slides & Set Light</span>
+                            <span>Open Slides & Set Traffic Light</span>
                           </>
                         ) : task.type === 'practice_quiz' ? (
                           <>
                             <Award className="w-3.5 h-3.5" />
-                            <span>Start Quiz</span>
+                            <span>Start Practice Quiz</span>
                           </>
                         ) : (
                           <>
@@ -595,18 +595,16 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
                         )}
                       </button>
 
-                      <button
-                        onClick={() => handleToggleTaskComplete(task)}
-                        disabled={updatingTaskId === task.id}
-                        title={isCompleted ? 'Mark as Incomplete' : 'Mark as Completed'}
-                        className={`p-2 rounded-xl border text-xs font-semibold transition shrink-0 ${
-                          isCompleted 
-                            ? 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white' 
-                            : 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/60'
-                        }`}
-                      >
-                        {isCompleted ? <Check className="w-4 h-4 text-emerald-400" /> : <Check className="w-4 h-4" />}
-                      </button>
+                      <div className="p-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-400 text-[11px] flex items-center gap-1.5">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>
+                          {task.type === 'slides_traffic_light' 
+                            ? 'Automatically marks complete when you review the slides and set your confidence rating.'
+                            : task.type === 'practice_quiz'
+                              ? 'Automatically marks complete upon quiz completion.'
+                              : 'Automatically marks complete when you finish the assigned activity.'}
+                        </span>
+                      </div>
                     </div>
                   )}
                 </div>

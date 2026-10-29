@@ -8,9 +8,17 @@ import {
   Sparkles, 
   FlaskConical, 
   Info,
-  Scale
+  Scale,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle
 } from 'lucide-react';
-import { examTierDetails, commandWordsGlossary, qualitativeAnalysisNotes } from '../data/examGuidelinesData';
+import { 
+  examTierDetails, 
+  commandWordsGlossary, 
+  qualitativeAnalysisNotes,
+  syllabusClarifications 
+} from '../data/examGuidelinesData';
 
 export const ExamGuidelines: React.FC = () => {
   const [commandSearch, setCommandSearch] = useState<string>('');
@@ -112,6 +120,80 @@ export const ExamGuidelines: React.FC = () => {
               </div>
               <h3 className="font-semibold text-white text-sm">{ao.title}</h3>
               <p className="text-xs text-slate-300 leading-relaxed">{ao.description}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Official Cambridge 0653 Key Syllabus Boundaries & Exclusions */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5 shadow-sm">
+        <div>
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-amber-400" />
+            <h2 className="text-lg font-bold text-white">Cambridge 0653 Key Syllabus Boundaries & Exclusions</h2>
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            Understanding what is <span className="text-emerald-400 font-semibold">in</span> and <span className="text-rose-400 font-semibold">out</span> of the Cambridge IGCSE Combined Science 0653 syllabus ensures you focus on high-scoring topics without revising unnecessary content from separate sciences.
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {syllabusClarifications.map((item, idx) => (
+            <div key={idx} className="bg-slate-800/40 border border-slate-700/80 rounded-xl p-5 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700/60 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="px-2 py-0.5 rounded text-xs font-mono font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                    {item.subject}
+                  </span>
+                  <h3 className="text-sm font-bold text-white">{item.topic}</h3>
+                </div>
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {item.badge}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Required Content */}
+                <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs uppercase tracking-wider">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>Tested in 0653 Syllabus</span>
+                  </div>
+                  <ul className="space-y-1.5 text-xs text-slate-300">
+                    {item.includedContent.map((inc, i) => (
+                      <li key={i} className="flex items-start gap-2">
+                        <span className="text-emerald-400 font-bold leading-none mt-1">•</span>
+                        <span>{inc}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Excluded Content */}
+                <div className="bg-rose-950/20 border border-rose-500/30 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center gap-2 text-rose-400 font-bold text-xs uppercase tracking-wider">
+                    <XCircle className="w-4 h-4 shrink-0" />
+                    <span>Excluded from 0653 Syllabus (DO NOT REVISE)</span>
+                  </div>
+                  <ul className="space-y-1.5 text-xs text-slate-300">
+                    {item.excludedContent.map((exc, i) => (
+                      <li key={i} className="flex items-start gap-2">
+                        <span className="text-rose-400 font-bold leading-none mt-1">✕</span>
+                        <span>{exc}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Examiner Tip Banner */}
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-xs text-amber-200/90 flex items-start gap-2.5">
+                <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <p>
+                  <strong className="font-semibold text-amber-300">Examiner Advice: </strong>
+                  {item.examinerTip}
+                </p>
+              </div>
             </div>
           ))}
         </div>

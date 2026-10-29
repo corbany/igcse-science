@@ -1,6 +1,7 @@
 import { QuizQuestion, ScienceSubject } from '../types';
 import { allSubtopicsData, getSubtopicByCode, SubtopicTopicGroup } from './subtopicSlidesData';
 import { syllabusItems } from './syllabusData';
+import { TOPIC_QUESTION_LIBRARY, generateParametricQuestion } from './topicQuestionLibrary';
 
 /**
  * Randomizes the 4 options for each question so the correct answer is
@@ -1475,159 +1476,139 @@ export const predefinedSubtopicQuizzes: Record<string, QuizQuestion[]> = {
 // Extracts authentic slide content, objectives, and starter Q&A.
 // Builds plausible distractors from the SAME subtopic keywords and
 // syllabus misconceptions, guaranteeing non-obvious, rigorous quizzes.
+// STRICTLY ENFORCES ZERO REPEAT QUESTIONS WITHIN ANY QUIZ.
 // =========================================================================
+
+export function deduplicateQuizQuestions(questions: QuizQuestion[]): QuizQuestion[] {
+  if (!questions || questions.length === 0) return [];
+  const seen = new Set<string>();
+  const unique: QuizQuestion[] = [];
+  for (const q of questions) {
+    if (!q || !q.question) continue;
+    const norm = q.question.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (norm.length >= 10 && !seen.has(norm)) {
+      seen.add(norm);
+      unique.push(q);
+    }
+  }
+  return unique;
+}
+
+function shuffleArray<T>(arr: T[]): T[] {
+  const result = [...arr];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
 function buildDynamicSubtopicQuiz(subtopic: SubtopicTopicGroup): QuizQuestion[] {
   const code = subtopic.subtopicCode;
   const title = subtopic.title;
   const subject = subtopic.subject;
   const topicCode = subtopic.topicCode;
   const decks = subtopic.decks || [];
-  const primaryDeck = decks[0];
-
-  // Pool of keywords and concepts from this subtopic and its topic
-  const deckKeywords = Array.from(
-    new Set([
-      ...(primaryDeck?.keywords || []),
-      ...(subtopic.syllabusSummary || []).flatMap(s => s.split(/[\s,.;:]+/).filter(w => w.length > 4)),
-      subtopic.topicName,
-      title
-    ])
-  ).filter(k => k.length > 2);
-
-  // Sibling terms from syllabus
-  const syllabusMatch = syllabusItems.find(s => s.code === topicCode || s.id === topicCode);
-  const syllabusKeywords = syllabusMatch?.essentialKeywords || [];
-  const topicMisconceptions = syllabusMatch?.commonMisconceptions || [];
-
-  const candidateKeywords = Array.from(new Set([...deckKeywords, ...syllabusKeywords]));
 
   const questions: QuizQuestion[] = [];
+  const seenStems = new Set<string>();
 
-  // Helper to get 3 alternative keywords from the same subtopic
-  const getSiblingDistractors = (target: string, count = 3): string[] => {
-    const cleanTarget = target.toLowerCase().trim();
-    const available = candidateKeywords.filter(k => k.toLowerCase().trim() !== cleanTarget && k.length > 3);
-    const chosen: string[] = [];
-    for (const item of available) {
-      if (!chosen.includes(item) && chosen.length < count) {
-        chosen.push(item);
-      }
-    }
-    // Fallback domain-appropriate keywords
-    const defaults = subject === 'biology' 
-      ? ['Respiration', 'Osmosis', 'Active transport', 'Enzyme specificity']
-      : subject === 'chemistry'
-        ? ['Electrolysis', 'Activation energy', 'Covalent bonding', 'Fractional distillation']
-        : ['Kinetic energy', 'Resultant force', 'Refraction', 'Electric current'];
+  const normalizeStem = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  const addUnique = (q: QuizQuestion): boolean => {
+    if (!q || !q.question || !q.options || q.options.length < 4) return false;
     
-    let dIdx = 0;
-    while (chosen.length < count) {
-      const fallback = defaults[dIdx++ % defaults.length];
-      if (!chosen.includes(fallback) && fallback.toLowerCase() !== cleanTarget) {
-        chosen.push(fallback);
+    // Strict Anti-Tautology Rule:
+    // Reject any question that asks "specifically describes" or contains the short answer word verbatim in quotes in the prompt
+    if (q.question.toLowerCase().includes('specifically describes')) return false;
+    const correctOpt = (q.options[q.correctIndex || 0] || '').trim().toLowerCase();
+    if (correctOpt.length > 0 && correctOpt.length < 35) {
+      if (q.question.toLowerCase().includes(`"${correctOpt}"`) || q.question.toLowerCase().includes(`'${correctOpt}'`)) {
+        return false;
       }
     }
-    return chosen.slice(0, count);
+
+    const norm = normalizeStem(q.question);
+    if (norm.length < 15 || seenStems.has(norm)) return false;
+
+    // Check if options have duplicates or empty values
+    const uniqueOpts = Array.from(new Set(q.options.map(o => o.trim()))).filter(Boolean);
+    if (uniqueOpts.length < 4) return false;
+
+    seenStems.add(norm);
+    questions.push({
+      ...q,
+      subject,
+      topicCode,
+      syllabusRef: code
+    });
+    return true;
   };
 
-  // 1. Starter Look-Back Question (from slide review)
-  if (primaryDeck?.starterLookBack?.question && primaryDeck.starterLookBack.answer) {
-    const correctAns = primaryDeck.starterLookBack.answer;
-    const distractors = [
-      `The reverse relationship occurs due to counter-balancing metabolic or energetic forces in ${topicCode}`,
-      `The effect is independent of temperature, concentration, or external field conditions`,
-      `The rate decreases to zero because equilibrium is established prematurely`
-    ];
-    questions.push({
-      id: `${code}-q-lookback`,
-      subject,
-      topicCode,
-      question: `[Lesson Review] ${primaryDeck.starterLookBack.question}`,
-      options: [correctAns, ...distractors],
-      correctIndex: 0,
-      explanation: `From the lesson starter notes: ${correctAns}`,
-      syllabusRef: code
+  // 1. High-Yield Question Library for this specific Topic (e.g. B2, C2, P1, etc.)
+  const topicQuestions = TOPIC_QUESTION_LIBRARY[topicCode] || [];
+  for (const tq of topicQuestions) {
+    addUnique({
+      ...tq,
+      id: `${code}-lib-${questions.length + 1}`
     });
   }
 
-  // 2. Starter Look-Forward / Core Inquiry Question (from slide notes)
-  if (primaryDeck?.starterLookForward?.question && primaryDeck.starterLookForward.answer) {
-    const correctAns = primaryDeck.starterLookForward.answer;
-    const distractors = [
-      `Observations are explained by random chance rather than consistent scientific laws in ${topicCode}`,
-      `The process requires high external voltage that only occurs during electrical discharge`,
-      `Energy is consumed without any corresponding transformation of particles or chemical bonds`
-    ];
-    questions.push({
-      id: `${code}-q-lookforward`,
-      subject,
-      topicCode,
-      question: `[Syllabus Investigation] ${primaryDeck.starterLookForward.question}`,
-      options: [correctAns, ...distractors],
-      correctIndex: 0,
-      explanation: `From the lesson slide inquiry: ${correctAns}`,
-      syllabusRef: code
-    });
+  // 2. Parametric Calculation Questions with realistic random values
+  for (let seed = 1; seed <= 6; seed++) {
+    const paramQ = generateParametricQuestion(topicCode, code, seed);
+    if (paramQ) {
+      addUnique(paramQ);
+    }
   }
 
-  // 3. Extract Definitions from Theory Slides
-  const theorySlides = decks.flatMap(d => d.slides || []).filter(s => s.slideType === 'theory' || s.slideType === 'starter');
-  theorySlides.forEach((slide, sIdx) => {
-    if (questions.length >= 7) return;
-
-    // Look for bullet points with explicit definitions (e.g. "• Term: definition")
-    const bulletDef = slide.content.find(c => c.includes(':') && c.length > 25);
-    if (bulletDef) {
-      const parts = bulletDef.replace(/^•\s*/, '').split(':');
-      const term = parts[0].trim();
-      const def = parts.slice(1).join(':').trim();
-
-      if (term.length < 35 && def.length > 15) {
-        const distractors = getSiblingDistractors(term, 3);
-        questions.push({
-          id: `${code}-q-def-${sIdx}`,
-          subject,
-          topicCode,
-          question: `According to the lesson slides on "${slide.title}", which scientific concept is defined as: "${def}"?`,
-          options: [term, ...distractors],
-          correctIndex: 0,
-          explanation: `In the Cambridge 0653 syllabus for ${code}, "${term}" is explicitly defined as: ${def}`,
-          syllabusRef: code
-        });
-      }
-    } else if (slide.content.length > 0) {
-      const keyFact = slide.content[0].replace(/^•\s*/, '');
-      const distractors = [
-        `The opposite process occurs because particles lose kinetic energy and bond covalently`,
-        `The interaction is independent of temperature, mass, or concentration in ${code}`,
-        `Energy is destroyed during the transformation, violating classical conservation laws`
+  // 3. Challenge Questions from Slide Decks (with plausible domain distractors)
+  const allSlides = decks.flatMap(d => d.slides || []);
+  allSlides.forEach((slide, sIdx) => {
+    if (slide.task?.challengeQuestion && slide.task.challengeSolution) {
+      const qText = slide.task.challengeQuestion;
+      const correctAns = slide.task.challengeSolution;
+      // Build domain-specific distractors based on subject
+      const domainDistractors = subject === 'biology' ? [
+        'Rate decreases because active transport requires additional oxygen from diffusion',
+        'Metabolic reactions proceed in reverse due to thermodynamic equilibrium in cells',
+        'The process is restricted entirely to plant cell vacuole storage'
+      ] : subject === 'chemistry' ? [
+        'Mass decreases because activation energy destroys covalent bonds',
+        'Rate remains completely constant regardless of temperature or surface area',
+        'Products form an insoluble ionic precipitate with zero energy change'
+      ] : [
+        'Energy is destroyed during the transformation violating conservation laws',
+        'The parameter decreases inversely proportional to the cube of distance',
+        'Resultant force equals zero so the object accelerates without limit'
       ];
-      questions.push({
-        id: `${code}-q-slide-${sIdx}`,
+
+      addUnique({
+        id: `${code}-q-challenge-${sIdx}`,
         subject,
         topicCode,
-        question: `In the study of ${title} ("${slide.title}"), which statement accurately reflects the principle taught in the slides?`,
-        options: [keyFact, ...distractors],
+        question: `[Application] ${qText}`,
+        options: [correctAns, ...domainDistractors],
         correctIndex: 0,
-        explanation: `From lesson slide content: ${keyFact}`,
+        explanation: `Syllabus reasoning: ${correctAns}`,
         syllabusRef: code
       });
     }
   });
 
-  // 4. Practical Apparatus & Safety from Practical Slides
-  const practicalSlide = decks.flatMap(d => d.slides || []).find(s => s.practicalInfo || s.slideType === 'practical');
-  if (practicalSlide?.practicalInfo) {
-    const p = practicalSlide.practicalInfo;
+  // 4. Practical Investigation Apparatus & Risk Assessment from Slides
+  const practicalSlides = allSlides.filter(s => s.practicalInfo || s.slideType === 'practical');
+  practicalSlides.forEach((ps, pIdx) => {
+    const p = ps.practicalInfo;
+    if (!p) return;
     if (p.equipment && p.equipment.length > 0) {
       const correctApparatus = p.equipment.slice(0, 3).join(', ');
-      // Pick 3 realistic alternative apparatus sets
       const distractors = REAL_APPARATUS_POOLS.filter(a => a !== correctApparatus).slice(0, 3);
-      questions.push({
-        id: `${code}-q-apparatus`,
+      addUnique({
+        id: `${code}-q-app-${pIdx}`,
         subject,
         topicCode,
-        question: `When carrying out the practical investigation for ${title} (${p.aim}), which apparatus is required?`,
+        question: `When carrying out the laboratory investigation for [${code}] ${title} (${p.aim}), which apparatus is required?`,
         options: [correctApparatus, ...distractors],
         correctIndex: 0,
         explanation: `Required Cambridge laboratory apparatus: ${p.equipment.join(', ')}.`,
@@ -1639,98 +1620,151 @@ function buildDynamicSubtopicQuiz(subtopic: SubtopicTopicGroup): QuizQuestion[] 
       const risk = p.riskAssessment[0];
       const correctPrecaution = risk.precaution;
       const distractors = REAL_SAFETY_POOLS.filter(s => s !== correctPrecaution).slice(0, 3);
-      questions.push({
-        id: `${code}-q-safety`,
+      addUnique({
+        id: `${code}-q-safe-${pIdx}`,
         subject,
         topicCode,
-        question: `In the laboratory risk assessment for ${title} (${risk.hazard}), which precaution must be followed?`,
+        question: `In the laboratory risk assessment for [${code}] ${title} (${risk.hazard}), which safety precaution must be followed?`,
         options: [correctPrecaution, ...distractors],
         correctIndex: 0,
         explanation: `Cambridge lab safety standard for ${risk.hazard}: ${risk.precaution}.`,
         syllabusRef: code
       });
     }
-  }
-
-  // 5. Syllabus Learning Objectives from Deck Objectives
-  const objectives = primaryDeck?.objectives || subtopic.syllabusSummary || [];
-  objectives.forEach((obj, oIdx) => {
-    if (questions.length >= 10) return;
-    const cleanObj = obj.replace(/^Describe\s+|^Explain\s+|^Define\s+|^State\s+/i, '');
-    const correctStatement = `${cleanObj.charAt(0).toUpperCase()}${cleanObj.slice(1)}`;
-    const distractors = [
-      `The mechanism occurs in reverse because conservation of energy does not apply to microscopic systems`,
-      `Rate and equilibrium are unaffected by changes in temperature, pressure, or concentration`,
-      `The process is restricted entirely to theoretical models and cannot be verified by experiment`
-    ];
-
-    if (topicMisconceptions.length > 0) {
-      distractors[0] = topicMisconceptions[oIdx % topicMisconceptions.length];
-    }
-
-    questions.push({
-      id: `${code}-q-obj-${oIdx}`,
-      subject,
-      topicCode,
-      question: `Which statement accurately aligns with the Cambridge 0653 syllabus objective for [${code}] ${title}?`,
-      options: [correctStatement, ...distractors],
-      correctIndex: 0,
-      explanation: `Cambridge 0653 learning objective requirement: ${obj}`,
-      syllabusRef: code
-    });
   });
 
-  // 6. Keywords Application Check (if needed to reach 10 questions)
-  let kwCounter = 0;
-  while (questions.length < 10 && kwCounter < deckKeywords.length) {
-    const kw = deckKeywords[kwCounter];
-    const siblingDistractors = getSiblingDistractors(kw, 3);
-    questions.push({
-      id: `${code}-q-kw-${kwCounter}`,
-      subject,
-      topicCode,
-      question: `Which key syllabus term from the lesson slides on ${title} is central to explaining the mechanism in [${code}]?`,
-      options: [kw, ...siblingDistractors],
-      correctIndex: 0,
-      explanation: `"${kw}" is a mandatory Cambridge syllabus keyword for [${code}] ${title}.`,
-      syllabusRef: code
+  // 5. Scientific Definition Inversion from Slides (NEVER tautological)
+  allSlides.forEach((slide, sIdx) => {
+    const bulletDef = slide.content.find(c => c.includes(':') && c.length > 25);
+    if (bulletDef) {
+      const parts = bulletDef.replace(/^•\s*/, '').split(':');
+      const term = parts[0].trim();
+      const def = parts.slice(1).join(':').trim();
+
+      // Only generate if term is a clean concept and definition is substantive
+      if (term.length > 2 && term.length < 30 && def.length > 20 && !term.toLowerCase().includes('http')) {
+        // Find sibling terms from syllabus
+        const syllabusMatch = syllabusItems.find(s => s.code === topicCode || s.id === topicCode);
+        const siblings = (syllabusMatch?.essentialKeywords || [])
+          .filter(k => k.toLowerCase() !== term.toLowerCase() && k.length > 3)
+          .slice(0, 3);
+        
+        const fallbackTerms = subject === 'biology' 
+          ? ['Active transport', 'Osmosis', 'Enzyme denaturation', 'Peristalsis']
+          : subject === 'chemistry'
+            ? ['Covalent bonding', 'Activation energy', 'Fractional distillation', 'Catalysis']
+            : ['Resultant force', 'Thermal conduction', 'Total internal reflection', 'Potential difference'];
+
+        const opts = [term];
+        for (const sib of siblings) {
+          if (!opts.includes(sib) && opts.length < 4) opts.push(sib);
+        }
+        for (const fb of fallbackTerms) {
+          if (!opts.includes(fb) && opts.length < 4) opts.push(fb);
+        }
+
+        if (opts.length >= 4) {
+          addUnique({
+            id: `${code}-q-def-${sIdx}`,
+            subject,
+            topicCode,
+            question: `In Cambridge 0653 [${code}] ("${slide.title}"), which scientific concept is defined as: "${def}"?`,
+            options: opts,
+            correctIndex: 0,
+            explanation: `In the Cambridge 0653 syllabus for ${code}, "${term}" is defined as: ${def}`,
+            syllabusRef: code
+          });
+        }
+      }
+    }
+  });
+
+  // 6. If questions are still fewer than 12, draw from adjacent syllabus topics in the same subject
+  if (questions.length < 12) {
+    const allTopicKeys = Object.keys(TOPIC_QUESTION_LIBRARY);
+    const sameSubjectKeys = allTopicKeys.filter(k => {
+      const isBio = subject === 'biology' && k.startsWith('B');
+      const isChem = subject === 'chemistry' && k.startsWith('C');
+      const isPhy = subject === 'physics' && k.startsWith('P');
+      return (isBio || isChem || isPhy) && k !== topicCode;
     });
-    kwCounter++;
+
+    for (const adjacentTopic of sameSubjectKeys) {
+      const adjQuestions = TOPIC_QUESTION_LIBRARY[adjacentTopic] || [];
+      for (const adjQ of adjQuestions) {
+        addUnique({
+          ...adjQ,
+          id: `${code}-adj-${adjacentTopic}-${questions.length + 1}`
+        });
+        if (questions.length >= 15) break;
+      }
+      if (questions.length >= 15) break;
+    }
   }
 
-  return questions.slice(0, 10);
+  // 7. Extra parametric questions if needed
+  let extraSeed = 10;
+  while (questions.length < 12 && extraSeed <= 25) {
+    const extraQ = generateParametricQuestion(topicCode, code, extraSeed);
+    if (extraQ) {
+      addUnique(extraQ);
+    }
+    extraSeed++;
+  }
+
+  return questions;
+}
+
+import { selectFreshSubtopicQuiz, buildComprehensiveSubtopicPool, getSeenQuestionIds, clearSeenQuestionHistory } from './expandedSubtopicQuestions';
+
+export { selectFreshSubtopicQuiz, buildComprehensiveSubtopicPool, getSeenQuestionIds, clearSeenQuestionHistory };
+
+/**
+ * Returns the total number of unique, syllabus-aligned questions available in the pool for a subtopic.
+ */
+export function getSubtopicQuestionPoolSize(subtopicCode: string): number {
+  return buildComprehensiveSubtopicPool(subtopicCode).length;
 }
 
 /**
  * Returns a complete, 10-question quiz tailored specifically to the given subtopic.
  * Guarantees that:
- * 1. Questions test only content taught in the lesson slide decks.
- * 2. Every question strictly matches the correct syllabus objective with syllabusRef set to the subtopic code.
- * 3. Distractors are scientifically plausible and drawn from the same subtopic or related content (no obvious/silly answers).
+ * 1. Huge variety: draws from an expanded library of 35-50+ questions per subtopic.
+ * 2. Non-repeating rotation: successive quiz attempts on the same subtopic will NOT present the same questions.
+ * 3. ZERO repeat questions within any single quiz attempt.
  * 4. Option order is randomized with correctIndex evenly balanced across A (0), B (1), C (2), and D (3).
+ * 5. Strictly aligned with Cambridge 0653 syllabus constraints (NO genetics/monohybrid crosses, NO C3 mole calculations).
  */
-export function getQuizForSubtopic(subtopicCode: string): QuizQuestion[] {
+export function getQuizForSubtopic(
+  subtopicCode: string,
+  options?: {
+    attemptNumber?: number;
+    count?: number;
+    resetHistory?: boolean;
+  }
+): QuizQuestion[] {
   const normalized = subtopicCode.trim().toUpperCase();
 
-  // 1. Check if a hand-crafted high-yield bank exists
-  if (predefinedSubtopicQuizzes[normalized] && predefinedSubtopicQuizzes[normalized].length >= 10) {
-    const baseBank = predefinedSubtopicQuizzes[normalized].slice(0, 10);
-    return randomizeQuizQuestions(baseBank);
+  // Use the intelligent non-repeating selection engine
+  const selection = selectFreshSubtopicQuiz(normalized, options);
+  
+  if (selection.questions && selection.questions.length > 0) {
+    return randomizeQuizQuestions(selection.questions);
   }
 
-  // 2. Look up the subtopic in our Cambridge data registry
+  // Fallback if empty
   const subtopic = getSubtopicByCode(normalized) || 
     allSubtopicsData.find(s => s.subtopicCode.toLowerCase() === normalized.toLowerCase());
 
   if (subtopic) {
     const dynamicQuiz = buildDynamicSubtopicQuiz(subtopic);
-    return randomizeQuizQuestions(dynamicQuiz);
+    const uniqueQuestions = deduplicateQuizQuestions(dynamicQuiz);
+    return randomizeQuizQuestions(shuffleArray(uniqueQuestions).slice(0, options?.count || 10));
   }
 
-  // 3. Fallback for any unknown code
   const subject: ScienceSubject = normalized.startsWith('B') ? 'biology' : normalized.startsWith('C') ? 'chemistry' : 'physics';
   const topicCode = normalized.split('.')[0] || 'B1';
-  const fallback = predefinedSubtopicQuizzes['B1.1'].slice(0, 10).map((q, idx) => ({
+  const fallback = (predefinedSubtopicQuizzes['B1.1'] || []).slice(0, 10).map((q, idx) => ({
     ...q,
     id: `${normalized}-fb-${idx}`,
     subject,
@@ -1738,5 +1772,6 @@ export function getQuizForSubtopic(subtopicCode: string): QuizQuestion[] {
     syllabusRef: normalized
   }));
 
-  return randomizeQuizQuestions(fallback);
+  return randomizeQuizQuestions(shuffleArray(deduplicateQuizQuestions(fallback)).slice(0, options?.count || 10));
 }
+

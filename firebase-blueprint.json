@@ -14,7 +14,15 @@
         "examDate": { "type": "string", "description": "Scheduled exam date" },
         "enrolledClassIds": { "type": "array", "description": "List of class IDs joined by the student" },
         "createdAt": { "type": "string", "description": "Account creation timestamp" },
-        "lastActive": { "type": "string", "description": "Last active timestamp" }
+        "lastActive": { "type": "string", "description": "Last active timestamp" },
+        "gold": { "type": "number", "description": "Earned study gold balance" },
+        "wood": { "type": "number", "description": "Wood building material balance" },
+        "brick": { "type": "number", "description": "Brick building material balance" },
+        "metal": { "type": "number", "description": "Metal building material balance" },
+        "avatar": { "type": "string", "description": "Equipped avatar skin ID" },
+        "equippedSkin": { "type": "string", "description": "Equipped skin ID" },
+        "inventory": { "type": "array", "description": "List of all owned item IDs" },
+        "unlockedSkins": { "type": "array", "description": "List of unlocked avatar skin card IDs" }
       },
       "required": ["uid", "name", "email", "role"]
     },
@@ -131,6 +139,113 @@
         "notes": { "type": "string", "description": "Optional student or instructor note" }
       },
       "required": ["studentId", "status"]
+    },
+    "BattleEventConfig": {
+      "title": "BattleEventConfig",
+      "description": "Configuration for the scheduled Battle Royale event.",
+      "type": "object",
+      "properties": {
+        "nextEventDate": { "type": "string", "description": "Scheduled ISO timestamp of the monthly event" },
+        "title": { "type": "string", "description": "Title of the tournament event" },
+        "description": { "type": "string", "description": "Brief event instructions" },
+        "season": { "type": "number", "description": "Current tournament season" }
+      }
+    },
+    "BattleEventState": {
+      "title": "BattleEventState",
+      "description": "Real-time state of the Battle Royale arena.",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["LOBBY", "IN_PROGRESS", "ENDED"], "description": "Current battle lifecycle state" },
+        "startedAt": { "type": "string", "description": "Timestamp when the battle started" },
+        "stormRadius": { "type": "number", "description": "Current storm circle radius in arena units" },
+        "stormCenter": { "type": "object", "description": "Storm center coordinate {x, y}" },
+        "currentWinner": { "type": "object", "description": "Winning player summary" }
+      }
+    },
+    "BattleLobbyPlayer": {
+      "title": "BattleLobbyPlayer",
+      "description": "Student waiting in the pre-game lobby.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Auth UID of the student" },
+        "name": { "type": "string", "description": "Display name of student" },
+        "avatar": { "type": "string", "description": "Equipped avatar skin ID" },
+        "equippedWeapon": { "type": "string", "description": "Equipped weapon ID" },
+        "wood": { "type": "number", "description": "Wood materials" },
+        "brick": { "type": "number", "description": "Brick materials" },
+        "metal": { "type": "number", "description": "Metal materials" },
+        "isReady": { "type": "boolean", "description": "Readiness indicator" },
+        "joinedAt": { "type": "string", "description": "Join timestamp" }
+      },
+      "required": ["uid", "name"]
+    },
+    "BattleArenaPlayer": {
+      "title": "BattleArenaPlayer",
+      "description": "Live player in the 2D arena.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Player UID" },
+        "name": { "type": "string", "description": "Player display name" },
+        "avatar": { "type": "string", "description": "Avatar skin ID" },
+        "equippedWeapon": { "type": "string", "description": "Equipped weapon ID" },
+        "x": { "type": "number", "description": "X position in arena" },
+        "y": { "type": "number", "description": "Y position in arena" },
+        "angle": { "type": "number", "description": "Facing angle in radians" },
+        "hp": { "type": "number", "description": "Current HP (0-100)" },
+        "maxHp": { "type": "number", "description": "Max HP" },
+        "shield": { "type": "number", "description": "Current Shield (0-100)" },
+        "maxShield": { "type": "number", "description": "Max Shield" },
+        "wood": { "type": "number", "description": "Current Wood materials" },
+        "brick": { "type": "number", "description": "Current Brick materials" },
+        "metal": { "type": "number", "description": "Current Metal materials" },
+        "isAlive": { "type": "boolean", "description": "Alive or eliminated" },
+        "kills": { "type": "number", "description": "Eliminations in current match" }
+      },
+      "required": ["uid", "name", "hp", "isAlive"]
+    },
+    "BattleStructure": {
+      "title": "BattleStructure",
+      "description": "Constructed defense barrier placed by a student.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique structure ID" },
+        "x": { "type": "number", "description": "X position in arena" },
+        "y": { "type": "number", "description": "Y position in arena" },
+        "type": { "type": "string", "enum": ["wood_wall", "brick_ramp", "metal_bunker"], "description": "Structure type" },
+        "hp": { "type": "number", "description": "Current barrier health" },
+        "maxHp": { "type": "number", "description": "Max barrier health" },
+        "ownerId": { "type": "string", "description": "UID of builder" },
+        "createdAt": { "type": "string", "description": "Build timestamp" }
+      },
+      "required": ["id", "x", "y", "type", "hp", "ownerId"]
+    },
+    "BattleCrate": {
+      "title": "BattleCrate",
+      "description": "Supply drop crate containing IGCSE science questions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Crate ID" },
+        "x": { "type": "number", "description": "X position" },
+        "y": { "type": "number", "description": "Y position" },
+        "isClaimed": { "type": "boolean", "description": "Whether crate has been opened" },
+        "rewardType": { "type": "string", "enum": ["shield", "materials"], "description": "Reward type" }
+      },
+      "required": ["id", "x", "y", "isClaimed"]
+    },
+    "ModuleRewardClaim": {
+      "title": "ModuleRewardClaim",
+      "description": "Record of revision module completion rewards claimed by a student.",
+      "type": "object",
+      "properties": {
+        "claimedAt": { "type": "string", "description": "Claim timestamp" },
+        "wood": { "type": "number", "description": "Wood awarded" },
+        "brick": { "type": "number", "description": "Brick awarded" },
+        "metal": { "type": "number", "description": "Metal awarded" },
+        "xp": { "type": "number", "description": "XP awarded" },
+        "gold": { "type": "number", "description": "Gold awarded" }
+      },
+      "required": ["claimedAt"]
     }
   },
   "firestore": {
@@ -150,6 +265,10 @@
       "schema": { "$ref": "#/entities/User" },
       "description": "Stores user profiles with assigned roles (student or instructor)."
     },
+    "/users/{userId}/completedModules/{moduleId}": {
+      "schema": { "$ref": "#/entities/ModuleRewardClaim" },
+      "description": "Anti-farming records for claimed lesson slide revision rewards."
+    },
     "/instructor_invites/{inviteId}": {
       "schema": { "$ref": "#/entities/InstructorInvite" },
       "description": "Records instructor invitations issued by existing instructors."
@@ -161,6 +280,30 @@
     "/classes/{classId}/students/{studentId}": {
       "schema": { "$ref": "#/entities/ClassStudentEnrollment" },
       "description": "Students enrolled in a specific class and their progress tracked by the instructor."
+    },
+    "/battleEvent/config": {
+      "schema": { "$ref": "#/entities/BattleEventConfig" },
+      "description": "Tournament countdown and schedule configuration."
+    },
+    "/battleEvent/state": {
+      "schema": { "$ref": "#/entities/BattleEventState" },
+      "description": "Real-time state of the Battle Royale match."
+    },
+    "/battleEvent/lobby/{uid}": {
+      "schema": { "$ref": "#/entities/BattleLobbyPlayer" },
+      "description": "Students waiting in the pre-game match lobby."
+    },
+    "/battleEvent/players/{uid}": {
+      "schema": { "$ref": "#/entities/BattleArenaPlayer" },
+      "description": "Real-time coordinates, health, and loadouts of arena combatants."
+    },
+    "/battleEvent/structures/{structureId}": {
+      "schema": { "$ref": "#/entities/BattleStructure" },
+      "description": "Walls, ramps, and metal bunkers built during the match."
+    },
+    "/battleEvent/crates/{crateId}": {
+      "schema": { "$ref": "#/entities/BattleCrate" },
+      "description": "Science supply crates dropped in the arena."
     }
   }
 }

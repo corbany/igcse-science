@@ -35,7 +35,9 @@ import {
   SyllabusTopicOption, 
   generateAIQuiz, 
   estimateCambridgeGrade,
-  isGeneticsQuestion
+  isGeneticsQuestion,
+  deduplicateQuestionsList,
+  ALL_SUBTOPIC_OPTIONS
 } from '../services/quizService';
 
 interface QuizArenaProps {
@@ -63,6 +65,9 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
     'C1', 'C2', 'C3', 'C4',
     'P1', 'P2', 'P3', 'P4'
   ]);
+  const [selectedSubtopics, setSelectedSubtopics] = useState<string[]>([]);
+  const [expandedTopics, setExpandedTopics] = useState<Record<string, boolean>>({});
+  const [attemptCount, setAttemptCount] = useState<number>(1);
   const [tier, setTier] = useState<'Extended' | 'Core' | 'Mixed'>('Extended');
   const [topicSearch, setTopicSearch] = useState<string>('');
   const [activeSubjectTab, setActiveSubjectTab] = useState<'all' | 'biology' | 'chemistry' | 'physics'>('all');
@@ -119,6 +124,33 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
     setSelectedTopics(codes);
   };
 
+  // Group subtopics by parent topic code (e.g. B1 -> [B1.1, B1.2])
+  const subtopicsByTopic = useMemo(() => {
+    const map: Record<string, typeof ALL_SUBTOPIC_OPTIONS> = {};
+    ALL_SUBTOPIC_OPTIONS.forEach(s => {
+      if (!map[s.topicCode]) map[s.topicCode] = [];
+      map[s.topicCode].push(s);
+    });
+    return map;
+  }, []);
+
+  const handleToggleSubtopic = (subCode: string, parentTopicCode: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedSubtopics(prev => {
+      const next = prev.includes(subCode) ? prev.filter(c => c !== subCode) : [...prev, subCode];
+      // If a subtopic is selected, ensure parent topic is also included in selectedTopics
+      if (!selectedTopics.includes(parentTopicCode)) {
+        setSelectedTopics(curr => [...curr, parentTopicCode]);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleExpandTopic = (topicCode: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpandedTopics(prev => ({ ...prev, [topicCode]: !prev[topicCode] }));
+  };
+
   // Filtered topics for UI grid
   const filteredTopics = useMemo(() => {
     return ALL_SYLLABUS_TOPICS.filter(t => {
@@ -131,19 +163,26 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
     });
   }, [activeSubjectTab, topicSearch]);
 
-  // Start Generation of New AI Quiz
-  const handleStartGeneration = async () => {
-    if (selectedTopics.length === 0) return;
+  // Start Generation of New AI Quiz with Guaranteed Fresh Questions
+  const handleStartGeneration = async (isNewAttempt: boolean = false) => {
+    if (selectedTopics.length === 0 && selectedSubtopics.length === 0) return;
 
+    const nextAttempt = isNewAttempt ? attemptCount + 1 : attemptCount;
+    setAttemptCount(nextAttempt);
     setPhase('generating');
+
     try {
       const result = await generateAIQuiz({
         topics: selectedTopics,
+        subtopics: selectedSubtopics,
         numQuestions: numQuestions,
-        tier: tier
+        tier: tier,
+        attemptNumber: nextAttempt
       });
 
-      const cleanQuestions = (result.questions || []).filter(q => !isGeneticsQuestion(q));
+      const cleanQuestions = deduplicateQuestionsList(
+        (result.questions || []).filter(q => !isGeneticsQuestion(q))
+      );
       setQuestions(cleanQuestions);
       setGenerationSource(result.source);
       setCurrentIdx(0);
@@ -514,10 +553,14 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
               </div>
             </div>
 
-            {/* Topic Cards Grid */}
+            {/* Topic Cards Grid with Subtopic Drill-Down */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto pr-1">
               {filteredTopics.map(t => {
                 const isSelected = selectedTopics.includes(t.code);
+                const subtopics = subtopicsByTopic[t.code] || [];
+                const isExpanded = Boolean(expandedTopics[t.code]);
+                const activeSubtopicsForTopic = subtopics.filter(st => selectedSubtopics.includes(st.code));
+
                 let badgeClass = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
                 if (t.subject === 'chemistry') badgeClass = 'bg-sky-500/20 text-sky-300 border-sky-500/40';
                 if (t.subject === 'physics') badgeClass = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
@@ -525,64 +568,160 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
                 return (
                   <div
                     key={t.code}
-                    onClick={() => handleToggleTopic(t.code)}
-                    className={`p-3.5 rounded-2xl border cursor-pointer transition select-none flex items-start gap-3 ${
+                    className={`rounded-2xl border transition select-none flex flex-col ${
                       isSelected
                         ? 'bg-slate-850 border-emerald-500/50 shadow-xs'
                         : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
                     }`}
                   >
-                    <div className="pt-0.5">
-                      {isSelected ? (
-                        <CheckSquare className="w-4 h-4 text-emerald-400 shrink-0" />
-                      ) : (
-                        <Square className="w-4 h-4 text-slate-600 shrink-0" />
-                      )}
+                    <div 
+                      onClick={() => handleToggleTopic(t.code)}
+                      className="p-3.5 cursor-pointer flex items-start gap-3"
+                    >
+                      <div className="pt-0.5">
+                        {isSelected ? (
+                          <CheckSquare className="w-4 h-4 text-emerald-400 shrink-0" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-600 shrink-0" />
+                        )}
+                      </div>
+
+                      <div className="space-y-1 flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1.5">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${badgeClass}`}>
+                              {t.code}
+                            </span>
+                            <span className="text-xs font-bold text-white truncate">
+                              {t.title}
+                            </span>
+                          </div>
+
+                          {subtopics.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleToggleExpandTopic(t.code, e)}
+                              className="text-[10px] px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/60 flex items-center gap-1 shrink-0 transition"
+                              title="Click to drill down into specific subtopics"
+                            >
+                              <span>{subtopics.length} subs</span>
+                              {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-400 line-clamp-1">
+                          {t.keyConcepts}
+                        </p>
+                        {activeSubtopicsForTopic.length > 0 && (
+                          <div className="text-[10px] font-mono text-emerald-400 font-semibold pt-0.5">
+                            ✓ {activeSubtopicsForTopic.length} of {subtopics.length} subtopics focused
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="space-y-1 flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${badgeClass}`}>
-                          {t.code}
-                        </span>
-                        <span className="text-xs font-bold text-white truncate">
-                          {t.title}
-                        </span>
+                    {/* Expandable Subtopics Tray */}
+                    {isExpanded && subtopics.length > 0 && (
+                      <div className="p-3 bg-slate-950/90 border-t border-slate-800/80 rounded-b-2xl space-y-2">
+                        <div className="flex items-center justify-between text-[11px] text-slate-400">
+                          <span className="font-semibold text-slate-300">Target Specific Subtopics:</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const allSubCodes = subtopics.map(st => st.code);
+                              const allSelected = allSubCodes.every(c => selectedSubtopics.includes(c));
+                              if (allSelected) {
+                                setSelectedSubtopics(prev => prev.filter(c => !allSubCodes.includes(c)));
+                              } else {
+                                setSelectedSubtopics(prev => Array.from(new Set([...prev, ...allSubCodes])));
+                                if (!selectedTopics.includes(t.code)) setSelectedTopics(curr => [...curr, t.code]);
+                              }
+                            }}
+                            className="text-[10px] text-emerald-400 hover:underline"
+                          >
+                            Toggle all
+                          </button>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          {subtopics.map(st => {
+                            const isSubSelected = selectedSubtopics.includes(st.code);
+                            return (
+                              <button
+                                key={st.code}
+                                type="button"
+                                onClick={(e) => handleToggleSubtopic(st.code, t.code, e)}
+                                className={`text-left text-xs p-2 rounded-xl border transition flex items-center justify-between gap-2 ${
+                                  isSubSelected
+                                    ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-200'
+                                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 truncate">
+                                  <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-slate-800 font-bold text-slate-300">
+                                    {st.code}
+                                  </span>
+                                  <span className="truncate text-[11px]">{st.title}</span>
+                                </div>
+                                {isSubSelected ? (
+                                  <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                ) : (
+                                  <span className="w-3.5 h-3.5 rounded-full border border-slate-700 shrink-0" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                      <p className="text-[10px] text-slate-400 line-clamp-1">
-                        {t.keyConcepts}
-                      </p>
-                    </div>
+                    )}
                   </div>
                 );
               })}
             </div>
 
-            {selectedTopics.length === 0 && (
+            {selectedTopics.length === 0 && selectedSubtopics.length === 0 && (
               <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                <span>Please select at least 1 topic to generate a quiz.</span>
+                <span>Please select at least 1 topic or subtopic to generate a quiz.</span>
               </div>
             )}
           </div>
 
-          {/* Start Button */}
-          <div className="flex items-center justify-end gap-4">
-            <button
-              onClick={handleStartGeneration}
-              disabled={selectedTopics.length === 0}
-              className={`w-full sm:w-auto px-8 py-4 rounded-2xl text-sm font-bold flex items-center justify-center gap-2.5 transition shadow-lg ${
-                selectedTopics.length === 0
-                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/30'
-              }`}
-            >
-              <Sparkles className="w-4 h-4 text-emerald-200" />
-              <span>
-                Generate AI Quiz ({numQuestions} Questions across {selectedTopics.length} Topics)
-              </span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+          {/* Guaranteed Variety & Start Action */}
+          <div className="space-y-3">
+            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="text-slate-200">
+                  <strong>Fresh Question Guarantee:</strong> Attempt #{attemptCount} • Dynamic non-repeating question rotation ensures zero duplicate stems across consecutive practice tests.
+                </span>
+              </div>
+              {selectedSubtopics.length > 0 && (
+                <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 font-mono font-bold shrink-0 self-start sm:self-auto">
+                  {selectedSubtopics.length} Target Subtopic{selectedSubtopics.length !== 1 ? 's' : ''} Selected
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-4">
+              <button
+                onClick={() => handleStartGeneration(false)}
+                disabled={selectedTopics.length === 0 && selectedSubtopics.length === 0}
+                className={`w-full sm:w-auto px-8 py-4 rounded-2xl text-sm font-bold flex items-center justify-center gap-2.5 transition shadow-lg ${
+                  selectedTopics.length === 0 && selectedSubtopics.length === 0
+                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/30 cursor-pointer'
+                }`}
+              >
+                <Sparkles className="w-4 h-4 text-emerald-200" />
+                <span>
+                  {selectedSubtopics.length > 0 
+                    ? `Generate AI Quiz (${numQuestions} Qs for ${selectedSubtopics.length} Selected Subtopics)`
+                    : `Generate AI Quiz (${numQuestions} Questions across ${selectedTopics.length} Topics)`}
+                </span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -905,11 +1044,11 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
               </button>
 
               <button
-                onClick={handleStartGeneration}
+                onClick={() => handleStartGeneration(true)}
                 className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition shadow-md shadow-purple-600/30 flex items-center gap-2"
               >
                 <RefreshCw className="w-4 h-4" />
-                <span>Regenerate Fresh AI Questions (Same Topics)</span>
+                <span>Practice with NEW Questions (Fresh Bank Rotation)</span>
               </button>
             </div>
           </div>

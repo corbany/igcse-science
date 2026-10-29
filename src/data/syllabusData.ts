@@ -324,7 +324,11 @@ export const syllabusItems: SyllabusItem[] = [
       'Deduce formula of ionic compounds from ion charges.',
       'Construct balanced ionic equations with state symbols.'
     ],
-    essentialKeywords: ['Molecular formula', 'State symbols', 'Balancing equations', 'Ionic equation', 'Law of conservation of mass']
+    essentialKeywords: ['Molecular formula', 'State symbols', 'Balancing equations', 'Ionic equation', 'Law of conservation of mass'],
+    commonMisconceptions: [
+      'Thinking mole calculations (n = m / Mr, molar volume 24 dm³, or c = n / V) are required in 0653 Combined Science — they are strictly excluded from the Cambridge 0653 syllabus.',
+      'Changing subscript numbers inside chemical formulas instead of adjusting balancing coefficients in front of formulas.'
+    ]
   },
   {
     id: 'C4',

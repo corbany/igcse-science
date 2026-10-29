@@ -250,3 +250,37 @@ export const qualitativeAnalysisNotes: QualitativeTest[] = [
     expectedResult: "Blue-green flame."
   }
 ];
+
+export interface SyllabusClarification {
+  subject: string;
+  topic: string;
+  badge: string;
+  includedContent: string[];
+  excludedContent: string[];
+  examinerTip: string;
+}
+
+export const syllabusClarifications: SyllabusClarification[] = [
+  {
+    subject: "Chemistry",
+    topic: "C3 Stoichiometry & Equations",
+    badge: "0653 Syllabus Boundary",
+    includedContent: [
+      "Stating and reading chemical formulae of elements and compounds",
+      "Interpreting subscript numbers and brackets (e.g. Ca(OH)₂, Al₂(SO₄)₃)",
+      "Constructing word equations and balanced chemical symbol equations with state symbols (s, l, g, aq)",
+      "Applying the Law of Conservation of Mass (mass of products = mass of reactants)",
+      "Calculating relative formula mass (Mr) from given relative atomic masses (Ar)",
+      "Deducing formulae of ionic compounds from ion charges (Supplement / Extended)",
+      "Constructing balanced ionic equations with spectator ions omitted (Supplement / Extended)"
+    ],
+    excludedContent: [
+      "Calculating moles from mass (n = m / Mr) — NOT in Cambridge 0653",
+      "Calculating concentration from moles (c = n / V or mol/dm³) — NOT in Cambridge 0653",
+      "Molar gas volumes (24 dm³ at r.t.p.) — NOT in Cambridge 0653",
+      "Avogadro's constant & mole-based reacting mass stoichiometry — NOT in Cambridge 0653 (these belong to Chemistry 0620 and Co-ordinated Science 0654 only)"
+    ],
+    examinerTip: "Do not waste revision time practicing mole calculations or titration concentration calculations for 0653! Focus strictly on balancing equations, formula deduction from charges, and the Law of Conservation of Mass."
+  }
+];
+

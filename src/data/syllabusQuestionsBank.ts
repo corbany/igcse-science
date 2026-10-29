@@ -1,4 +1,6 @@
 import { QuizQuestion, ScienceSubject } from '../types';
+import { allSubtopicsData } from './subtopicSlidesData';
+import { getQuizForSubtopic } from './subtopicQuizzes';
 
 export interface DynamicTopicMeta {
   code: string;
@@ -967,7 +969,8 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
 };
 
 /**
- * Generate a set of unique dynamic syllabus questions for the selected topics
+ * Generate a set of unique dynamic syllabus questions for the selected topics.
+ * GUARANTEES ZERO REPEAT QUESTIONS WITHIN THE RESULTING QUIZ.
  */
 export function generateDynamicSyllabusQuestions(
   topics: string[],
@@ -976,48 +979,173 @@ export function generateDynamicSyllabusQuestions(
   seed: string = ''
 ): QuizQuestion[] {
   const safeCount = Math.min(40, Math.max(1, count));
-  const validTopics = topics.length > 0 ? topics : Object.keys(SYLLABUS_TOPICS_META);
+  const rawTopics = topics.length > 0 ? topics : Object.keys(SYLLABUS_TOPICS_META);
   const questions: QuizQuestion[] = [];
+  const seenStems = new Set<string>();
   const uniqueToken = seed || `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
-  // Cycle through selected topics
-  for (let i = 0; i < safeCount; i++) {
-    const topicCode = validTopics[i % validTopics.length];
-    const meta = SYLLABUS_TOPICS_META[topicCode] || SYLLABUS_TOPICS_META['B1'];
-    const templates = TOPIC_TEMPLATES[topicCode] || TOPIC_TEMPLATES['B1'];
-    
-    // Pick variant based on index, seed, and pseudo-random rotation
-    const templateIdx = (i + Math.floor(Math.random() * 10)) % templates.length;
-    const template = templates[templateIdx];
+  const normalizeStem = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
 
-    const vars = template.generateVars ? template.generateVars() : null;
-    const stem = typeof template.stem === 'function' ? template.stem(vars) : template.stem;
-    const correctAns = typeof template.correct === 'function' ? template.correct(vars) : template.correct;
-    const distractors = typeof template.distractors === 'function' ? template.distractors(vars) : template.distractors;
-    const explanation = typeof template.explanation === 'function' ? template.explanation(vars) : template.explanation;
+  const addUnique = (q: QuizQuestion): boolean => {
+    if (!q || !q.question || !q.options || q.options.length < 4) return false;
+    const norm = normalizeStem(q.question);
+    if (norm.length < 15 || seenStems.has(norm)) return false;
+    seenStems.add(norm);
+    questions.push(q);
+    return true;
+  };
 
-    // Build 4 options and shuffle
-    const rawOptions = [correctAns, ...distractors.slice(0, 3)];
-    const shuffled = [...rawOptions];
-    for (let j = shuffled.length - 1; j > 0; j--) {
-      const k = Math.floor(Math.random() * (j + 1));
-      [shuffled[j], shuffled[k]] = [shuffled[k], shuffled[j]];
+  // Check for specific subtopics (e.g. "B1.1", "C4.1") vs parent topics ("B1", "C4")
+  const specificSubtopics = rawTopics.filter(t => t.includes('.'));
+  const parentTopics = rawTopics.filter(t => !t.includes('.'));
+  const validTopics = parentTopics.length > 0 ? parentTopics : (specificSubtopics.length === 0 ? Object.keys(SYLLABUS_TOPICS_META) : []);
+
+  // 0. If specific subtopics are requested, draw directly from their high-variety pools first
+  if (specificSubtopics.length > 0) {
+    for (const subCode of specificSubtopics) {
+      const subQuestions = getQuizForSubtopic(subCode, { count: Math.ceil(safeCount / specificSubtopics.length) + 2 });
+      for (const q of subQuestions) {
+        addUnique(q);
+        if (questions.length >= safeCount) break;
+      }
+      if (questions.length >= safeCount) break;
     }
-    const correctIndex = shuffled.indexOf(correctAns);
-
-    questions.push({
-      id: `ai-gen-${topicCode.toLowerCase()}-${uniqueToken}-${i + 1}`,
-      subject: meta.subject,
-      topicCode: meta.code,
-      topicTitle: meta.title,
-      syllabusRef: template.ref || meta.syllabusRef,
-      question: stem,
-      options: shuffled,
-      correctIndex: correctIndex >= 0 ? correctIndex : 0,
-      explanation
-    });
   }
 
-  // Shuffle final list so topics are interleaved realistically like real Cambridge exam papers
-  return questions.sort(() => Math.random() - 0.5);
+  // 1. Gather questions from TOPIC_TEMPLATES for each selected topic
+  for (const topicCode of validTopics) {
+    const meta = SYLLABUS_TOPICS_META[topicCode] || SYLLABUS_TOPICS_META['B1'];
+    const templates = TOPIC_TEMPLATES[topicCode] || [];
+
+    for (let tIdx = 0; tIdx < templates.length; tIdx++) {
+      const template = templates[tIdx];
+      // Generate multiple variations if template supports dynamic variables
+      const iterations = template.generateVars ? 3 : 1;
+      for (let v = 0; v < iterations; v++) {
+        const vars = template.generateVars ? template.generateVars() : null;
+        const stem = typeof template.stem === 'function' ? template.stem(vars) : template.stem;
+        const correctAns = typeof template.correct === 'function' ? template.correct(vars) : template.correct;
+        const distractors = typeof template.distractors === 'function' ? template.distractors(vars) : template.distractors;
+        const explanation = typeof template.explanation === 'function' ? template.explanation(vars) : template.explanation;
+
+        // Build 4 options and shuffle
+        const rawOptions = [correctAns, ...distractors.slice(0, 3)];
+        const shuffled = [...rawOptions];
+        for (let j = shuffled.length - 1; j > 0; j--) {
+          const k = Math.floor(Math.random() * (j + 1));
+          [shuffled[j], shuffled[k]] = [shuffled[k], shuffled[j]];
+        }
+        const correctIndex = shuffled.indexOf(correctAns);
+
+        addUnique({
+          id: `ai-gen-${topicCode.toLowerCase()}-${uniqueToken}-${questions.length + 1}`,
+          subject: meta.subject,
+          topicCode: meta.code,
+          topicTitle: meta.title,
+          syllabusRef: template.ref || meta.syllabusRef,
+          question: stem,
+          options: shuffled,
+          correctIndex: correctIndex >= 0 ? correctIndex : 0,
+          explanation
+        });
+      }
+    }
+  }
+
+  // 2. Gather authentic questions from all subtopics matching the requested topics
+  for (const topicCode of validTopics) {
+    const matchingSubtopics = allSubtopicsData.filter(s => 
+      s.topicCode === topicCode || s.subtopicCode.startsWith(`${topicCode}.`)
+    );
+
+    for (const sub of matchingSubtopics) {
+      const subQuiz = getQuizForSubtopic(sub.subtopicCode);
+      for (const q of subQuiz) {
+        addUnique({
+          ...q,
+          id: `sub-${sub.subtopicCode.toLowerCase()}-${uniqueToken}-${questions.length + 1}`
+        });
+        if (questions.length >= safeCount * 2) break;
+      }
+      if (questions.length >= safeCount * 2) break;
+    }
+  }
+
+  // 3. If questions are still fewer than safeCount (e.g. single small topic), generate unique parametric calculations
+  let pCounter = 1;
+  while (questions.length < safeCount && pCounter <= 50) {
+    const topicCode = validTopics[(questions.length + pCounter) % validTopics.length];
+    const meta = SYLLABUS_TOPICS_META[topicCode] || SYLLABUS_TOPICS_META['B1'];
+
+    if (meta.subject === 'physics') {
+      const mass = (10 + pCounter * 5);
+      const velocity = (2 + pCounter);
+      const ke = 0.5 * mass * velocity * velocity;
+      addUnique({
+        id: `param-ke-${uniqueToken}-${pCounter}`,
+        subject: 'physics',
+        topicCode,
+        topicTitle: meta.title,
+        syllabusRef: `${topicCode}.1`,
+        question: `An object of mass ${mass} kg is travelling with a constant speed of ${velocity} m/s in investigation #${pCounter}. What is its kinetic energy?`,
+        options: [
+          `${ke.toLocaleString()} J`,
+          `${(ke * 2).toLocaleString()} J`,
+          `${(ke / 2).toLocaleString()} J`,
+          `${(mass * velocity).toLocaleString()} J`
+        ],
+        correctIndex: 0,
+        explanation: `Kinetic energy KE = 0.5 × m × v² = 0.5 × ${mass} × ${velocity}² = ${ke} J.`
+      });
+    } else if (meta.subject === 'chemistry') {
+      // In Cambridge 0653 Combined Science, mole calculations from mass or concentration are excluded.
+      // Tests Law of Conservation of Mass & reacting masses:
+      const mgMass = (1.2 * pCounter).toFixed(1);
+      const oMass = (0.8 * pCounter).toFixed(1);
+      const mgoMass = (Number(mgMass) + Number(oMass)).toFixed(1);
+      addUnique({
+        id: `param-mass-conservation-${uniqueToken}-${pCounter}`,
+        subject: 'chemistry',
+        topicCode,
+        topicTitle: meta.title,
+        syllabusRef: `${topicCode}.1`,
+        question: `According to the Law of Conservation of Mass, when ${mgMass} g of magnesium ribbon burns completely in ${oMass} g of oxygen gas, what mass of magnesium oxide is formed?`,
+        options: [
+          `${mgoMass} g`,
+          `${(Number(mgoMass) * 1.5).toFixed(1)} g`,
+          `${Math.abs(Number(mgMass) - Number(oMass)).toFixed(1)} g`,
+          `${(Number(mgMass) * 2).toFixed(1)} g`
+        ],
+        correctIndex: 0,
+        explanation: `By the Law of Conservation of Mass, the total mass of products equals the total mass of reactants: ${mgMass} g + ${oMass} g = ${mgoMass} g. (In Cambridge 0653 Combined Science, mole calculations from mass or concentration are not required).`
+      });
+    } else {
+      const imageMm = (20 + pCounter * 4);
+      const mag = (200 + pCounter * 50);
+      const actualUm = ((imageMm * 1000) / mag).toFixed(1);
+      addUnique({
+        id: `param-mag-${uniqueToken}-${pCounter}`,
+        subject: 'biology',
+        topicCode,
+        topicTitle: meta.title,
+        syllabusRef: `${topicCode}.1`,
+        question: `Under a light microscope, a biological specimen image measures ${imageMm} mm across at magnification ×${mag} (Slide specimen #${pCounter}). What is the actual dimension?`,
+        options: [
+          `${actualUm} μm`,
+          `${(Number(actualUm) * 10).toFixed(1)} μm`,
+          `${(Number(actualUm) / 10).toFixed(2)} μm`,
+          `${(imageMm * mag).toLocaleString()} μm`
+        ],
+        correctIndex: 0,
+        explanation: `Actual size = Image size ÷ Magnification = (${imageMm} × 1000 μm) ÷ ${mag} = ${actualUm} μm.`
+      });
+    }
+    pCounter++;
+  }
+
+  // Shuffle final list so topics and difficulty are interleaved realistically
+  const shuffledFinal = questions.sort(() => Math.random() - 0.5);
+
+  // Return exactly the requested count, all guaranteed unique
+  return shuffledFinal.slice(0, safeCount);
 }

@@ -24,13 +24,24 @@ import {
   ShieldCheck, 
   RefreshCw, 
   Search, 
+  User,
   Check, 
   Copy, 
   Info, 
   ChevronRight,
   ExternalLink,
-  ShieldAlert
+  ShieldAlert,
+  Dna,
+  FlaskConical,
+  Zap
 } from 'lucide-react';
+import { 
+  MedalTierIcon, 
+  MedalCountsSummary, 
+  MiniMedalPill,
+  StudentMedalStrip,
+  DynamicCategoryMedalGroup
+} from './MedalTypeBadge';
 
 interface StudentLeaderboardProps {
   user: UserProfile;
@@ -68,6 +79,7 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
   });
 
   const [inspectedStudent, setInspectedStudent] = useState<LeaderboardEntry | null>(null);
+  const [inspectedBadgeCategory, setInspectedBadgeCategory] = useState<'all' | 'streak' | 'topic_module' | 'quiz'>('all');
 
   // Load student's enrolled classes
   useEffect(() => {
@@ -349,6 +361,15 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
                     <span>Streak: <strong className="text-white font-mono">{currentUserEntry.streakDays}d</strong></span>
                   </span>
                 </div>
+
+                {/* Dynamic earned virtual badges strip for current user */}
+                <div className="mt-2.5">
+                  <StudentMedalStrip 
+                    badges={currentUserEntry.unlockedBadges || []} 
+                    compact={false}
+                    showCategoryBreakdown={true}
+                  />
+                </div>
               </div>
             </div>
 
@@ -363,6 +384,17 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
                   <span>My Private Accuracy:</span>
                   <strong className="text-emerald-400 font-mono font-bold">{currentUserEntry.quizAccuracy}%</strong>
                 </div>
+              )}
+
+              {onNavigateToProfile && (
+                <button
+                  onClick={onNavigateToProfile}
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs transition flex items-center gap-1.5 border border-slate-700 shadow-sm"
+                  title="View your student profile, recent activity, and earned medals"
+                >
+                  <User className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>My Profile & Recent Activity</span>
+                </button>
               )}
 
               {onNavigateToQuizzes && (
@@ -414,9 +446,16 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
               <p className="font-mono text-xs text-emerald-400 font-bold mt-0.5">
                 {topThreeList[1]?.totalQuizScore || 0} Quiz Pts
               </p>
-              <span className="text-[10px] text-slate-400">
-                {topThreeList[1]?.badgesCount || 0} Badges
-              </span>
+              <div className="mt-1 flex flex-col items-center">
+                <span className="text-[10px] text-slate-300 font-bold mb-0.5">
+                  {topThreeList[1]?.badgesCount || 0} Medals
+                </span>
+                <StudentMedalStrip 
+                  badges={topThreeList[1]?.unlockedBadges || []} 
+                  compact={true} 
+                  showCategoryBreakdown={false}
+                />
+              </div>
 
               {/* Podium Step */}
               <div className="w-full h-20 sm:h-24 bg-gradient-to-t from-slate-800 to-slate-700/80 rounded-t-2xl border-t-2 border-slate-400 flex flex-col items-center justify-center text-slate-300 text-xs font-bold mt-2 shadow-inner">
@@ -448,9 +487,16 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
               <p className="font-mono text-xs sm:text-sm text-emerald-400 font-black mt-0.5">
                 {topThreeList[0]?.totalQuizScore || 0} Quiz Pts
               </p>
-              <span className="text-[10px] text-amber-300 font-bold">
-                {topThreeList[0]?.badgesCount || 0} Badges
-              </span>
+              <div className="mt-1 flex flex-col items-center">
+                <span className="text-[10px] text-amber-300 font-bold mb-0.5">
+                  {topThreeList[0]?.badgesCount || 0} Medals
+                </span>
+                <StudentMedalStrip 
+                  badges={topThreeList[0]?.unlockedBadges || []} 
+                  compact={true} 
+                  showCategoryBreakdown={false}
+                />
+              </div>
 
               {/* Podium Step */}
               <div className="w-full h-28 sm:h-32 bg-gradient-to-t from-amber-950/60 via-slate-800 to-amber-900/40 rounded-t-2xl border-t-2 border-amber-400 flex flex-col items-center justify-center text-amber-300 text-xs font-bold mt-2 shadow-lg shadow-amber-950/50">
@@ -481,9 +527,16 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
               <p className="font-mono text-xs text-emerald-400 font-bold mt-0.5">
                 {topThreeList[2]?.totalQuizScore || 0} Quiz Pts
               </p>
-              <span className="text-[10px] text-slate-400">
-                {topThreeList[2]?.badgesCount || 0} Badges
-              </span>
+              <div className="mt-1 flex flex-col items-center">
+                <span className="text-[10px] text-amber-400 font-bold mb-0.5">
+                  {topThreeList[2]?.badgesCount || 0} Medals
+                </span>
+                <StudentMedalStrip 
+                  badges={topThreeList[2]?.unlockedBadges || []} 
+                  compact={true} 
+                  showCategoryBreakdown={false}
+                />
+              </div>
 
               {/* Podium Step */}
               <div className="w-full h-16 sm:h-20 bg-gradient-to-t from-slate-800 to-amber-950/40 rounded-t-2xl border-t-2 border-amber-600 flex flex-col items-center justify-center text-amber-500 text-xs font-bold mt-2 shadow-inner">
@@ -593,14 +646,14 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
                 <th className="py-3 px-3 text-center">
                   <span className="flex items-center justify-center gap-1">
                     <Award className="w-3 h-3 text-amber-400" />
-                    <span>Badges</span>
+                    <span>Earned Medals</span>
                   </span>
                 </th>
                 <th className="py-3 px-3">Featured Medal</th>
                 <th className="py-3 px-3 text-center">Streak</th>
                 <th className="py-3 px-3 text-center">Decks</th>
                 <th className="py-3 px-3 text-right">Total XP</th>
-                <th className="py-3 px-3 text-center">Badges</th>
+                <th className="py-3 px-3 text-center">Details</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
@@ -678,22 +731,26 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
                       </div>
                     </td>
 
-                    {/* AGGREGATED BADGES COUNT */}
+                    {/* DYNAMIC EARNED MEDALS WITH ICONS FOR EACH MEDAL TYPE */}
                     <td className="py-3.5 px-3 text-center">
-                      <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-950/40 border border-amber-500/30 text-amber-300 font-bold text-xs">
-                        <Award className="w-3.5 h-3.5 text-amber-400" />
-                        <span>{student.badgesCount}</span>
+                      <div className="flex justify-center">
+                        <StudentMedalStrip 
+                          badges={student.unlockedBadges || []} 
+                          compact={true} 
+                          showCategoryBreakdown={true}
+                          onClick={() => setInspectedStudent(student)}
+                          className="cursor-pointer hover:scale-105 transition"
+                        />
                       </div>
                     </td>
 
                     {/* Featured Medal */}
                     <td className="py-3.5 px-3">
                       {student.featuredBadge ? (
-                        <div className="flex items-center gap-1.5">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border truncate max-w-[150px] ${getRarityBadgeStyle(student.featuredBadge.rarity)}`}>
-                            {student.featuredBadge.title}
-                          </span>
-                        </div>
+                        <MiniMedalPill 
+                          badge={student.featuredBadge}
+                          onClick={() => setInspectedStudent(student)}
+                        />
                       ) : (
                         <span className="text-slate-600 text-[11px]">—</span>
                       )}
@@ -727,9 +784,10 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
                           e.stopPropagation();
                           setInspectedStudent(student);
                         }}
-                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition"
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition flex items-center justify-center gap-1 mx-auto"
                       >
-                        View Badges
+                        <Medal className="w-3 h-3 text-amber-400" />
+                        <span>Inspect</span>
                       </button>
                     </td>
                   </tr>
@@ -847,45 +905,122 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
               <span>Quiz percentage averages are kept strictly private for student confidentiality.</span>
             </div>
 
-            {/* UNLOCKED BADGES LIST */}
-            <div className="text-left space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-white flex items-center gap-1.5">
+            {/* UNLOCKED BADGES LIST & CATEGORY TABS */}
+            <div className="text-left space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                <span className="font-bold text-white flex items-center gap-1.5 text-xs">
                   <Award className="w-4 h-4 text-amber-400" />
-                  <span>Unlocked Badges & Medals ({inspectedStudent.unlockedBadges?.length || inspectedStudent.badgesCount})</span>
+                  <span>Earned Virtual Badges & Medals ({inspectedStudent.unlockedBadges?.length || inspectedStudent.badgesCount})</span>
                 </span>
                 <span className="text-[11px] text-amber-400 font-mono font-bold">
                   {inspectedStudent.xp} XP Earned
                 </span>
               </div>
 
-              {inspectedStudent.unlockedBadges && inspectedStudent.unlockedBadges.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
-                  {inspectedStudent.unlockedBadges.map(badge => (
-                    <div 
-                      key={badge.id}
-                      className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/90 flex items-start gap-2.5"
-                    >
-                      <div className={`p-1.5 rounded-lg border shrink-0 mt-0.5 ${getRarityBadgeStyle(badge.rarity)}`}>
-                        <Award className="w-3.5 h-3.5" />
-                      </div>
-                      <div className="min-w-0">
-                        <span className="text-xs font-bold text-white block truncate">{badge.title}</span>
-                        <p className="text-[10px] text-slate-400 line-clamp-2 leading-tight mt-0.5">
-                          {badge.description}
-                        </p>
-                        <span className="text-[9px] font-mono font-bold text-amber-400 mt-1 block">
-                          +{badge.xpReward} XP • {badge.rarity.toUpperCase()}
-                        </span>
-                      </div>
+              {/* Medal Counts Breakdown by Tier (Diamond, Gold, Silver, Bronze) */}
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Medals by Tier:</span>
+                <MedalCountsSummary badges={inspectedStudent.unlockedBadges || []} size="xs" />
+              </div>
+
+              {/* Category Filter Tabs: All, Streaks, Module Completions, Quiz Performance */}
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                {[
+                  { id: 'all', label: 'All Medals', icon: null, count: (inspectedStudent.unlockedBadges || []).length },
+                  { 
+                    id: 'streak', 
+                    label: 'Streaks', 
+                    icon: <Flame className="w-3 h-3 text-amber-400 fill-amber-400" />,
+                    count: (inspectedStudent.unlockedBadges || []).filter(b => b.category === 'streak').length 
+                  },
+                  { 
+                    id: 'topic_module', 
+                    label: 'Modules', 
+                    icon: <BookOpen className="w-3 h-3 text-indigo-400" />,
+                    count: (inspectedStudent.unlockedBadges || []).filter(b => b.category === 'topic_module').length 
+                  },
+                  { 
+                    id: 'quiz', 
+                    label: 'Quizzes', 
+                    icon: <Target className="w-3 h-3 text-emerald-400" />,
+                    count: (inspectedStudent.unlockedBadges || []).filter(b => b.category === 'quiz').length 
+                  }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setInspectedBadgeCategory(tab.id as any)}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
+                      inspectedBadgeCategory === tab.id
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800'
+                    }`}
+                  >
+                    {tab.icon}
+                    <span>{tab.label}</span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-slate-900/80 border border-slate-700/60">
+                      {tab.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Filtered Badges Cards */}
+              {(() => {
+                const list = (inspectedStudent.unlockedBadges || []).filter(b => {
+                  if (inspectedBadgeCategory === 'all') return true;
+                  return b.category === inspectedBadgeCategory;
+                });
+
+                if (list.length === 0) {
+                  return (
+                    <div className="p-6 rounded-2xl bg-slate-950 border border-slate-800 text-center text-xs text-slate-400 space-y-1">
+                      <Medal className="w-8 h-8 text-slate-600 mx-auto" />
+                      <p className="font-semibold text-slate-300">No medals earned in this category yet</p>
+                      <p className="text-[11px] text-slate-500">Keep revising to unlock badges for this achievement category.</p>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-center text-xs text-slate-500">
-                  <span>Badge progress synced with class activities.</span>
-                </div>
-              )}
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
+                    {list.map(badge => (
+                      <div 
+                        key={badge.id}
+                        className="p-3 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 flex items-start gap-3 transition"
+                      >
+                        <div className="shrink-0 mt-0.5">
+                          <MedalTierIcon rarity={badge.rarity} size="md" category={badge.category} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-bold text-white truncate block">{badge.title}</span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 line-clamp-2 leading-tight mt-0.5">
+                            {badge.description}
+                          </p>
+                          <div className="flex items-center gap-2 mt-1.5 text-[9px] font-mono">
+                            <span className="font-bold text-amber-400">+{badge.xpReward} XP</span>
+                            <span className="text-slate-600">•</span>
+                            <span className={`uppercase font-bold ${
+                              badge.rarity === 'diamond' ? 'text-cyan-400' :
+                              badge.rarity === 'gold' ? 'text-amber-400' :
+                              badge.rarity === 'silver' ? 'text-slate-300' : 'text-amber-600'
+                            }`}>
+                              {badge.rarity}
+                            </span>
+                            {badge.category && (
+                              <>
+                                <span className="text-slate-600">•</span>
+                                <span className="capitalize text-slate-400">{badge.category.replace('_', ' ')}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
 
             <button

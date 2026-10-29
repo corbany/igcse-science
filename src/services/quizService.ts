@@ -49,10 +49,28 @@ export const ALL_SYLLABUS_TOPICS: SyllabusTopicOption[] = [
   { code: 'P5', subject: 'physics', title: 'Nuclear & Space Physics', keyConcepts: 'Solar system, orbital speed, star life cycle, nuclear fusion' }
 ];
 
+import { allSubtopicsData } from '../data/subtopicSlidesData';
+
+export interface SubtopicOptionItem {
+  code: string;
+  topicCode: string;
+  subject: ScienceSubject;
+  title: string;
+}
+
+export const ALL_SUBTOPIC_OPTIONS: SubtopicOptionItem[] = allSubtopicsData.map(s => ({
+  code: s.subtopicCode,
+  topicCode: s.topicCode,
+  subject: s.subject,
+  title: s.title
+}));
+
 export interface GenerateQuizParams {
   topics: string[];
+  subtopics?: string[];
   numQuestions: number;
   tier?: 'Extended' | 'Core' | 'Mixed';
+  attemptNumber?: number;
 }
 
 export interface QuizGenerationResult {
@@ -69,13 +87,33 @@ export function isGeneticsQuestion(q: QuizQuestion): boolean {
   return GENETICS_TERMS_REGEX.test(content);
 }
 
+export function deduplicateQuestionsList(questions: QuizQuestion[]): QuizQuestion[] {
+  if (!questions || questions.length === 0) return [];
+  const seen = new Set<string>();
+  const unique: QuizQuestion[] = [];
+  for (const q of questions) {
+    if (!q || !q.question) continue;
+    const norm = q.question.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (norm.length >= 15 && !seen.has(norm)) {
+      seen.add(norm);
+      unique.push(q);
+    }
+  }
+  return unique;
+}
+
 /**
  * Request AI-generated multiple-choice questions from backend or client fallback
+ * GUARANTEES ZERO REPEAT QUESTIONS WITHIN THE PRACTICE QUIZ.
  */
 export async function generateAIQuiz(params: GenerateQuizParams): Promise<QuizGenerationResult> {
   const clampedNum = Math.min(40, Math.max(1, Math.round(params.numQuestions || 10)));
   const targetTopics = params.topics.length > 0 ? params.topics : ALL_SYLLABUS_TOPICS.map(t => t.code);
-  const sessionSeed = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const targetSubtopics = params.subtopics && params.subtopics.length > 0 ? params.subtopics : [];
+  const sessionSeed = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}-att-${params.attemptNumber || 1}`;
+
+  // If subtopics are specified, combine them into targetTopics for fallback/backend
+  const effectiveRequestTopics = targetSubtopics.length > 0 ? targetSubtopics : targetTopics;
 
   try {
     const res = await fetch('/api/generate-quiz', {
@@ -85,6 +123,7 @@ export async function generateAIQuiz(params: GenerateQuizParams): Promise<QuizGe
       },
       body: JSON.stringify({
         topics: targetTopics,
+        subtopics: targetSubtopics,
         numQuestions: clampedNum,
         tier: params.tier || 'Extended',
         seed: sessionSeed
@@ -96,14 +135,26 @@ export async function generateAIQuiz(params: GenerateQuizParams): Promise<QuizGe
       if (Array.isArray(data.quiz) && data.quiz.length > 0) {
         // Enforce strict syllabus compliance: purge any genetics questions
         const filtered = (data.quiz as QuizQuestion[]).filter(q => !isGeneticsQuestion(q));
-        if (filtered.length < clampedNum) {
-          const needed = clampedNum - filtered.length;
-          const supplement = generateClientFallbackQuiz(targetTopics, needed, params.tier)
+        const unique = deduplicateQuestionsList(filtered);
+
+        if (unique.length < clampedNum) {
+          const needed = clampedNum - unique.length;
+          const seenStems = new Set(unique.map(q => q.question.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()));
+          const supplement = generateClientFallbackQuiz(effectiveRequestTopics, needed * 2, params.tier)
             .filter(q => !isGeneticsQuestion(q));
-          filtered.push(...supplement);
+          
+          for (const sq of supplement) {
+            const norm = sq.question.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+            if (!seenStems.has(norm)) {
+              seenStems.add(norm);
+              unique.push(sq);
+            }
+            if (unique.length >= clampedNum) break;
+          }
         }
+
         return {
-          questions: filtered.slice(0, clampedNum),
+          questions: unique.slice(0, clampedNum),
           source: data.source || 'gemini-3.8-flash'
         };
       }
@@ -113,10 +164,10 @@ export async function generateAIQuiz(params: GenerateQuizParams): Promise<QuizGe
   }
 
   // Fallback to high-fidelity client-side generation covering all 33 topics
-  const fallbackQuestions = generateClientFallbackQuiz(targetTopics, clampedNum, params.tier)
+  const fallbackQuestions = generateClientFallbackQuiz(effectiveRequestTopics, clampedNum, params.tier)
     .filter(q => !isGeneticsQuestion(q));
   return {
-    questions: fallbackQuestions,
+    questions: deduplicateQuestionsList(fallbackQuestions).slice(0, clampedNum),
     source: 'syllabus-engine'
   };
 }
@@ -128,7 +179,7 @@ export function generateClientFallbackQuiz(topics: string[], count: number, tier
   const cleanTopics = topics.length > 0 ? topics : ALL_SYLLABUS_TOPICS.map(t => t.code);
   const uniqueSeed = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const questions = generateDynamicSyllabusQuestions(cleanTopics, count, tier, uniqueSeed);
-  return questions.filter(q => !isGeneticsQuestion(q));
+  return deduplicateQuestionsList(questions.filter(q => !isGeneticsQuestion(q)));
 }
 
 function createQuestionTemplate(

@@ -72,7 +72,9 @@ import {
   INITIAL_INSTRUCTOR_EMAILS,
   subscribeToClassStudents,
   shareClassWithInstructor,
-  removeSharedInstructorFromClass
+  removeSharedInstructorFromClass,
+  updatePastStudentQuizResultsWithNewTrafficLightParameters,
+  UpdatePastQuizResultsSummary
 } from '../services/firestoreService';
 import { allSubtopicsData } from '../data/subtopicSlidesData';
 import { UserProfile, ScienceSubject } from '../types';
@@ -96,14 +98,24 @@ interface InstructorDashboardProps {
   currentUser: UserProfile;
   onSwitchToStudentMode?: () => void;
   onNavigateToLessons?: () => void;
+  initialTab?: 'classes' | 'tasks' | 'cohort' | 'roster' | 'invites' | 'drive' | 'slides';
 }
 
 export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({ 
   currentUser,
   onSwitchToStudentMode, 
-  onNavigateToLessons 
+  onNavigateToLessons,
+  initialTab = 'classes'
 }) => {
-  const [dashboardTab, setDashboardTab] = useState<'classes' | 'tasks' | 'invites' | 'roster' | 'drive' | 'slides'>('classes');
+  const [dashboardTab, setDashboardTab] = useState<'classes' | 'tasks' | 'cohort' | 'roster' | 'invites' | 'drive' | 'slides'>(() => {
+    return (initialTab === 'cohort' || initialTab === 'roster') ? 'cohort' : initialTab;
+  });
+
+  useEffect(() => {
+    if (initialTab) {
+      setDashboardTab((initialTab === 'cohort' || initialTab === 'roster') ? 'cohort' : initialTab);
+    }
+  }, [initialTab]);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [tierFilter, setTierFilter] = useState<'all' | 'Core' | 'Extended'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'Excelling' | 'On Track' | 'Intervention Required'>('all');
@@ -137,6 +149,25 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   const [shareEmailInput, setShareEmailInput] = useState<string>('');
   const [sharingClass, setSharingClass] = useState<boolean>(false);
   const [shareFeedbackMsg, setShareFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Recalculate past student quiz results with new traffic light parameters
+  const [updatingQuizParameters, setUpdatingQuizParameters] = useState<boolean>(false);
+  const [updateResultsModalSummary, setUpdateResultsModalSummary] = useState<UpdatePastQuizResultsSummary | null>(null);
+
+  const handleUpdateAllPastQuizResults = async () => {
+    setUpdatingQuizParameters(true);
+    try {
+      const summary = await updatePastStudentQuizResultsWithNewTrafficLightParameters();
+      setUpdateResultsModalSummary(summary);
+      setActionNotice(`Recalculated past quiz results: ${summary.subtopicResultsUpdatedCount} quiz grades & ${summary.taskSubmissionsUpdatedCount} task submissions updated!`);
+      setTimeout(() => setActionNotice(null), 6000);
+      await loadInstructorClasses();
+    } catch (err: any) {
+      alert(`Error updating quiz parameters: ${err?.message || 'Failed to update'}`);
+    } finally {
+      setUpdatingQuizParameters(false);
+    }
+  };
 
   // Load classes created by or shared with this instructor
   const loadInstructorClasses = async () => {
@@ -632,7 +663,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
           }`}
         >
           <BookOpen className="w-4 h-4" />
-          <span>My Classes & Student Tracking ({classes.length})</span>
+          <span>My Classes & Students ({classes.length})</span>
         </button>
 
         <button
@@ -648,6 +679,18 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         </button>
 
         <button
+          onClick={() => setDashboardTab('cohort')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            (dashboardTab === 'cohort' || dashboardTab === 'roster')
+              ? 'bg-purple-600 text-white shadow-md'
+              : 'bg-slate-800 text-slate-400 hover:text-white'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4" />
+          <span>Cohort Progress & Analytics</span>
+        </button>
+
+        <button
           onClick={() => setDashboardTab('invites')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
             dashboardTab === 'invites'
@@ -657,18 +700,6 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         >
           <UserPlus className="w-4 h-4" />
           <span>Instructor Team & Invites</span>
-        </button>
-
-        <button
-          onClick={() => setDashboardTab('roster')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-            dashboardTab === 'roster'
-              ? 'bg-purple-600 text-white shadow-md'
-              : 'bg-slate-800 text-slate-400 hover:text-white'
-          }`}
-        >
-          <BarChart3 className="w-4 h-4" />
-          <span>Cohort Overview Analytics</span>
         </button>
 
         <button
@@ -1308,10 +1339,46 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
       )}
 
       {/* ============================================================= */}
-      {/* TAB 3: COHORT OVERVIEW ANALYTICS (EXISTING ROSTER)           */}
+      {/* TAB 3: INTEGRATED COHORT PROGRESS & MASTERY ANALYTICS         */}
       {/* ============================================================= */}
-      {dashboardTab === 'roster' && (
+      {(dashboardTab === 'cohort' || dashboardTab === 'roster') && (
         <div className="space-y-6">
+          {/* Traffic Light Recalibration Banner & Action */}
+          <div className="bg-slate-900 border border-purple-500/30 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center shrink-0">
+                <RefreshCw className={`w-5 h-5 text-purple-400 ${updatingQuizParameters ? 'animate-spin' : ''}`} />
+              </div>
+              <div>
+                <div className="text-xs sm:text-sm font-bold text-white flex items-center gap-2 flex-wrap">
+                  <span>Traffic Light Grading Parameters</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    50%, 60%, 70% Amber/Orange
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                    ≤40% Red
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    80%+ Green
+                  </span>
+                </div>
+                <div className="text-xs text-slate-400 mt-1">
+                  Recalculate all past student quiz records, traffic lights, and task submissions across your classes with the new thresholds.
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={handleUpdateAllPastQuizResults}
+              disabled={updatingQuizParameters}
+              className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition flex items-center justify-center gap-2 shrink-0 cursor-pointer disabled:opacity-50 shadow-md shadow-purple-600/30"
+              title="Recalculate past student quiz results to match Amber/Orange (50%, 60%, 70%), Red (40% or less), Green (80%+)"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${updatingQuizParameters ? 'animate-spin' : ''}`} />
+              <span>{updatingQuizParameters ? 'Updating Past Results...' : 'Recalculate All Past Student Results'}</span>
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm">
               <span className="text-xs text-slate-400 font-medium">Cohort Syllabus Coverage</span>
@@ -2434,6 +2501,79 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
           </div>
         );
       })()}
+
+      {/* Recalculate Past Quiz Results Summary Modal */}
+      {updateResultsModalSummary && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-purple-500/40 rounded-3xl max-w-lg w-full p-6 sm:p-7 space-y-5 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
+                  <CheckCircle className="w-5 h-5 text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Quiz Parameters Recalculation Complete</h3>
+                  <p className="text-xs text-slate-400">All past records synchronized to new grading rules</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setUpdateResultsModalSummary(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Metrics cards */}
+            <div className="grid grid-cols-2 gap-3 text-center">
+              <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                <div className="text-2xl font-black text-purple-400 font-mono">
+                  {updateResultsModalSummary.subtopicResultsUpdatedCount}
+                </div>
+                <div className="text-xs text-slate-400 font-medium mt-0.5">Quiz Grades Updated</div>
+              </div>
+              <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                <div className="text-2xl font-black text-emerald-400 font-mono">
+                  {updateResultsModalSummary.taskSubmissionsUpdatedCount}
+                </div>
+                <div className="text-xs text-slate-400 font-medium mt-0.5">Task Submissions Updated</div>
+              </div>
+            </div>
+
+            {/* Parameter Legend */}
+            <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/80 space-y-2 text-xs">
+              <div className="font-semibold text-slate-300">Active Grading Parameters Applied:</div>
+              <div className="space-y-1.5 text-slate-400">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0"></span>
+                  <span className="font-semibold text-emerald-300">Green Grade:</span>
+                  <span>80% or higher score (Mastery)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0"></span>
+                  <span className="font-semibold text-amber-300">Amber / Orange Grade:</span>
+                  <span>50%, 60%, 70% score (In progress)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0"></span>
+                  <span className="font-semibold text-rose-300">Red Grade:</span>
+                  <span>40% or less score (Needs revision)</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setUpdateResultsModalSummary(null)}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition shadow-md shadow-purple-600/30"
+              >
+                Close & View Analytics
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -122,7 +122,11 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
   // SMTP Settings & 1-Click Email Dispatch state
   const [showSmtpModal, setShowSmtpModal] = useState<boolean>(false);
-  const [smtpStatus, setSmtpStatus] = useState<{ configured: boolean; host: string; port: number; secure: boolean; user: string; from: string } | null>(null);
+  const [smtpModalTab, setSmtpModalTab] = useState<'config' | 'logs' | 'guide'>('config');
+  const [emailLogs, setEmailLogs] = useState<any[]>([]);
+  const [loadingEmailLogs, setLoadingEmailLogs] = useState<boolean>(false);
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [smtpStatus, setSmtpStatus] = useState<{ configured: boolean; host: string; port: number; secure: boolean; user: string; from: string; hasPassword?: boolean } | null>(null);
   const [smtpForm, setSmtpForm] = useState<{ host: string; port: number; secure: boolean; user: string; pass: string; from: string }>({
     host: 'smtp.gmail.com',
     port: 587,
@@ -147,6 +151,27 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
     recipients?: { studentName: string; studentEmail: string }[];
   } | null>(null);
 
+  const fetchEmailLogs = async () => {
+    setLoadingEmailLogs(true);
+    try {
+      const res = await fetch('/api/email-logs');
+      if (res.ok) {
+        const data = await res.json();
+        setEmailLogs(data.logs || []);
+      }
+    } catch {
+    } finally {
+      setLoadingEmailLogs(false);
+    }
+  };
+
+  const handleClearEmailLogs = async () => {
+    try {
+      await fetch('/api/clear-email-logs', { method: 'POST' });
+      setEmailLogs([]);
+    } catch {}
+  };
+
   const loadSmtpStatus = async () => {
     try {
       const res = await fetch('/api/smtp-config');
@@ -155,12 +180,12 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
         setSmtpStatus(data);
         if (data.configured) {
           setSmtpForm({
-            host: data.host || '',
+            host: data.host || 'smtp.gmail.com',
             port: data.port || 587,
             secure: Boolean(data.secure),
-            user: data.user || '',
+            user: data.user || currentUser.email || 'corbanb@gisboyshigh.net',
             pass: '',
-            from: data.from || ''
+            from: data.from || `"Mr. Corban" <${data.user || currentUser.email || 'corbanb@gisboyshigh.net'}>`
           });
         }
       }
@@ -443,6 +468,11 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
         }));
       }
 
+      // Collect any additional notification emails (e.g. instructor copy, test emails)
+      const additionalEmailsList = additionalEmailsInput.trim()
+        ? additionalEmailsInput.split(/[,;\s]+/).map(s => s.trim().toLowerCase()).filter(s => s.includes('@'))
+        : [currentUser.email || 'corbanb@gisboyshigh.net'];
+
       const created = await createClassTask({
         classId: newClassId,
         className: targetClassName,
@@ -458,18 +488,49 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
         instructorEmail: currentUser.email || 'corbanb@gisboyshigh.net'
       }, {
         sendEmail: sendEmailNotification,
-        explicitRecipients
+        explicitRecipients,
+        additionalEmails: additionalEmailsList
       });
 
       setTasks([created, ...tasks]);
-      const notifMsg = sendEmailNotification 
-        ? ` 📧 Automated email notification dispatched to assigned students.` 
-        : '';
-      setFeedbackNotice({ 
-        type: 'success', 
-        text: `Task "${created.title}" successfully assigned!${notifMsg}` 
-      });
+      const notifResult = (created as any).notificationResult;
+
+      if (sendEmailNotification && notifResult) {
+        const studentCount = notifResult.count || (explicitRecipients?.length || 1);
+        if (notifResult.smtpConfigured) {
+          setFeedbackNotice({ 
+            type: 'success', 
+            text: `✅ Task "${created.title}" successfully assigned! Automated emails are being dispatched to ${studentCount} recipients via your SMTP server.` 
+          });
+        } else {
+          setFeedbackNotice({ 
+            type: 'success', 
+            text: `✅ Task "${created.title}" published! SMTP server is not yet configured. Use the 1-Click Gmail or Mail App button below to send immediately.` 
+          });
+        }
+
+        setLastEmailAction({
+          taskId: created.id,
+          taskTitle: created.title,
+          count: studentCount,
+          method: notifResult.method,
+          smtpConfigured: Boolean(notifResult.smtpConfigured),
+          mailtoUrl: notifResult.mailtoUrl,
+          gmailComposeUrl: notifResult.gmailComposeUrl,
+          warning: notifResult.warning,
+          subject: notifResult.subject,
+          emailText: notifResult.emailText,
+          recipients: notifResult.recipients || []
+        });
+      } else {
+        setFeedbackNotice({ 
+          type: 'success', 
+          text: `Task "${created.title}" successfully assigned!` 
+        });
+      }
+
       setShowCreateModal(false);
+      setAdditionalEmailsInput('');
 
       // Reset form to clean default
       setSelectedSubtopics(['B1.1']);
@@ -497,7 +558,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
             studentName: s.studentName,
             studentEmail: s.studentEmail && s.studentEmail.includes('@')
               ? s.studentEmail
-              : `${s.studentName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
+              : `${s.studentName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@gisboyshigh.net`
           }));
       }
 
@@ -511,7 +572,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
               studentName: s.name,
               studentEmail: s.email && s.email.includes('@')
                 ? s.email
-                : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
+                : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@gisboyshigh.net`
             }));
         } else {
           for (const c of classes) {
@@ -523,7 +584,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                   studentName: s.name,
                   studentEmail: s.email && s.email.includes('@')
                     ? s.email
-                    : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@cambridge0653.edu`
+                    : `${s.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'student'}@gisboyshigh.net`
                 });
               }
             }
@@ -536,19 +597,27 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
         return;
       }
 
-      const notifResult = await notifyStudentsOfTaskAssignment(task, recipients);
+      const notifResult = await notifyStudentsOfTaskAssignment(task, recipients, [currentUser.email || 'corbanb@gisboyshigh.net']);
       const studentCount = notifResult.count || recipients.length;
-      setFeedbackNotice({
-        type: 'success',
-        text: `📧 Dispatched task email notifications to ${studentCount} student${studentCount !== 1 ? 's' : ''} via ${notifResult.smtpConfigured ? 'SMTP server' : 'automated mail service'}!`
-      });
+      if (notifResult.smtpConfigured) {
+        setFeedbackNotice({
+          type: 'success',
+          text: `📧 Dispatched task email notifications to ${studentCount} student${studentCount !== 1 ? 's' : ''} via your SMTP server!`
+        });
+      } else {
+        setFeedbackNotice({
+          type: 'success',
+          text: `📧 Prepared 1-Click Email notification for ${studentCount} students! Use the Gmail or Mail App button below to dispatch.`
+        });
+      }
+
       if (notifResult.mailtoUrl || notifResult.gmailComposeUrl) {
         setLastEmailAction({
           taskId: task.id,
           taskTitle: task.title,
           count: studentCount,
           method: notifResult.method,
-          smtpConfigured: notifResult.smtpConfigured,
+          smtpConfigured: Boolean(notifResult.smtpConfigured),
           mailtoUrl: notifResult.mailtoUrl,
           gmailComposeUrl: notifResult.gmailComposeUrl,
           warning: notifResult.warning,
@@ -711,6 +780,33 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                 <span>Copy Announcement Text</span>
               </button>
             )}
+
+            {lastEmailAction.recipients && lastEmailAction.recipients.length > 0 && (
+              <button
+                onClick={() => {
+                  if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                    const emailList = lastEmailAction.recipients!.map(r => r.studentEmail).join(', ');
+                    navigator.clipboard.writeText(emailList);
+                    setFeedbackNotice({ type: 'success', text: `📋 Copied ${lastEmailAction.recipients!.length} student email addresses to clipboard!` });
+                  }
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center gap-1.5 border border-slate-700 transition"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copy Student Emails (BCC)</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                setShowSmtpModal(true);
+                fetchEmailLogs();
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-purple-900/60 hover:bg-purple-800 text-purple-200 font-semibold text-xs flex items-center gap-1.5 border border-purple-500/40 transition ml-auto"
+            >
+              <Settings className="w-3.5 h-3.5 text-purple-300" />
+              <span>Email Server Settings & Logs</span>
+            </button>
           </div>
         </div>
       )}
@@ -736,16 +832,41 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
             </p>
           </div>
 
-          <button
-            onClick={() => {
-              setNewClassId(classes[0]?.id || 'all');
-              setShowCreateModal(true);
-            }}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md hover:shadow-purple-600/30 transition shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Set New Task</span>
-          </button>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <button
+              onClick={() => {
+                setShowSmtpModal(true);
+                fetchEmailLogs();
+              }}
+              className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition shadow-xs shrink-0"
+              title="Configure SMTP mail server or inspect email delivery logs"
+            >
+              <Mail className="w-4 h-4 text-purple-400" />
+              <span>Email Delivery</span>
+              {smtpStatus?.configured ? (
+                <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  SMTP Active
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  1-Click Gmail
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => {
+                setNewClassId(classes[0]?.id || 'all');
+                setShowCreateModal(true);
+              }}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md hover:shadow-purple-600/30 transition shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Set New Task</span>
+            </button>
+          </div>
         </div>
 
         {/* Filters and search bar */}
@@ -1168,7 +1289,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                                                 sub.trafficLight === 'green' ? 'bg-emerald-400' :
                                                 sub.trafficLight === 'orange' ? 'bg-amber-400' : 'bg-rose-500'
                                               }`}></span>
-                                              <span className="capitalize">{sub.trafficLight} Light</span>
+                                              <span>{sub.trafficLight === 'orange' ? 'Amber/Orange' : sub.trafficLight === 'green' ? 'Green' : 'Red'} Grade</span>
                                             </span>
                                           ) : sub.slidesCompleted ? (
                                             <span className="text-[10px] text-emerald-400 font-medium">✓ Completed</span>
@@ -1195,7 +1316,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                                               sub.trafficLight === 'green' ? 'bg-emerald-400' :
                                               sub.trafficLight === 'orange' ? 'bg-amber-400' : 'bg-rose-500'
                                             }`}></span>
-                                            <span className="capitalize">{sub.trafficLight} Light</span>
+                                            <span>{sub.trafficLight === 'orange' ? 'Amber/Orange' : sub.trafficLight === 'green' ? 'Green' : 'Red'} Grade</span>
                                           </span>
                                         )}
                                         {sub.quizScore !== undefined && (
@@ -1829,33 +1950,83 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
               </div>
 
               {/* Student Email Notification Option Card */}
-              <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-purple-500/30 flex items-center justify-between gap-3 shadow-xs">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-xl bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
-                    <Mail className="w-4 h-4 text-purple-400" />
-                  </div>
-                  <div className="space-y-0.5">
-                    <div className="font-bold text-white flex items-center gap-1.5">
-                      <span>Notify Students by Email</span>
-                      <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                        Automated
-                      </span>
+              <div className="p-4 rounded-2xl bg-slate-950/90 border border-purple-500/30 space-y-3 shadow-xs">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
+                      <Mail className="w-4 h-4 text-purple-400" />
                     </div>
-                    <div className="text-[11px] text-slate-400">
-                      Dispatches an automated email to each assigned student with the task title, activity type, due date, and direct portal link.
+                    <div className="space-y-0.5">
+                      <div className="font-bold text-white flex items-center gap-1.5 flex-wrap">
+                        <span>Notify Students by Email</span>
+                        {smtpStatus?.configured ? (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            🟢 SMTP Background Auto-Send
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            🟡 1-Click Gmail / Mail App
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        Dispatches assignment details (title, due date, syllabus subtopics, and direct portal link) to each assigned student.
+                      </div>
                     </div>
                   </div>
+
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={sendEmailNotification}
+                      onChange={e => setSendEmailNotification(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                  </label>
                 </div>
 
-                <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={sendEmailNotification}
-                    onChange={e => setSendEmailNotification(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
-                </label>
+                {sendEmailNotification && (
+                  <div className="pt-2 border-t border-slate-800/80 space-y-2 text-xs">
+                    {!smtpStatus?.configured && (
+                      <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-2 text-amber-200">
+                        <div className="flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span className="text-[11px]">
+                            SMTP mail server is not configured yet. <strong>1-Click Gmail & Email App launcher</strong> will open right after creation so you can notify students immediately.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSmtpModal(true);
+                            fetchEmailLogs();
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-amber-600/30 hover:bg-amber-600/50 text-amber-200 font-bold text-[11px] border border-amber-500/30 transition shrink-0"
+                        >
+                          Setup SMTP
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <label className="font-semibold text-slate-300 text-[11px] flex items-center justify-between">
+                        <span>Additional Notification Emails (Optional)</span>
+                        <span className="text-[10px] text-slate-400">Your email ({currentUser.email || 'corbanb@gisboyshigh.net'}) is included by default</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={additionalEmailsInput}
+                        onChange={e => setAdditionalEmailsInput(e.target.value)}
+                        placeholder="e.g. corbanb@gisboyshigh.net, co-teacher@gisboyshigh.net, test@email.com"
+                        className="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 placeholder-slate-500 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      />
+                      <p className="text-[10px] text-slate-400">
+                        Separate multiple emails with commas. All recipients will receive the assignment details and direct portal link.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               </div>
@@ -1888,6 +2059,476 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* SMTP Configuration & Delivery Logs Modal */}
+      {showSmtpModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in-50 duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
+            {/* Modal Header */}
+            <div className="p-5 sm:p-6 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                    <span>Task Email Dispatch & Server Settings</span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Ensure student task emails deliver reliably via SMTP or 1-Click Gmail.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowSmtpModal(false);
+                  setSmtpTestResult(null);
+                }}
+                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Navigation Tabs */}
+            <div className="flex items-center gap-1 px-5 pt-3 border-b border-slate-800/80 bg-slate-950/50 text-xs">
+              <button
+                type="button"
+                onClick={() => setSmtpModalTab('config')}
+                className={`px-4 py-2.5 rounded-t-xl font-bold transition flex items-center gap-2 border-b-2 ${
+                  smtpModalTab === 'config'
+                    ? 'border-purple-500 text-purple-300 bg-slate-900/90'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Settings className="w-3.5 h-3.5" />
+                <span>SMTP Server Setup</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSmtpModalTab('logs');
+                  fetchEmailLogs();
+                }}
+                className={`px-4 py-2.5 rounded-t-xl font-bold transition flex items-center gap-2 border-b-2 ${
+                  smtpModalTab === 'logs'
+                    ? 'border-purple-500 text-purple-300 bg-slate-900/90'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Delivery Logs</span>
+                {emailLogs.length > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 font-mono">
+                    {emailLogs.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSmtpModalTab('guide')}
+                className={`px-4 py-2.5 rounded-t-xl font-bold transition flex items-center gap-2 border-b-2 ${
+                  smtpModalTab === 'guide'
+                    ? 'border-purple-500 text-purple-300 bg-slate-900/90'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>Google Setup Guide</span>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-4 text-xs">
+              {smtpModalTab === 'config' && (
+                <form onSubmit={handleSaveSmtp} className="space-y-4">
+                  {/* Status Banner */}
+                  <div className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 ${
+                    smtpStatus?.configured
+                      ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                      : 'bg-amber-950/40 border-amber-500/40 text-amber-300'
+                  }`}>
+                    <div className="flex items-center gap-2.5">
+                      {smtpStatus?.configured ? (
+                        <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                      ) : (
+                        <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                      )}
+                      <div>
+                        <div className="font-bold text-white text-xs">
+                          {smtpStatus?.configured 
+                            ? `Active SMTP Server: ${smtpStatus.host}:${smtpStatus.port}`
+                            : 'SMTP Mail Server Not Configured'}
+                        </div>
+                        <div className="text-[11px] opacity-90">
+                          {smtpStatus?.configured
+                            ? `Automated background task emails are sent from "${smtpStatus.user}".`
+                            : 'Tasks currently use 1-Click Gmail and Mail App dispatching until SMTP is configured below.'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Preset quick buttons */}
+                  <div className="space-y-1">
+                    <span className="text-[11px] text-slate-400 font-semibold">Quick Presets:</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSmtpForm({
+                            host: 'smtp.gmail.com',
+                            port: 587,
+                            secure: false,
+                            user: currentUser.email || 'corbanb@gisboyshigh.net',
+                            pass: smtpForm.pass,
+                            from: `"Mr. Corban" <${currentUser.email || 'corbanb@gisboyshigh.net'}>`
+                          });
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs transition"
+                      >
+                        ⚡ Google Workspace / Gmail (587 TLS)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSmtpForm({
+                            host: 'smtp.gmail.com',
+                            port: 465,
+                            secure: true,
+                            user: currentUser.email || 'corbanb@gisboyshigh.net',
+                            pass: smtpForm.pass,
+                            from: `"Mr. Corban" <${currentUser.email || 'corbanb@gisboyshigh.net'}>`
+                          });
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs transition"
+                      >
+                        🔒 Google SSL (465 SSL)
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="font-semibold text-slate-300">SMTP Host Server</label>
+                      <input
+                        type="text"
+                        required
+                        value={smtpForm.host}
+                        onChange={e => setSmtpForm({ ...smtpForm, host: e.target.value })}
+                        placeholder="smtp.gmail.com"
+                        className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label className="font-semibold text-slate-300">Port & Security</label>
+                        <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={smtpForm.secure}
+                            onChange={e => setSmtpForm({ ...smtpForm, secure: e.target.checked })}
+                            className="rounded bg-slate-800 border-slate-700 text-purple-600 focus:ring-0"
+                          />
+                          <span>SSL (Port 465)</span>
+                        </label>
+                      </div>
+                      <input
+                        type="number"
+                        required
+                        value={smtpForm.port}
+                        onChange={e => setSmtpForm({ ...smtpForm, port: parseInt(e.target.value, 10) || 587 })}
+                        placeholder="587"
+                        className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="font-semibold text-slate-300">User / Sender Email Address</label>
+                      <input
+                        type="email"
+                        required
+                        value={smtpForm.user}
+                        onChange={e => setSmtpForm({ ...smtpForm, user: e.target.value })}
+                        placeholder="corbanb@gisboyshigh.net"
+                        className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label className="font-semibold text-slate-300">
+                          Password / Google App Password
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="text-[10px] text-purple-400 hover:text-purple-300 underline"
+                        >
+                          {showPassword ? 'Hide' : 'Show'}
+                        </button>
+                      </div>
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={smtpForm.pass}
+                        onChange={e => setSmtpForm({ ...smtpForm, pass: e.target.value })}
+                        placeholder={smtpStatus?.hasPassword ? '(Password configured — leave empty to keep)' : '16-character Google App Password'}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Important Google Workspace notice */}
+                  <div className="p-3 rounded-xl bg-purple-950/30 border border-purple-500/30 text-purple-200 text-[11px] space-y-1">
+                    <div className="font-bold flex items-center gap-1.5 text-white">
+                      <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                      <span>Note for Google Workspace / Gmail Accounts:</span>
+                    </div>
+                    <p className="text-slate-300 leading-relaxed">
+                      Google blocks regular account passwords for SMTP. You must use a <strong>16-character Google App Password</strong> generated at{' '}
+                      <a
+                        href="https://myaccount.google.com/apppasswords"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-purple-300 underline font-semibold hover:text-white"
+                      >
+                        myaccount.google.com/apppasswords
+                      </a>{' '}
+                      (requires 2-Step Verification enabled).
+                    </p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="font-semibold text-slate-300">From Header Display Name</label>
+                    <input
+                      type="text"
+                      value={smtpForm.from}
+                      onChange={e => setSmtpForm({ ...smtpForm, from: e.target.value })}
+                      placeholder={`"Mr. Corban" <${currentUser.email || 'corbanb@gisboyshigh.net'}>`}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  {/* Test Result Message */}
+                  {smtpTestResult && (
+                    <div className={`p-3.5 rounded-xl border flex items-start gap-2.5 ${
+                      smtpTestResult.type === 'success'
+                        ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200'
+                        : 'bg-rose-950/50 border-rose-500/40 text-rose-200'
+                    }`}>
+                      {smtpTestResult.type === 'success' ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                      )}
+                      <div className="space-y-1">
+                        <div className="font-bold">{smtpTestResult.type === 'success' ? 'Connection Successful' : 'Connection Failed'}</div>
+                        <div className="text-[11px] leading-relaxed">{smtpTestResult.text}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Buttons */}
+                  <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-3">
+                    <button
+                      type="button"
+                      disabled={smtpTesting}
+                      onClick={handleTestSmtp}
+                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs flex items-center gap-2 transition disabled:opacity-50"
+                    >
+                      {smtpTesting ? (
+                        <div className="w-3.5 h-3.5 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
+                      ) : (
+                        <Send className="w-3.5 h-3.5 text-purple-400" />
+                      )}
+                      <span>Test Connection ({currentUser.email || 'corbanb@gisboyshigh.net'})</span>
+                    </button>
+
+                    <button
+                      type="submit"
+                      className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md transition"
+                    >
+                      Save & Activate SMTP
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {smtpModalTab === 'logs' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-300">
+                      Recent Task Email Delivery Logs ({emailLogs.length})
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={fetchEmailLogs}
+                        disabled={loadingEmailLogs}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs flex items-center gap-1 border border-slate-700"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${loadingEmailLogs ? 'animate-spin' : ''}`} />
+                        <span>Refresh</span>
+                      </button>
+                      {emailLogs.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleClearEmailLogs}
+                          className="px-2.5 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 font-medium text-xs border border-rose-800/40"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {loadingEmailLogs ? (
+                    <div className="p-8 text-center text-slate-400">
+                      <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                      <span>Loading delivery logs...</span>
+                    </div>
+                  ) : emailLogs.length === 0 ? (
+                    <div className="p-8 rounded-2xl bg-slate-950/60 border border-slate-800/80 text-center space-y-2">
+                      <Mail className="w-8 h-8 text-slate-600 mx-auto" />
+                      <div className="font-semibold text-slate-300 text-sm">No delivery logs recorded yet</div>
+                      <p className="text-slate-400 text-xs max-w-sm mx-auto">
+                        When you assign a task or click &quot;Send Email Reminder&quot;, delivery records and server responses will appear here in real-time.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+                      {emailLogs.map(log => (
+                        <div
+                          key={log.id}
+                          className={`p-3 rounded-xl border space-y-1 ${
+                            log.status === 'sent'
+                              ? 'bg-emerald-950/20 border-emerald-500/30'
+                              : log.status === 'failed'
+                              ? 'bg-rose-950/30 border-rose-500/40'
+                              : 'bg-slate-950/70 border-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-white text-xs">{log.taskTitle}</span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              log.status === 'sent'
+                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                                : log.status === 'failed'
+                                ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                                : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                            }`}>
+                              {log.status === 'sent' ? '✓ Delivered via SMTP' : log.status === 'failed' ? '✕ Failed' : 'Ready for 1-Click Send'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between text-[11px] text-slate-400">
+                            <span>To: <strong className="text-slate-200">{log.recipientName}</strong> ({log.recipientEmail})</span>
+                            <span className="font-mono text-[10px]">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                          </div>
+
+                          {log.info && (
+                            <div className="text-[10px] text-slate-400 font-mono">{log.info}</div>
+                          )}
+
+                          {log.error && (
+                            <div className="text-[11px] text-rose-300 bg-rose-950/40 p-2 rounded-lg border border-rose-900/50 mt-1">
+                              <strong>Error:</strong> {log.error}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {smtpModalTab === 'guide' && (
+                <div className="space-y-4 text-xs leading-relaxed">
+                  <div className="p-4 rounded-2xl bg-purple-950/30 border border-purple-500/30 space-y-2">
+                    <h4 className="font-bold text-sm text-white flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-purple-400" />
+                      <span>Why Were Task Emails Not Going Through?</span>
+                    </h4>
+                    <p className="text-slate-300">
+                      Standard automated email dispatch requires an authenticated SMTP server. For Google accounts (including <strong>@gisboyshigh.net</strong> and personal Gmail), Google enforces 2-Step Verification and requires a dedicated <strong>Google App Password</strong>. Using your normal Google login password causes Google to reject the connection with code <strong>535 Authentication Failed</strong>.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h4 className="font-bold text-white text-sm">Two Easy Ways to Notify Students:</h4>
+
+                    {/* Option 1: 1-Click Gmail */}
+                    <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/80 space-y-2">
+                      <div className="flex items-center gap-2 font-bold text-white text-xs">
+                        <span className="w-5 h-5 rounded-full bg-purple-600 text-white flex items-center justify-center text-[11px]">1</span>
+                        <span>Zero-Configuration: 1-Click Gmail & Mail App (Fastest)</span>
+                      </div>
+                      <p className="text-slate-300 text-xs pl-7">
+                        When you create a task or click &quot;Send Email Reminder&quot;, the system automatically prepares a <strong>1-Click Open in Gmail</strong> button. Clicking it instantly launches your Gmail compose window with:
+                      </p>
+                      <ul className="list-disc pl-11 text-slate-400 space-y-1 text-xs">
+                        <li>All assigned students pre-populated into <strong>BCC</strong> for privacy.</li>
+                        <li>Formatted assignment title, subtopics, due date, and direct portal link.</li>
+                        <li>You simply review and click Send in Gmail! No server configuration needed.</li>
+                      </ul>
+                    </div>
+
+                    {/* Option 2: Automated SMTP */}
+                    <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/80 space-y-2">
+                      <div className="flex items-center gap-2 font-bold text-white text-xs">
+                        <span className="w-5 h-5 rounded-full bg-purple-600 text-white flex items-center justify-center text-[11px]">2</span>
+                        <span>Automated Background Delivery via Google App Password</span>
+                      </div>
+                      <p className="text-slate-300 text-xs pl-7">
+                        To enable seamless background auto-delivery straight from your email address:
+                      </p>
+                      <ol className="list-decimal pl-11 text-slate-300 space-y-1 text-xs">
+                        <li>Make sure 2-Step Verification is active on your Google / GIS Boys High account.</li>
+                        <li>
+                          Visit{' '}
+                          <a
+                            href="https://myaccount.google.com/apppasswords"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-purple-300 underline font-semibold hover:text-white"
+                          >
+                            myaccount.google.com/apppasswords
+                          </a>
+                        </li>
+                        <li>Create a new App Password named <strong>&quot;IGCSE Science Hub&quot;</strong>.</li>
+                        <li>Copy the 16-letter password and paste it into the <strong>Password</strong> field in the SMTP Setup tab.</li>
+                        <li>Click <strong>&quot;Test Connection&quot;</strong> to confirm, then <strong>&quot;Save & Activate SMTP&quot;</strong>.</li>
+                      </ol>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-800 bg-slate-900/90 flex items-center justify-between">
+              <span className="text-[11px] text-slate-400">
+                Cambridge 0653 Science Revision Hub • Instructor Notification System
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSmtpModal(false);
+                  setSmtpTestResult(null);
+                }}
+                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-slate-700 transition"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

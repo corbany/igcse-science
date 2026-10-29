@@ -24,10 +24,22 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // User profiles
+    // User profiles & subcollections (including completedModules anti-farming records)
     match /users/{userId} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
+
+      match /{subcollection=**} {
+        allow read, write: if true;
+      }
+    }
+    
+    // Gamified Battle Royale Tournament Events
+    match /battleEvent/{docId} {
+      allow read, write: if true;
+
+      match /{subcollection=**} {
+        allow read, write: if true;
+      }
     }
     
     // Instructor invites

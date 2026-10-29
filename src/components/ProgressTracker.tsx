@@ -21,7 +21,8 @@ import {
   ChevronDown,
   ArrowLeft,
   RefreshCw,
-  Trophy
+  Trophy,
+  User
 } from 'lucide-react';
 import { StudentProgress, UserProfile, TrafficLightStatus } from '../types';
 import { syllabusItems } from '../data/syllabusData';
@@ -40,6 +41,7 @@ interface ProgressTrackerProps {
   onUpdateConfidence: (topicCode: string, rating: number) => void;
   onNavigateToTopic: (topicCode: string) => void;
   onNavigateToLeaderboard?: () => void;
+  onNavigateToProfile?: () => void;
 }
 
 interface EnrichedStudentItem extends ClassStudentItem {
@@ -53,7 +55,8 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
   user,
   onUpdateConfidence,
   onNavigateToTopic,
-  onNavigateToLeaderboard
+  onNavigateToLeaderboard,
+  onNavigateToProfile
 }) => {
   const isInstructor = user.role === 'instructor';
 
@@ -531,7 +534,7 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
                       </div>
                       <div className="p-2 rounded-xl bg-amber-950/40 border border-amber-500/30 text-amber-300 text-xs font-mono font-bold">
                         <div>{orangeCount}</div>
-                        <div className="text-[10px] text-amber-400/80 font-sans font-semibold">Orange</div>
+                        <div className="text-[10px] text-amber-400/80 font-sans font-semibold">Amber/Orange</div>
                       </div>
                       <div className="p-2 rounded-xl bg-rose-950/40 border border-rose-500/30 text-rose-300 text-xs font-mono font-bold">
                         <div>{redCount}</div>
@@ -641,16 +644,29 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
               Earn <span className="text-emerald-400 font-bold">Green status</span> by scoring ≥80% on each subtopic's 10-Question Knowledge Check.
             </p>
 
-            {!isInstructor && onNavigateToLeaderboard && (
-              <div className="pt-2">
-                <button
-                  onClick={onNavigateToLeaderboard}
-                  className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold text-xs transition shadow-xs"
-                >
-                  <Trophy className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Compare Rank in Class Leaderboard</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
+            {!isInstructor && (
+              <div className="pt-2 flex flex-wrap items-center gap-2">
+                {onNavigateToProfile && (
+                  <button
+                    onClick={onNavigateToProfile}
+                    className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-bold text-xs transition shadow-xs"
+                  >
+                    <User className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>My Profile & Recent Activity</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+
+                {onNavigateToLeaderboard && (
+                  <button
+                    onClick={onNavigateToLeaderboard}
+                    className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold text-xs transition shadow-xs"
+                  >
+                    <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Compare Rank in Class Leaderboard</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -757,11 +773,11 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-                <span>Orange (50-79%)</span>
+                <span>Amber / Orange (50%, 60%, 70%)</span>
               </span>
               <span className="text-lg font-mono font-bold text-white">{stats.orange}</span>
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">Needs revision</p>
+            <p className="text-[11px] text-slate-400 mt-1">Solid foundation · Review for Green</p>
           </div>
 
           {/* RED CARD */}
@@ -776,11 +792,11 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
-                <span>Red (&lt;50%)</span>
+                <span>Red (40% or less)</span>
               </span>
               <span className="text-lg font-mono font-bold text-white">{stats.red}</span>
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">Priority focus</p>
+            <p className="text-[11px] text-slate-400 mt-1">Priority focus · Review lesson slides</p>
           </div>
 
           {/* UNRANKED CARD */}

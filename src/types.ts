@@ -344,3 +344,20 @@ export interface SharedInstructorRecord {
   addedBy: string;
 }
 
+export type ActivityType = 'task' | 'subtopic_quiz' | 'subject_quiz';
+
+export interface CompletedActivity {
+  id: string;
+  type: ActivityType;
+  title: string;
+  subtitle?: string;
+  code?: string;
+  subject?: ScienceSubject;
+  score?: number;
+  total?: number;
+  percentage?: number;
+  passed?: boolean;
+  trafficLight?: TrafficLightStatus;
+  completedAt: string; // ISO date string
+}
+
