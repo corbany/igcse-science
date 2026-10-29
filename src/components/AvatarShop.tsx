@@ -36,20 +36,51 @@ import { db } from '../services/firebaseAuth';
 import { doc, setDoc, updateDoc, increment, arrayUnion } from 'firebase/firestore';
 
 // ============================================================================
-// SKIN CARDS REGISTRY & POKÉMON CARD CATALOG
+// SKIN CARDS REGISTRY & POKÉMON CARD CATALOG (18 FANTASY DUNGEON SKINS)
 // ============================================================================
 
-import { ALL_SCIENCE_SKINS, SkinDefinition, SKIN_ALIASES } from '../data/spriteAtlasData';
+import { 
+  ALL_FANTASY_SKINS, 
+  FantasySkinDefinition, 
+  FANTASY_SKIN_ALIASES, 
+  getFantasySkin 
+} from '../data/fantasySkinsData';
+
+export type SkinCard = FantasySkinDefinition;
+export const ALL_SKIN_CARDS: SkinCard[] = ALL_FANTASY_SKINS;
+
+/**
+ * PixelCharacterPreview:
+ * Slices the front-facing (Row 0, Frame 0) 32x32 character sprite from a 128x128 
+ * Fantasy Dungeon sprite sheet and renders it razor-sharp with image-rendering: pixelated.
+ */
+export const PixelCharacterPreview: React.FC<{
+  sheetSrc: string;
+  size?: number;
+  className?: string;
+  isLocked?: boolean;
+}> = ({ sheetSrc, size = 80, className = '', isLocked = false }) => {
+  // A 32x32 frame is 1/4 (25%) of the 128x128 sprite sheet.
+  // Setting backgroundSize to (size * 4)px makes the 32x32 frame occupy exactly size x size px!
+  return (
+    <div
+      className={`relative select-none pointer-events-none ${className}`}
+      style={{
+        width: `${size}px`,
+        height: `${size}px`,
+        backgroundImage: `url(${sheetSrc})`,
+        backgroundPosition: '0 0',
+        backgroundRepeat: 'no-repeat',
+        backgroundSize: `${size * 4}px ${size * 4}px`,
+        imageRendering: 'pixelated',
+        filter: isLocked ? 'brightness(0) opacity(0.25) blur(0.5px)' : 'drop-shadow(0 6px 12px rgba(0,0,0,0.5))',
+      }}
+    />
+  );
+};
 
 // ============================================================================
-// SKIN CARDS REGISTRY & POKÉMON CARD CATALOG (20 SPRITE PACK SKINS)
-// ============================================================================
-
-export type SkinCard = SkinDefinition;
-export const ALL_SKIN_CARDS: SkinCard[] = ALL_SCIENCE_SKINS;
-
-// ============================================================================
-// BOOSTER PACK CONFIGURATIONS & DROP PROBABILITIES
+// BOOSTER PACK CONFIGURATIONS & DROP PROBABILITIES (0.5% MYTHIC DROP RATE)
 // ============================================================================
 
 export interface BoosterPackConfig {
@@ -74,68 +105,55 @@ export interface BoosterPackConfig {
 
 export const BOOSTER_PACKS: BoosterPackConfig[] = [
   {
-    id: 'pack_1_physics',
-    name: 'Pack 1: Physics & Advanced Energy',
-    subtitle: 'Quantum Physicist, Laser Optics, Polar Astronomer',
-    price: 120,
+    id: 'pack_1_catacombs',
+    name: 'Pack 1: Dungeon Catacombs',
+    subtitle: 'Cultist, Skeleton Warrior & Goblin',
+    price: 90,
     badge: 'Pack 1',
     packNumber: 1,
-    description: 'High-voltage energy lab specialists: Quantum Physicist, Laser Optics Specialist, Polar Astronomer, Circuit Specialist, and Robotics Mechanist.',
-    foilColor: 'from-amber-600 via-orange-700 to-slate-950',
-    packBorder: 'border-amber-400/70',
-    accentGlow: 'shadow-amber-500/30',
-    odds: { common: 40, rare: 35, epic: 16, legendary: 7, mythic: 2 }
+    description: 'Delve into the damp underground crypts to encounter Common dungeon denizens and Rare explorers.',
+    foilColor: 'from-stone-800 via-neutral-900 to-slate-950',
+    packBorder: 'border-stone-500/70',
+    accentGlow: 'shadow-stone-500/30',
+    odds: { common: 50, rare: 35, epic: 11, legendary: 3.5, mythic: 0.5 }
   },
   {
-    id: 'pack_2_biology',
-    name: 'Pack 2: Biology & Life Sciences',
-    subtitle: 'Bio-Hazard, Virology, Plant Pathologist, Botanist',
+    id: 'pack_2_citadel',
+    name: 'Pack 2: Arcane Citadel',
+    subtitle: 'Archer, Rogue, Necromancer & Discoverer',
     price: 120,
     badge: 'Pack 2',
     packNumber: 2,
-    description: 'Life sciences researchers: Bio-Hazard NBC suit, Virology Researcher, Plant Pathologist, Field Botanist, and Field Entomologist.',
-    foilColor: 'from-emerald-600 via-teal-700 to-slate-950',
-    packBorder: 'border-emerald-400/70',
-    accentGlow: 'shadow-emerald-500/30',
-    odds: { common: 40, rare: 35, epic: 16, legendary: 7, mythic: 2 }
+    description: 'Storm the arcane towers of the high citadel for Rare skirmishers, Epic spellcasters, and dark warlocks.',
+    foilColor: 'from-indigo-700 via-purple-900 to-slate-950',
+    packBorder: 'border-indigo-400/70',
+    accentGlow: 'shadow-indigo-500/30',
+    odds: { common: 40, rare: 42, epic: 14, legendary: 3.5, mythic: 0.5 }
   },
   {
-    id: 'pack_3_space',
-    name: 'Pack 3: Earth & Space Sciences',
-    subtitle: 'Crystallographer, Marine Diver, Paleontologist, Glaciology',
-    price: 120,
+    id: 'pack_3_legends',
+    name: 'Pack 3: Legends & Knights',
+    subtitle: 'Knight Hero, Dragon Slayer & Berserker',
+    price: 150,
     badge: 'Pack 3',
     packNumber: 3,
-    description: 'Earth and marine exploration team: Crystallographer, Marine Oceanographer, Fossil Paleontologist, Cryo Glaciologist, and Mining Geologist.',
-    foilColor: 'from-sky-600 via-indigo-700 to-slate-950',
-    packBorder: 'border-cyan-400/70',
-    accentGlow: 'shadow-cyan-500/30',
-    odds: { common: 40, rare: 35, epic: 16, legendary: 7, mythic: 2 }
-  },
-  {
-    id: 'pack_4_legends',
-    name: 'Pack 4: Applied Science & Chemistry',
-    subtitle: 'Radiation Specialist, Pharma Chemist, Bioinformatics, Lab Chemist',
-    price: 150,
-    badge: 'Pack 4',
-    packNumber: 4,
-    description: 'Applied laboratory team: Thermal Radiation Specialist, Pharmaceutical Chemist, Bioinformatics Scientist, Wildlife Ecologist, and Classic Chemist.',
-    foilColor: 'from-purple-600 via-fuchsia-700 to-slate-950',
-    packBorder: 'border-purple-400/70',
-    accentGlow: 'shadow-purple-500/30',
-    odds: { common: 30, rare: 40, epic: 20, legendary: 7, mythic: 3 }
+    description: 'Summon legendary armored heroes and dragon hunters forged in epic mythical combat.',
+    foilColor: 'from-amber-600 via-yellow-700 to-slate-950',
+    packBorder: 'border-amber-400/70',
+    accentGlow: 'shadow-amber-500/30',
+    odds: { common: 25, rare: 40, epic: 24, legendary: 10.5, mythic: 0.5 }
   },
   {
     id: 'super_gold_pack',
-    name: 'Super Gold Pack',
-    subtitle: 'All-Science High-Tier Booster',
-    price: 300,
-    badge: '3x Mythic Odds',
-    description: 'Premium golden foil booster containing all 20 science skins from the attached sprite pack with boosted odds for Mythic cards!',
+    name: 'Super Gold Dungeon Pack',
+    subtitle: 'All 18 Fantasy Dungeon Champions',
+    price: 250,
+    badge: 'High-Tier Booster',
+    description: 'Premium golden foil booster containing all 18 fantasy dungeon characters with boosted Epic & Legendary odds!',
     foilColor: 'from-amber-400 via-yellow-600 to-slate-950',
     packBorder: 'border-yellow-300',
     accentGlow: 'shadow-yellow-500/50',
-    odds: { common: 15, rare: 40, epic: 28, legendary: 12, mythic: 5 }
+    odds: { common: 20, rare: 40, epic: 28, legendary: 11.5, mythic: 0.5 }
   }
 ];
 
@@ -280,10 +298,10 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
   const currentGold = isInstructor ? 999999 : (gameProfile?.gold ?? 100);
   const unlockedSkins: string[] = isInstructor 
     ? ALL_SKIN_CARDS.map(c => c.id) 
-    : (gameProfile?.unlockedSkins ?? ['classic_chemist']);
-  const equippedSkin = gameProfile?.equippedSkin || gameProfile?.avatar || 'classic_chemist';
+    : (gameProfile?.unlockedSkins ?? ['cultist']);
+  const equippedSkin = gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist';
   const equippedWeaponId = gameProfile?.equippedWeapon || 'bunsen_burner';
-  const inventory = gameProfile?.inventory || ['classic_chemist', 'bunsen_burner'];
+  const inventory = gameProfile?.inventory || ['cultist', 'bunsen_burner'];
 
   // Helper: Weighted Probability RNG Drop Selection
   const selectRandomSkin = (pack: BoosterPackConfig): SkinCard => {
@@ -749,14 +767,10 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
             {ALL_SKIN_CARDS.map((card) => {
               const isUnlocked = isInstructor || 
                 unlockedSkins.includes(card.id) || 
-                (card.id === 'cyber_chemist' && unlockedSkins.includes('cyber_scientist')) ||
-                (card.id === 'mad_alchemist' && unlockedSkins.includes('alchemist_robes')) ||
-                (card.id === 'tesla_electrician' && unlockedSkins.includes('tesla_overlord')) ||
-                (card.id === 'cosmic_radiation_tech' && unlockedSkins.includes('astro_chemist')) ||
-                (card.id === 'particle_specialist' && unlockedSkins.includes('supernova_cosmologist')) ||
-                (card.id === 'neuro_technologist' && unlockedSkins.includes('chrono_quantum_pioneer'));
+                (FANTASY_SKIN_ALIASES[equippedSkin] === card.id) ||
+                Object.entries(FANTASY_SKIN_ALIASES).some(([oldId, newId]) => newId === card.id && unlockedSkins.includes(oldId));
 
-              const isEquippedActive = equippedSkin === card.id || SKIN_ALIASES[equippedSkin] === card.id;
+              const isEquippedActive = equippedSkin === card.id || FANTASY_SKIN_ALIASES[equippedSkin] === card.id;
 
               if (isUnlocked) {
                 // UNLOCKED SHINY POKÉMON TRADING CARD
@@ -773,7 +787,7 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
                       {/* Card Header: Subject, Rarity, & Number */}
                       <div className="flex items-center justify-between text-[10px] font-mono border-b border-white/10 pb-2">
                         <span className="px-2 py-0.5 rounded-full bg-white/10 text-white font-black uppercase">
-                          {card.subject}
+                          {card.subject || card.title || 'FANTASY'}
                         </span>
                         <span className={`px-2 py-0.5 rounded-md uppercase ${getRarityBadgeStyle(card.rarity)}`}>
                           {card.rarity}
@@ -783,25 +797,11 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
 
                       {/* Character Illustration Frame */}
                       <div className="relative my-3 rounded-2xl bg-slate-950/80 border border-white/20 p-3 flex items-center justify-center overflow-hidden shadow-inner h-32">
-                        {card.avatarImg ? (
-                          <img 
-                            src={card.avatarImg} 
-                            alt={card.name} 
-                            className="h-28 w-auto object-contain drop-shadow-[0_8px_16px_rgba(0,0,0,0.6)] group-hover:scale-110 transition-transform" 
-                            style={{ imageRendering: 'pixelated' }}
-                            onError={(e) => {
-                              (e.currentTarget as HTMLElement).style.display = 'none';
-                              const next = e.currentTarget.parentElement?.querySelector('.fallback-icon') as HTMLElement;
-                              if (next) next.style.display = 'flex';
-                            }}
-                          />
-                        ) : null}
-                        <div 
-                          className="fallback-icon w-20 h-20 rounded-full bg-gradient-to-tr from-white/10 to-transparent flex items-center justify-center text-5xl shadow-md group-hover:scale-110 transition-transform"
-                          style={{ display: card.avatarImg ? 'none' : 'flex' }}
-                        >
-                          {card.icon}
-                        </div>
+                        <PixelCharacterPreview
+                          sheetSrc={card.sheetImg || card.imageSrc}
+                          size={84}
+                          className="group-hover:scale-110 transition-transform"
+                        />
                       </div>
 
                       {/* Character Identity */}
@@ -851,7 +851,7 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
                     <div>
                       {/* Top clue */}
                       <div className="flex items-center justify-between text-[10px] font-mono border-b border-slate-800/80 pb-2">
-                        <span className="text-slate-500 font-bold uppercase">{card.subject}</span>
+                        <span className="text-slate-500 font-bold uppercase">{card.subject || 'DUNGEON'}</span>
                         <span className={`px-2 py-0.5 rounded-md uppercase text-[9px] ${getRarityBadgeStyle(card.rarity)}`}>
                           {card.rarity}
                         </span>
@@ -860,14 +860,12 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
 
                       {/* Mystery Silhouetted Frame */}
                       <div className="my-3 rounded-2xl bg-slate-900/60 border border-slate-800 p-3 flex flex-col items-center justify-center h-32 relative overflow-hidden">
-                        {card.avatarImg ? (
-                          <img 
-                            src={card.avatarImg} 
-                            alt="Locked Skin" 
-                            className="h-24 w-auto object-contain brightness-0 opacity-20 blur-[0.5px]" 
-                          />
-                        ) : null}
-                        <div className="absolute inset-0 flex items-center justify-center">
+                        <PixelCharacterPreview
+                          sheetSrc={card.sheetImg || card.imageSrc}
+                          size={72}
+                          isLocked={true}
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                           <Lock className="w-8 h-8 text-slate-500 drop-shadow" />
                         </div>
                       </div>
@@ -876,12 +874,12 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
                       <div className="space-y-1">
                         <h4 className="text-sm font-black text-slate-400">???</h4>
                         <span className="text-[10px] text-slate-500 font-bold block uppercase tracking-wider">
-                          Locked Science Skin
+                          Locked Dungeon Champion
                         </span>
                       </div>
 
                       <p className="text-[10px] text-slate-500 mt-3 p-2 rounded-xl bg-slate-900/50 border border-slate-800">
-                        Obtainable from Revision Royale Booster Packs.
+                        Obtainable from Dungeon Booster Packs.
                       </p>
                     </div>
 
@@ -1223,7 +1221,7 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
                       {/* Card Header */}
                       <div className="flex items-center justify-between text-[11px] font-mono border-b border-white/10 pb-2">
                         <span className="px-2 py-0.5 rounded-full bg-white/10 text-white font-black uppercase">
-                          {pulledCard.subject}
+                          {pulledCard.subject || pulledCard.title || 'FANTASY'}
                         </span>
                         <span className={`px-2 py-0.5 rounded-md uppercase ${getRarityBadgeStyle(pulledCard.rarity)}`}>
                           {pulledCard.rarity}
@@ -1233,25 +1231,11 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
 
                       {/* Character Artwork Frame */}
                       <div className="relative my-4 rounded-2xl bg-slate-950/80 border border-white/20 p-4 flex items-center justify-center overflow-hidden shadow-inner h-40">
-                        {pulledCard.avatarImg ? (
-                          <img 
-                            src={pulledCard.avatarImg} 
-                            alt={pulledCard.name} 
-                            className="h-36 w-auto object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.8)] animate-in zoom-in-75 duration-300" 
-                            style={{ imageRendering: 'pixelated' }}
-                            onError={(e) => {
-                              (e.currentTarget as HTMLElement).style.display = 'none';
-                              const next = e.currentTarget.parentElement?.querySelector('.fallback-icon') as HTMLElement;
-                              if (next) next.style.display = 'flex';
-                            }}
-                          />
-                        ) : null}
-                        <div 
-                          className="fallback-icon w-24 h-24 rounded-full bg-gradient-to-tr from-white/15 to-transparent flex items-center justify-center text-6xl shadow-md"
-                          style={{ display: pulledCard.avatarImg ? 'none' : 'flex' }}
-                        >
-                          {pulledCard.icon}
-                        </div>
+                        <PixelCharacterPreview 
+                          sheetSrc={pulledCard.sheetImg || pulledCard.imageSrc} 
+                          size={112} 
+                          className="animate-in zoom-in-75 duration-300 drop-shadow-[0_12px_24px_rgba(0,0,0,0.8)]" 
+                        />
                       </div>
 
                       {/* Character Title */}

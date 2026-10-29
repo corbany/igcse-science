@@ -840,15 +840,11 @@ export async function organizeDriveLessonsIntoSubfolders(
   }
 
   // Step 4: "replace all lessons and do it again"
-  // Completely flush existing cached lessons in localStorage and re-fetch everything fresh
-  localStorage.removeItem(DRIVE_STORAGE_KEY);
-  localStorage.removeItem(DRIVE_STORAGE_PDFS_KEY);
-  localStorage.removeItem(DRIVE_LAST_SYNC_KEY);
-
+  // Fetch fresh lessons from Drive FIRST before updating cached storage
   const freshResult = await fetchAllDriveFolderFiles(token, rootFolderId);
   const totalPresentations = freshResult.presentations.length;
 
-  // Save new fresh presentations to localStorage
+  // Once fetch is successful, safely update the cache in localStorage
   localStorage.setItem(DRIVE_STORAGE_KEY, JSON.stringify(freshResult.presentations));
   localStorage.setItem(DRIVE_STORAGE_PDFS_KEY, JSON.stringify(freshResult.pdfs));
   localStorage.setItem(DRIVE_LAST_SYNC_KEY, String(Date.now()));
@@ -868,12 +864,9 @@ export async function organizeDriveLessonsIntoSubfolders(
 
 /**
  * Replaces all cached lessons and re-fetches from Drive fresh.
+ * Fetches remote Drive files first before updating the cache, ensuring existing slides never disappear on error.
  */
 export async function replaceAllSyncedLessons(accessToken: string, folderId: string = TARGET_DRIVE_FOLDER_ID): Promise<DriveSyncedSlideItem[]> {
-  localStorage.removeItem(DRIVE_STORAGE_KEY);
-  localStorage.removeItem(DRIVE_STORAGE_PDFS_KEY);
-  localStorage.removeItem(DRIVE_LAST_SYNC_KEY);
-
   const res = await fetchAllDriveFolderFiles(accessToken, folderId);
   localStorage.setItem(DRIVE_STORAGE_KEY, JSON.stringify(res.presentations));
   localStorage.setItem(DRIVE_STORAGE_PDFS_KEY, JSON.stringify(res.pdfs));

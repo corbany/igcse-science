@@ -25,6 +25,7 @@ export const db = (() => {
 
 export const WORKSPACE_DRIVE_SCOPES = [
   'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/drive.readonly'
 ];
 
@@ -52,6 +53,7 @@ let isSigningIn = false;
 // Cache the access token in memory (never localStorage per workspace guidelines)
 let cachedAccessToken: string | null = null;
 let cachedDriveToken: string | null = null;
+const DRIVE_TOKEN_SESSION_KEY = 'igcse_drive_scoped_token';
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
@@ -99,11 +101,33 @@ export const getAccessToken = async (): Promise<string | null> => {
 };
 
 export const getCachedDriveToken = async (): Promise<string | null> => {
-  return cachedDriveToken || cachedAccessToken;
+  if (cachedDriveToken) return cachedDriveToken;
+  try {
+    const sessionToken = sessionStorage.getItem(DRIVE_TOKEN_SESSION_KEY);
+    if (sessionToken) {
+      cachedDriveToken = sessionToken;
+      return sessionToken;
+    }
+  } catch {
+    // sessionStorage not available
+  }
+  return null;
 };
 
 export const clearCachedDriveToken = () => {
   cachedDriveToken = null;
+  try {
+    sessionStorage.removeItem(DRIVE_TOKEN_SESSION_KEY);
+  } catch {}
+};
+
+export const hasDrivePermission = (): boolean => {
+  if (cachedDriveToken) return true;
+  try {
+    return !!sessionStorage.getItem(DRIVE_TOKEN_SESSION_KEY);
+  } catch {
+    return false;
+  }
 };
 
 export const signInWithGoogle = async (): Promise<string | null> => {
@@ -127,6 +151,11 @@ export const signInWithDriveScope = async (): Promise<string | null> => {
     const result = await signInWithPopup(auth, driveProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     cachedDriveToken = credential?.accessToken || null;
+    if (cachedDriveToken) {
+      try {
+        sessionStorage.setItem(DRIVE_TOKEN_SESSION_KEY, cachedDriveToken);
+      } catch {}
+    }
     return cachedDriveToken;
   } catch (error: any) {
     if (error?.code === 'auth/popup-closed-by-user' || error?.code === 'auth/cancelled-popup-request') {
@@ -140,4 +169,7 @@ export const logout = async () => {
   await signOut(auth);
   cachedAccessToken = null;
   cachedDriveToken = null;
+  try {
+    sessionStorage.removeItem(DRIVE_TOKEN_SESSION_KEY);
+  } catch {}
 };

@@ -50,7 +50,7 @@ import {
   ShopItem,
   equipItem
 } from '../services/firebaseGameService';
-import { ALL_SCIENCE_SKINS, SKIN_ALIASES, SCIENCE_SKIN_SVGS, CHARACTER_THEMES, getSkinDefinition } from '../data/spriteAtlasData';
+import { ALL_FANTASY_SKINS, FANTASY_SKIN_ALIASES, getFantasySkin, FantasySkinDefinition } from '../data/fantasySkinsData';
 
 // ============================================================================
 // CONSTANTS & MAP METRICS
@@ -362,45 +362,25 @@ export const SPRITE_MANIFEST: Record<string, string> = {
     </svg>
   `),
 
-  // --- 20 REAL SCIENCE CHARACTER SPRITES (FROM ATTACHED SHEET) ---
-  science_characters_sheet: '/assets/science_characters_sheet.png',
-  avatar_quantum_physicist: SCIENCE_SKIN_SVGS.quantum_physicist,
-  avatar_laser_optics_tech: SCIENCE_SKIN_SVGS.laser_optics_tech,
-  avatar_polar_astronomer: SCIENCE_SKIN_SVGS.polar_astronomer,
-  avatar_circuit_engineer: SCIENCE_SKIN_SVGS.circuit_engineer,
-  avatar_robotics_mechanist: SCIENCE_SKIN_SVGS.robotics_mechanist,
-  avatar_biohazard_specialist: SCIENCE_SKIN_SVGS.biohazard_specialist,
-  avatar_virology_researcher: SCIENCE_SKIN_SVGS.virology_researcher,
-  avatar_plant_pathologist: SCIENCE_SKIN_SVGS.plant_pathologist,
-  avatar_field_botanist: SCIENCE_SKIN_SVGS.field_botanist,
-  avatar_field_entomologist: SCIENCE_SKIN_SVGS.field_entomologist,
-  avatar_crystallographer: SCIENCE_SKIN_SVGS.crystallographer,
-  avatar_marine_oceanographer: SCIENCE_SKIN_SVGS.marine_oceanographer,
-  avatar_fossil_paleontologist: SCIENCE_SKIN_SVGS.fossil_paleontologist,
-  avatar_cryo_glaciologist: SCIENCE_SKIN_SVGS.cryo_glaciologist,
-  avatar_mining_geologist: SCIENCE_SKIN_SVGS.mining_geologist,
-  avatar_radiation_hazard_suit: SCIENCE_SKIN_SVGS.radiation_hazard_suit,
-  avatar_pharmaceutical_tech: SCIENCE_SKIN_SVGS.pharmaceutical_tech,
-  avatar_bioinformatics_dev: SCIENCE_SKIN_SVGS.bioinformatics_dev,
-  avatar_wildlife_ecologist: SCIENCE_SKIN_SVGS.wildlife_ecologist,
-  avatar_classic_chemist: SCIENCE_SKIN_SVGS.classic_chemist,
-
-  // Backwards compatibility aliases
-  avatar_cyber_chemist: SCIENCE_SKIN_SVGS.classic_chemist,
-  avatar_cyber_scientist: SCIENCE_SKIN_SVGS.classic_chemist,
-  avatar_tesla_electrician: SCIENCE_SKIN_SVGS.circuit_engineer,
-  avatar_particle_specialist: SCIENCE_SKIN_SVGS.quantum_physicist,
-  avatar_botanist: SCIENCE_SKIN_SVGS.field_botanist,
-  avatar_geneticist: SCIENCE_SKIN_SVGS.virology_researcher,
-  avatar_neuro_technologist: SCIENCE_SKIN_SVGS.bioinformatics_dev,
-  avatar_astrophysicist: SCIENCE_SKIN_SVGS.polar_astronomer,
-  avatar_exoplanet_geologist: SCIENCE_SKIN_SVGS.mining_geologist,
-  avatar_cosmic_radiation_tech: SCIENCE_SKIN_SVGS.cryo_glaciologist,
-  avatar_gigachad_scholar: SCIENCE_SKIN_SVGS.radiation_hazard_suit,
-  avatar_mad_alchemist: SCIENCE_SKIN_SVGS.classic_chemist,
-  avatar_cyborg_assistant: SCIENCE_SKIN_SVGS.robotics_mechanist,
-  avatar_steampunk_inventor: SCIENCE_SKIN_SVGS.robotics_mechanist,
-  avatar_antimatter_researcher: SCIENCE_SKIN_SVGS.radiation_hazard_suit,
+  // --- 18 NIKASTUDIO FANTASY DUNGEON CHARACTER SPRITE SHEETS ---
+  char_cultist: '/assets/characters/cultist.png',
+  char_skeleton_warrior: '/assets/characters/skeleton_warrior.png',
+  char_goblin: '/assets/characters/goblin.png',
+  char_archer_hero: '/assets/characters/archer_hero.png',
+  char_rogue: '/assets/characters/rogue.png',
+  char_necromancer: '/assets/characters/necromancer.png',
+  char_discoverer: '/assets/characters/discoverer.png',
+  char_white_mage: '/assets/characters/white_mage.png',
+  char_paladin: '/assets/characters/paladin.png',
+  char_dark_knight: '/assets/characters/dark_knight.png',
+  char_warlock: '/assets/characters/warlock.png',
+  char_knight_hero: '/assets/characters/knight_hero.png',
+  char_dragon_slayer: '/assets/characters/dragon_slayer.png',
+  char_shadow_assassin: '/assets/characters/shadow_assassin.png',
+  char_berserker: '/assets/characters/berserker.png',
+  char_slime_king: '/assets/characters/slime_king.png',
+  char_overlord: '/assets/characters/overlord.png',
+  char_archangel: '/assets/characters/archangel.png',
 
   // --- 16x16 ROGUELIKE LANDSCAPE SPRITESHEET ---
   landscape_sheet: '/assets/roguelikeSheet_transparent.png'
@@ -2014,12 +1994,12 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   useEffect(() => {
     if (!user?.id) return;
     const isTeacher = user.role === 'instructor' || gameProfile?.role === 'instructor';
-    const initialAvatar = activeSkinId || gameProfile?.equippedSkin || gameProfile?.avatar || 'quantum_physicist';
+    const initialAvatar = activeSkinId || gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist';
     const initialWeapon = gameProfile?.equippedWeapon || 'bunsen_burner';
 
     ensureArenaPlayer({
       uid: user.id,
-      name: user.name || (isTeacher ? 'Instructor (Admin)' : 'Scientist'),
+      name: user.name || (isTeacher ? 'Instructor (Admin)' : 'Hero'),
       avatar: initialAvatar,
       equippedWeapon: initialWeapon,
       x: localX,
@@ -2085,7 +2065,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const equippedWeapon: ShopItem = SHOP_ITEMS.find(i => i.id === effectiveWeaponId) || SHOP_ITEMS.find(i => i.category === 'weapon') || SHOP_ITEMS[0];
   const equippedPowerId = gameProfile?.equippedPower || 'element_shield';
   const equippedPower: ShopItem = SHOP_ITEMS.find(i => i.id === equippedPowerId) || SHOP_ITEMS[11];
-  const effectiveSkinId = activeSkinId || gameProfile?.equippedSkin || gameProfile?.avatar || 'quantum_physicist';
+  const effectiveSkinId = activeSkinId || gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist';
   const equippedSkin: ShopItem = SHOP_ITEMS.find(i => i.id === effectiveSkinId) || SHOP_ITEMS[0];
 
   // Switch weapon immediately in arena
@@ -3533,66 +3513,68 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           cContext.stroke();
         }
 
-        // Check if real character sprite sheet is available
-        const resolvedSkinId = SKIN_ALIASES[skinId] || skinId;
-        const skinDef = getSkinDefinition(resolvedSkinId);
-        const sheetImg = imageAssets.current['science_characters_sheet'];
+        // Check if fantasy character sprite sheet is available
+        const resolvedSkinId = FANTASY_SKIN_ALIASES[skinId] || skinId;
+        const skinDef = getFantasySkin(resolvedSkinId);
+        const sheetImg = imageAssets.current[`char_${resolvedSkinId}`] || 
+                         imageAssets.current[`char_${skinId}`] || 
+                         imageAssets.current['char_cultist'];
         const hasSheet = sheetImg && sheetImg.complete && sheetImg.naturalWidth > 0;
-        const spriteImg = imageAssets.current[`avatar_${resolvedSkinId}`] || imageAssets.current[`avatar_${skinId}`];
 
-        if (hasSheet && skinDef && skinDef.frames) {
-          // --- FULL ANIMATED TOP-DOWN SPRITE FROM ATTACHED SCIENCE SHEET ---
+        if (hasSheet) {
+          // --- FULL 4-DIRECTION TOP-DOWN WALKING & IDLE PIXEL SPRITE ANIMATION ---
           cContext.save();
 
           // Movement detection from stride
           const isMoving = Math.abs(Math.sin(stride)) > 0.04;
-          const walkBob = isMoving ? Math.abs(Math.sin(stride)) * -3 : 0;
+          const walkBob = isMoving ? Math.abs(Math.sin(stride)) * -2 : 0;
           cContext.translate(0, walkBob);
 
-          // Facing direction from aim angle:
-          // angle: 0 = East, PI/2 = South, -PI/2 = North, PI / -PI = West
+          // Facing direction from aim angle (0: East, PI/2: South, -PI/2: North, PI / -PI: West)
           const sinA = Math.sin(angle);
           const cosA = Math.cos(angle);
 
-          let frameList = skinDef.frames.idle;
-          let flipX = false;
-
-          if (isMoving) {
-            if (sinA > 0.5) {
-              // Moving Down (facing south towards viewer)
-              frameList = skinDef.frames.walkDown;
-            } else if (sinA < -0.5) {
-              // Moving Up (facing north away from viewer)
-              frameList = skinDef.frames.walkUp;
-            } else {
-              // Moving Sideways
-              frameList = skinDef.frames.walkSide;
-              if (cosA < 0) flipX = true; // Flip when walking left
-            }
+          // Row determination in 128x128 sheet (each row is 32px):
+          // Row 0 = Facing Down / South (towards viewer)
+          // Row 1 = Facing Left / West
+          // Row 2 = Facing Right / East
+          // Row 3 = Facing Up / North (away from viewer)
+          let dirRow = 0;
+          if (sinA > 0.45) {
+            dirRow = 0; // Down
+          } else if (sinA < -0.45) {
+            dirRow = 3; // Up
+          } else if (cosA < 0) {
+            dirRow = 1; // Left
           } else {
-            // Idle breathing
-            frameList = skinDef.frames.idle;
-            if (cosA < -0.05) flipX = true;
+            dirRow = 2; // Right
           }
 
-          if (flipX) {
-            cContext.scale(-1, 1);
+          // Frame column in the row (0: Idle, 1: Walk Step A, 2: Walk Step B, 3: Action)
+          let frameCol = 0;
+          if (isMoving) {
+            const frameSpeed = 135;
+            const cycle = Math.floor(cNow / frameSpeed) % 4;
+            frameCol = cycle === 0 ? 0 : cycle === 1 ? 1 : cycle === 2 ? 0 : 2;
+          } else {
+            frameCol = 0;
           }
 
-          const frameSpeed = isMoving ? 130 : 380;
-          const frameIdx = Math.floor(cNow / frameSpeed) % frameList.length;
-          const f = frameList[frameIdx] || frameList[0];
+          const sx = frameCol * 32;
+          const sy = dirRow * 32;
+          const sw = 32;
+          const sh = 32;
 
-          // Draw the top-down RPG character sprite cleanly from the sheet
-          const sprW = 44;
-          const sprH = Math.round((f.h / f.w) * sprW);
+          // Scale 32x32 source frames cleanly to 48x48 pixel size on the 5000px map canvas
+          const sprW = 48;
+          const sprH = 48;
           cContext.imageSmoothingEnabled = false;
           cContext.drawImage(
             sheetImg,
-            f.x,
-            f.y,
-            f.w,
-            f.h,
+            sx,
+            sy,
+            sw,
+            sh,
             -sprW / 2,
             -sprH + 14,
             sprW,
@@ -3629,64 +3611,17 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           cContext.arc(24, 0, 2.5, 0, 2 * Math.PI);
           cContext.fill();
           cContext.restore();
-        } else if (spriteImg && spriteImg.complete && spriteImg.naturalWidth > 0) {
-          // --- SINGLE SPRITE FALLBACK ---
-          cContext.save();
-          const walkBob = Math.abs(Math.sin(stride)) * -4;
-          cContext.translate(0, walkBob);
-
-          const facingLeft = Math.cos(angle) < -0.05;
-          if (facingLeft) {
-            cContext.scale(-1, 1);
-          }
-
-          const sprW = 44;
-          const sprH = 54;
-          cContext.imageSmoothingEnabled = false;
-          cContext.drawImage(
-            spriteImg,
-            -sprW / 2,
-            -sprH + 12,
-            sprW,
-            sprH
-          );
-          cContext.restore();
-
-          // Held Weapon anchored & rotated towards crosshair
-          cContext.save();
-          cContext.rotate(angle);
-          const weaponItem = SHOP_ITEMS.find(i => i.id === weaponId) || equippedWeapon;
-          const beamCol = weaponItem?.stats?.beamColor || '#f97316';
-
-          cContext.fillStyle = '#fed7aa';
-          cContext.beginPath();
-          cContext.roundRect(6, -8, 10, 4, 2);
-          cContext.roundRect(6, 4, 10, 4, 2);
-          cContext.fill();
-
-          cContext.fillStyle = '#0f172a';
-          cContext.fillRect(10, -3, 14, 6);
-          cContext.fillStyle = beamCol;
-          cContext.fillRect(16, -2, 8, 4);
-          cContext.strokeStyle = '#020617';
-          cContext.lineWidth = 1;
-          cContext.strokeRect(10, -3, 14, 6);
-
-          cContext.fillStyle = beamCol;
-          cContext.beginPath();
-          cContext.arc(24, 0, 2.5, 0, 2 * Math.PI);
-          cContext.fill();
-          cContext.restore();
         } else {
           // Fallback to geometric composite paper-doll if sprite still preloading
           cContext.rotate(angle);
-          const theme = CHARACTER_THEMES[resolvedSkinId] || CHARACTER_THEMES[skinId] || CHARACTER_THEMES['cyber_chemist'] || {
-            torsoColor: '#f1f5f9',
-            collarColor: '#22c55e',
+          const fantasySkin = getFantasySkin(resolvedSkinId);
+          const theme = {
+            torsoColor: fantasySkin?.theme?.auraColor || '#6366f1',
+            collarColor: '#38bdf8',
             pantsColor: '#1e293b',
-            hairColor: '#fed7aa',
+            hairColor: '#fde047',
             helmetType: 'none',
-            auraColor: '#10b981'
+            auraColor: fantasySkin?.theme?.auraColor || '#a855f7'
           };
 
           // Distinctive skin aura glow
@@ -4548,16 +4483,16 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 <span className="text-lg">👔</span>
                 <div>
                   <span className="text-xs font-black uppercase tracking-wider text-amber-300 block">
-                    Instructor Instant Character Morph: All 20 Science Characters Unlocked
+                    Instructor Instant Character Morph: All 18 Fantasy Dungeon Characters Unlocked
                   </span>
                   <span className="text-[10px] text-slate-400">
-                    Click any science skin to instantly transform your avatar in the battle arena
+                    Click any fantasy skin to instantly transform your avatar in the battle arena
                   </span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-400/40 font-mono font-bold">
-                  20 / 20 Skins
+                  18 / 18 Skins
                 </span>
                 <button
                   onClick={() => setShowInstructorSkinDrawer(false)}
@@ -4568,9 +4503,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-10 gap-2 max-h-56 overflow-y-auto pr-1">
-              {ALL_SCIENCE_SKINS.map((skin) => {
-                const isSelected = effectiveSkinId === skin.id || effectiveSkinId === SKIN_ALIASES[skin.id];
+            <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-9 gap-2 max-h-56 overflow-y-auto pr-1">
+              {ALL_FANTASY_SKINS.map((skin) => {
+                const isSelected = effectiveSkinId === skin.id || FANTASY_SKIN_ALIASES[effectiveSkinId] === skin.id;
                 return (
                   <button
                     key={skin.id}
@@ -4583,14 +4518,21 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                     title={`${skin.name} (${skin.title})\n${skin.lore}`}
                   >
                     <div className="w-9 h-9 rounded-lg bg-slate-950 flex items-center justify-center overflow-hidden border border-slate-700">
-                      <img 
-                        src={skin.avatarImg || SCIENCE_SKIN_SVGS[skin.id]} 
-                        alt={skin.name} 
-                        className="w-full h-full object-contain pixelated"
+                      <div
+                        style={{
+                          width: '32px',
+                          height: '32px',
+                          backgroundImage: `url(${skin.imageSrc})`,
+                          backgroundPosition: '0 0',
+                          backgroundSize: '128px 128px',
+                          backgroundRepeat: 'no-repeat',
+                          transform: 'scale(0.85)',
+                          imageRendering: 'pixelated'
+                        }}
                       />
                     </div>
                     <span className="text-[9px] font-black text-slate-200 truncate w-full group-hover:text-amber-300 leading-tight">
-                      {skin.name.split(' ')[0]}
+                      {skin.name}
                     </span>
                     <span className="text-[8px] text-amber-400 font-mono">
                       {skin.rarity.slice(0, 3).toUpperCase()}

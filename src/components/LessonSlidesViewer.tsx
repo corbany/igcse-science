@@ -39,7 +39,8 @@ import {
   FlaskConical,
   Clock,
   Lock,
-  RefreshCw
+  RefreshCw,
+  Key
 } from 'lucide-react';
 import { ScienceSubject, TrafficLightStatus, SubtopicQuizResult, StudentProgress } from '../types';
 import { 
@@ -64,7 +65,7 @@ import {
   getManualSlideOverrides, 
   saveManualSlideOverride 
 } from '../services/googleDriveService';
-import { signInWithGoogle, getCachedDriveToken, clearCachedDriveToken, auth } from '../services/firebaseAuth';
+import { signInWithGoogle, signInWithDriveScope, getCachedDriveToken, clearCachedDriveToken, auth } from '../services/firebaseAuth';
 import { claimModuleRevisionReward, checkModuleClaimed } from '../services/firebaseGameService';
 import { UserProfile } from '../types';
 
@@ -460,10 +461,10 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     try {
       let token = await getCachedDriveToken();
       if (!token) {
-        token = await signInWithGoogle();
+        token = await signInWithDriveScope();
       }
       if (!token) {
-        setDriveSyncMessage('Google sign-in was cancelled or required. Please sign in to authenticate with Google Drive.');
+        setDriveSyncMessage('Google Drive permissions required to organize folders. Click "Grant Drive Access" below to authenticate.');
         setIsOrganizingDrive(false);
         return;
       }
@@ -475,7 +476,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
       if (err?.isInsufficientScope || err?.message?.includes('insufficient') || err?.message?.includes('403') || err?.message?.includes('401')) {
         console.warn('Google Drive permission notice:', err?.message);
         clearCachedDriveToken();
-        setDriveSyncMessage(`Drive Permissions Notice: ${err?.message || 'Google Drive permissions required. Please authenticate to grant access.'}`);
+        setDriveSyncMessage(`Drive Permissions Notice: ${err?.message || 'Google Drive permissions required. Please re-authenticate to grant access.'}`);
       } else {
         console.error('Failed to organize drive lessons:', err);
         setDriveSyncMessage(`Error organizing lessons: ${err?.message || 'Check folder access or Google sign-in.'}`);
@@ -492,10 +493,10 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     try {
       let token = await getCachedDriveToken();
       if (!token) {
-        token = await signInWithGoogle();
+        token = await signInWithDriveScope();
       }
       if (!token) {
-        setDriveSyncMessage('Google sign-in was cancelled or required. Please sign in to sync your Google Drive folder.');
+        setDriveSyncMessage('Google Drive permissions required to replace lessons. Click "Grant Drive Access" below to authenticate.');
         setIsSyncingDrive(false);
         return;
       }
@@ -507,7 +508,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
       if (err?.isInsufficientScope || err?.message?.includes('insufficient') || err?.message?.includes('403') || err?.message?.includes('401')) {
         console.warn('Google Drive permission notice:', err?.message);
         clearCachedDriveToken();
-        setDriveSyncMessage(`Drive Permissions Notice: ${err?.message || 'Google Drive permissions required. Please authenticate to grant access.'}`);
+        setDriveSyncMessage(`Drive Permissions Notice: ${err?.message || 'Google Drive permissions required. Please re-authenticate to grant access.'}`);
       } else {
         console.error('Failed to replace lessons:', err);
         setDriveSyncMessage(`Error replacing lessons: ${err?.message || 'Check folder access or Google sign-in.'}`);
@@ -524,10 +525,10 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     try {
       let token = await getCachedDriveToken();
       if (!token) {
-        token = await signInWithGoogle();
+        token = await signInWithDriveScope();
       }
       if (!token) {
-        setDriveSyncMessage('Google sign-in was cancelled or required. Please sign in to sync your Google Drive folder.');
+        setDriveSyncMessage('Google Drive permissions required to sync presentations. Click "Grant Drive Access" below to authenticate.');
         setIsSyncingDrive(false);
         return;
       }
@@ -542,7 +543,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
       }
     } catch (err: any) {
       console.error('Drive sync failed:', err);
-      if (err?.message?.includes('401') || err?.message?.includes('authentication')) {
+      if (err?.message?.includes('401') || err?.isInsufficientScope || err?.message?.includes('insufficient')) {
         clearCachedDriveToken();
       }
       const msg = err?.message || 'Check folder access or Google sign-in.';
@@ -857,11 +858,47 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
         {/* Sync message if present (Instructor only) */}
         {isInstructor && driveSyncMessage && (
-          <div className="mt-3 text-xs px-3.5 py-2 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-300 flex items-center justify-between">
-            <span>{driveSyncMessage}</span>
-            <button onClick={() => setDriveSyncMessage(null)} className="text-slate-400 hover:text-white">
-              <X className="w-3.5 h-3.5" />
-            </button>
+          <div className="mt-3 text-xs px-3.5 py-2.5 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-300 flex flex-wrap items-center justify-between gap-2">
+            <span className="flex-1 min-w-[240px] leading-relaxed">{driveSyncMessage}</span>
+            <div className="flex items-center gap-2">
+              {(driveSyncMessage.includes('insufficient') || 
+                driveSyncMessage.includes('Permissions Notice') || 
+                driveSyncMessage.includes('re-authenticate') || 
+                driveSyncMessage.includes('permissions required') ||
+                driveSyncMessage.includes('Grant Drive Access')) && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setDriveSyncMessage('Opening Google authorization popup with Drive permissions...');
+                    try {
+                      clearCachedDriveToken();
+                      const tok = await signInWithDriveScope();
+                      if (tok) {
+                        setDriveSyncMessage('Drive permission granted! Syncing presentations now...');
+                        const res = await replaceAllSyncedLessons(tok, TARGET_DRIVE_FOLDER_ID);
+                        setSyncedSlides(res);
+                        setDriveSyncMessage(`Drive connected! Successfully synced ${res.length} Google Slides presentations.`);
+                      } else {
+                        setDriveSyncMessage('Drive authorization was cancelled or closed.');
+                      }
+                    } catch (e: any) {
+                      setDriveSyncMessage(`Authorization error: ${e?.message || 'Failed to authorize Drive'}`);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Key className="w-3.5 h-3.5" />
+                  <span>Grant Drive Access</span>
+                </button>
+              )}
+              <button 
+                onClick={() => setDriveSyncMessage(null)} 
+                className="text-slate-400 hover:text-white p-1 rounded-md"
+                title="Dismiss notice"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         )}
 

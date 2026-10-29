@@ -228,232 +228,186 @@ export interface SupplyCrate {
 // ============================================================================
 
 export const SHOP_ITEMS: ShopItem[] = [
-  // --- SKINS: PACK 1 (Physics & Advanced Energy) ---
+  // --- 18 FANTASY DUNGEON SKINS (NIKASTUDIO TOP-DOWN SPRITE PACK) ---
   {
-    id: "quantum_physicist",
-    name: "Quantum Physicist",
-    category: "skin",
-    rarity: "mythic",
-    description: "Harnesses superposition wave-functions to bend quantum particle trajectories. Features plasma sphere action.",
-    price: 1000,
-    icon: "⚛️",
-    imageSrc: "/assets/avatars/quantum_physicist.png",
-    packNumber: 1
-  },
-  {
-    id: "laser_optics_tech",
-    name: "Laser Optics Specialist",
-    category: "skin",
-    rarity: "epic",
-    description: "Calibrates optical cavities and ruby crystal prisms for concentrated stimulated emission beams.",
-    price: 320,
-    icon: "🔦",
-    imageSrc: "/assets/avatars/laser_optics_tech.png",
-    packNumber: 1
-  },
-  {
-    id: "polar_astronomer",
-    name: "Polar Astronomer",
-    category: "skin",
-    rarity: "rare",
-    description: "Operates high-altitude cryogenic telescopes to map exoplanetary transits with stellar scope precision.",
-    price: 180,
-    icon: "🔭",
-    imageSrc: "/assets/avatars/polar_astronomer.png",
-    packNumber: 1
-  },
-  {
-    id: "circuit_engineer",
-    name: "Circuit Specialist",
-    category: "skin",
-    rarity: "common",
-    description: "Wires copper armature relays and step-up transformers with industrial toolboxes.",
-    price: 80,
-    icon: "⚡",
-    imageSrc: "/assets/avatars/circuit_engineer.png",
-    packNumber: 1
-  },
-  {
-    id: "robotics_mechanist",
-    name: "Robotics Mechanist",
-    category: "skin",
-    rarity: "common",
-    description: "Engineers planetary gear trains and precision mechanical actuators with rotating steel gears.",
-    price: 80,
-    icon: "⚙️",
-    imageSrc: "/assets/avatars/robotics_mechanist.png",
-    packNumber: 1
-  },
-
-  // --- SKINS: PACK 2 (Biology & Life Sciences) ---
-  {
-    id: "biohazard_specialist",
-    name: "Bio-Hazard Specialist",
-    category: "skin",
-    rarity: "legendary",
-    description: "Sealed in a pressurized Level 4 NBC containment suit impervious to toxic storms and reagents.",
-    price: 550,
-    icon: "☣️",
-    imageSrc: "/assets/avatars/biohazard_specialist.png",
-    packNumber: 2
-  },
-  {
-    id: "virology_researcher",
-    name: "Virology Researcher",
-    category: "skin",
-    rarity: "epic",
-    description: "Cultivates bacteriophages and synthesized monoclonal antibodies under sterile flow hoods.",
-    price: 320,
-    icon: "🔬",
-    imageSrc: "/assets/avatars/virology_researcher.png",
-    packNumber: 2
-  },
-  {
-    id: "plant_pathologist",
-    name: "Plant Pathologist",
-    category: "skin",
-    rarity: "rare",
-    description: "Extracts defensive alkaloids and chloroplast enzymes from exotic flora in botanical glassware.",
-    price: 180,
-    icon: "🌿",
-    imageSrc: "/assets/avatars/plant_pathologist.png",
-    packNumber: 2
-  },
-  {
-    id: "field_botanist",
-    name: "Field Botanist",
-    category: "skin",
-    rarity: "common",
-    description: "Catalogs angiosperm leaves and conducts transpiration field experiments on sprouting seeds.",
-    price: 80,
-    icon: "🌱",
-    imageSrc: "/assets/avatars/field_botanist.png",
-    packNumber: 2
-  },
-  {
-    id: "field_entomologist",
-    name: "Field Entomologist",
-    category: "skin",
-    rarity: "common",
-    description: "Surveys insect population genetics and pollination vectors with sweep nets.",
-    price: 80,
-    icon: "🦋",
-    imageSrc: "/assets/avatars/field_entomologist.png",
-    packNumber: 2
-  },
-
-  // --- SKINS: PACK 3 (Earth & Space Sciences) ---
-  {
-    id: "crystallographer",
-    name: "Crystallographer",
-    category: "skin",
-    rarity: "legendary",
-    description: "Decodes X-ray diffraction patterns of hexagonal crystal lattices and reflective gems.",
-    price: 550,
-    icon: "💎",
-    imageSrc: "/assets/avatars/crystallographer.png",
-    packNumber: 3
-  },
-  {
-    id: "marine_oceanographer",
-    name: "Marine Oceanographer",
-    category: "skin",
-    rarity: "epic",
-    description: "Dives into benthic trenches to sample hydrothermal vents and bioluminescent corals.",
-    price: 320,
-    icon: "🤿",
-    imageSrc: "/assets/avatars/marine_oceanographer.png",
-    packNumber: 3
-  },
-  {
-    id: "fossil_paleontologist",
-    name: "Fossil Paleontologist",
-    category: "skin",
-    rarity: "rare",
-    description: "Excavates Mesozoic vertebrate fossils and reads sedimentary rock strata like an open book.",
-    price: 180,
-    icon: "🦴",
-    imageSrc: "/assets/avatars/fossil_paleontologist.png",
-    packNumber: 3
-  },
-  {
-    id: "cryo_glaciologist",
-    name: "Cryo Glaciologist",
-    category: "skin",
-    rarity: "rare",
-    description: "Drills deep Antarctic ice cores to reconstruct paleoclimatic carbon dioxide levels in snowstorms.",
-    price: 180,
-    icon: "❄️",
-    imageSrc: "/assets/avatars/cryo_glaciologist.png",
-    packNumber: 3
-  },
-  {
-    id: "mining_geologist",
-    name: "Mining Geologist",
-    category: "skin",
-    rarity: "common",
-    description: "Identifies igneous mineral deposits and extracts ore with geological pickaxes.",
-    price: 80,
-    icon: "⛏️",
-    imageSrc: "/assets/avatars/mining_geologist.png",
-    packNumber: 3
-  },
-
-  // --- SKINS: PACK 4 (Applied Science & Chemistry) ---
-  {
-    id: "radiation_hazard_suit",
-    name: "Thermal Radiation Specialist",
-    category: "skin",
-    rarity: "mythic",
-    description: "Armed with an insulated lead-lined thermal suit to handle active fission isotopes and plasma torches.",
-    price: 1000,
-    icon: "☢️",
-    imageSrc: "/assets/avatars/radiation_hazard_suit.png",
-    packNumber: 4
-  },
-  {
-    id: "pharmaceutical_tech",
-    name: "Pharmaceutical Chemist",
-    category: "skin",
-    rarity: "epic",
-    description: "Calculates molar concentrations and formulates targeted medicinal serum suspensions.",
-    price: 320,
-    icon: "🧪",
-    imageSrc: "/assets/avatars/pharmaceutical_tech.png",
-    packNumber: 4
-  },
-  {
-    id: "bioinformatics_dev",
-    name: "Bioinformatics Scientist",
-    category: "skin",
-    rarity: "rare",
-    description: "Runs high-performance algorithmic modeling on nucleotide base pairings with mobile computing units.",
-    price: 180,
-    icon: "💻",
-    imageSrc: "/assets/avatars/bioinformatics_dev.png",
-    packNumber: 4
-  },
-  {
-    id: "wildlife_ecologist",
-    name: "Wildlife Ecologist",
-    category: "skin",
-    rarity: "common",
-    description: "Monitors trophic food webs and biomass transfer with long-distance spotting scopes.",
-    price: 80,
-    icon: "🦊",
-    imageSrc: "/assets/avatars/wildlife_ecologist.png",
-    packNumber: 4
-  },
-  {
-    id: "classic_chemist",
-    name: "Classic Laboratory Chemist",
-    category: "skin",
-    rarity: "common",
-    description: "Master of balancing titration equations, precipitate formation, and exothermic reactions.",
+    id: 'cultist',
+    name: 'Cultist',
+    category: 'skin',
+    rarity: 'common',
+    description: 'Occult Acolyte: Devotee of the forgotten catacombs, draped in dark crimson robes with arcane sigils.',
     price: 0,
-    icon: "⚗️",
-    imageSrc: "/assets/avatars/classic_chemist.png",
-    packNumber: 4
+    icon: '🔮',
+    imageSrc: '/assets/characters/cultist.png'
+  },
+  {
+    id: 'skeleton_warrior',
+    name: 'Skeleton',
+    category: 'skin',
+    rarity: 'common',
+    description: 'Risen Warrior: An ancient guardian reanimated from the bone crypts, clad in pitted iron.',
+    price: 80,
+    icon: '💀',
+    imageSrc: '/assets/characters/skeleton_warrior.png'
+  },
+  {
+    id: 'goblin',
+    name: 'Goblin',
+    category: 'skin',
+    rarity: 'common',
+    description: 'Dungeon Scavenger: A nimble cave-dweller wielding a crude cleaver and an obsession for shiny loot.',
+    price: 90,
+    icon: '👺',
+    imageSrc: '/assets/characters/goblin.png'
+  },
+  {
+    id: 'archer_hero',
+    name: 'Archer',
+    category: 'skin',
+    rarity: 'rare',
+    description: 'Keen Ranger: A deadly marksman hailing from the whispering forest, boasting unmatched bowstring speed.',
+    price: 160,
+    icon: '🏹',
+    imageSrc: '/assets/characters/archer_hero.png'
+  },
+  {
+    id: 'rogue',
+    name: 'Rogue',
+    category: 'skin',
+    rarity: 'rare',
+    description: 'Shadow Stalker: Slips through shadows unnoticed with dual daggers coated in paralyzing cavern venom.',
+    price: 180,
+    icon: '🗡️',
+    imageSrc: '/assets/characters/rogue.png'
+  },
+  {
+    id: 'necromancer',
+    name: 'Necromancer',
+    category: 'skin',
+    rarity: 'rare',
+    description: 'Soul Harvester: Channels the chill of the underworld with a staff carved from dragon bone.',
+    price: 200,
+    icon: '💀',
+    imageSrc: '/assets/characters/necromancer.png'
+  },
+  {
+    id: 'discoverer',
+    name: 'Discoverer',
+    category: 'skin',
+    rarity: 'rare',
+    description: 'Relic Seeker: Bold cartographer who mapped the deepest labyrinth levels and unsealed forgotten vaults.',
+    price: 210,
+    icon: '🧭',
+    imageSrc: '/assets/characters/discoverer.png'
+  },
+  {
+    id: 'white_mage',
+    name: 'White Mage',
+    category: 'skin',
+    rarity: 'epic',
+    description: 'High Cleric: A master of celestial radiance who wards allies against the creeping storm corruption.',
+    price: 320,
+    icon: '✨',
+    imageSrc: '/assets/characters/white_mage.png'
+  },
+  {
+    id: 'paladin',
+    name: 'Paladin',
+    category: 'skin',
+    rarity: 'epic',
+    description: 'Holy Crusader: Clad in polished silver and gold plate, brandishing a sacred sun-crest shield.',
+    price: 340,
+    icon: '🛡️',
+    imageSrc: '/assets/characters/paladin.png'
+  },
+  {
+    id: 'dark_knight',
+    name: 'Dark Knight',
+    category: 'skin',
+    rarity: 'epic',
+    description: 'Abyssal Champion: Forged in volcanic depths, bearing an obsidian greatsword that drinks enemy life.',
+    price: 360,
+    icon: '⚔️',
+    imageSrc: '/assets/characters/dark_knight.png'
+  },
+  {
+    id: 'warlock',
+    name: 'Warlock',
+    category: 'skin',
+    rarity: 'epic',
+    description: 'Eldritch Summoner: Commands chaotic nether-energies with a swirling orb of cosmic void.',
+    price: 380,
+    icon: '👁️',
+    imageSrc: '/assets/characters/warlock.png'
+  },
+  {
+    id: 'knight_hero',
+    name: 'Knight Hero',
+    category: 'skin',
+    rarity: 'legendary',
+    description: 'Crown Champion: The sovereign champion of the royal kingdom, clad in gleaming full plate and azure plume.',
+    price: 600,
+    icon: '👑',
+    imageSrc: '/assets/characters/knight_hero.png'
+  },
+  {
+    id: 'dragon_slayer',
+    name: 'Dragon Slayer',
+    category: 'skin',
+    rarity: 'legendary',
+    description: 'Wyrm Cleaver: Wears the impenetrable red scales of an ancient magma wyrm, wielding flame-forged steel.',
+    price: 650,
+    icon: '🐉',
+    imageSrc: '/assets/characters/dragon_slayer.png'
+  },
+  {
+    id: 'shadow_assassin',
+    name: 'Shadow Assassin',
+    category: 'skin',
+    rarity: 'legendary',
+    description: 'Night Reaper: A silent phantom cloaked in violet smoke ribbons, striking lethal blows from the dark.',
+    price: 700,
+    icon: '🥷',
+    imageSrc: '/assets/characters/shadow_assassin.png'
+  },
+  {
+    id: 'berserker',
+    name: 'Berserker',
+    category: 'skin',
+    rarity: 'legendary',
+    description: 'Iron Marauder: A hulking warrior wielding a double-headed battleaxe, entering frenzy when low on health.',
+    price: 720,
+    icon: '🪓',
+    imageSrc: '/assets/characters/berserker.png'
+  },
+  {
+    id: 'slime_king',
+    name: 'Slime King',
+    category: 'skin',
+    rarity: 'mythic',
+    description: 'Gelatinous Monarch: The sovereign ruler of all slimes, crowned in pure gold with a royal ruby.',
+    price: 1500,
+    icon: '👑',
+    imageSrc: '/assets/characters/slime_king.png'
+  },
+  {
+    id: 'overlord',
+    name: 'Overlord',
+    category: 'skin',
+    rarity: 'mythic',
+    description: 'Nether Tyrant: The apex demon king of the abyss, wrapped in living hellfire with a chaos scythe.',
+    price: 1800,
+    icon: '👹',
+    imageSrc: '/assets/characters/overlord.png'
+  },
+  {
+    id: 'archangel',
+    name: 'Archangel',
+    category: 'skin',
+    rarity: 'mythic',
+    description: 'Seraph of the Dawn: A towering divine celestial with burning wings of starlight and a blade of holy fire.',
+    price: 2000,
+    icon: '🪽',
+    imageSrc: '/assets/characters/archangel.png'
   },
 
   // --- 10 WEAPONS (RANKED BY RARITY WITH ALTERNATE FIRE MODES) ---
