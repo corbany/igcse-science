@@ -50,15 +50,61 @@ import {
   ShopItem,
   equipItem
 } from '../services/firebaseGameService';
-import { ALL_FANTASY_SKINS, FANTASY_SKIN_ALIASES, getFantasySkin, FantasySkinDefinition } from '../data/fantasySkinsData';
+import { 
+  ALL_FANTASY_SKINS, 
+  FANTASY_SKIN_ALIASES, 
+  getFantasySkin, 
+  FantasySkinDefinition,
+  CHARACTER_ACTION_SHEETS,
+  ActionSheets
+} from '../data/fantasySkinsData';
 
 // ============================================================================
 // CONSTANTS & MAP METRICS
 // ============================================================================
 
-export const MAP_SIZE = 5000; // 5000px x 5000px massive open arena
-const TILE_SIZE = 50; // 100 x 100 tile grid = 5000 x 5000 px
-const TILES_COUNT = MAP_SIZE / TILE_SIZE; // 100
+export const MAP_SIZE = 5120; // 5120px x 5120px massive open arena
+
+// 1. Exact Kenney 16x16 Roguelike Sheet Slicing Math (16px tile + 1px border spacing)
+export const TILE_SIZE = 16;  // Kenney 16x16 sheet source tile
+export const TILE_GAP = 1;    // 1px border spacing
+export const WORLD_TILE_SIZE = 32; // Scaled on canvas to 32x32 with ctx.imageSmoothingEnabled = false
+export const TILES_COUNT = Math.floor(MAP_SIZE / WORLD_TILE_SIZE); // 160 x 160 tiles
+
+// Helper formula for source coordinates: sx = col * 17 and sy = row * 17
+export const getTileSourceCoords = (col: number, row: number) => ({
+  sx: col * (TILE_SIZE + TILE_GAP), // col * 17
+  sy: row * (TILE_SIZE + TILE_GAP)  // row * 17
+});
+
+export type BuildingStyle = 'stone' | 'wood' | 'castle' | 'terracotta' | 'brick';
+
+export interface BuildingTile {
+  col: number; // grid tile col
+  row: number; // grid tile row
+  sheetCol: number;
+  sheetRow: number;
+  isRoof?: boolean;
+}
+
+export interface GeneratedBuilding {
+  id: string;
+  name: string;
+  tileX: number;
+  tileY: number;
+  width: number; // in tiles
+  height: number; // in tiles
+  worldX: number; // in pixels
+  worldY: number;
+  worldW: number;
+  worldH: number;
+  style: BuildingStyle;
+  tiles: BuildingTile[];
+  hitbox: { x: number; y: number; w: number; h: number };
+  doorway: { x: number; y: number; w: number; h: number };
+  perimeterProps: SceneryProp[];
+  interiorLoot: GroundLootItem[];
+}
 
 type BiomeType = 'meadows' | 'desert' | 'ruins' | 'forum';
 type TerrainSurface = 'grass' | 'asphalt' | 'pavement' | 'dirt' | 'sand' | 'stone' | 'water';
@@ -67,13 +113,14 @@ interface TileData {
   biome: BiomeType;
   surface: TerrainSurface;
   baseColor: string;
-  sheetCol: number;
+  sheetCol: number; // Solid grass base: col 5, row 0
   sheetRow: number;
   overlayCol?: number;
   overlayRow?: number;
   hasRoadMarking?: 'h_dash' | 'v_dash' | 'crosswalk' | null;
   detailType: number;
   isWater?: boolean;
+  isRoad?: boolean;
 }
 
 // Environmental Scenery Prop (Sorted by Y for depth)
@@ -84,8 +131,14 @@ interface SceneryProp {
   type: 
     | 'oak_tree' 
     | 'pine_tree' 
+    | 'round_tree'
+    | 'tree_stump'
+    | 'tent'
+    | 'fence'
+    | 'flower'
+    | 'campfire'
     | 'palm_tree' 
-    | 'orange_tree'
+    | 'orange_tree' 
     | 'bush'
     | 'container_blue' 
     | 'container_red' 
@@ -110,6 +163,7 @@ interface SceneryProp {
   spriteKey: string;
   sheetCol?: number;
   sheetRow?: number;
+  sheetTopRow?: number;
 }
 
 // Ground Loot Item (Bananas, Shield Cells, Ammo Boxes)
@@ -231,6 +285,51 @@ export const SPRITE_MANIFEST: Record<string, string> = {
       <!-- Top Sunlit Crown -->
       <circle cx="60" cy="46" r="32" fill="#22c55e"/>
       <circle cx="52" cy="38" r="18" fill="#4ade80" fill-opacity="0.7"/>
+    </svg>
+  `),
+  prop_round_tree: createSvgDataUri(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="120" height="150" viewBox="0 0 120 150">
+      <ellipse cx="60" cy="138" rx="46" ry="12" fill="#000000" fill-opacity="0.35"/>
+      <rect x="52" y="105" width="16" height="32" rx="3" fill="#78350f"/>
+      <path d="M54 112 L54 130 M62 110 L62 128" stroke="#451a03" stroke-width="2"/>
+      <circle cx="60" cy="72" r="50" fill="#15803d"/>
+      <circle cx="42" cy="58" r="32" fill="#16a34a"/>
+      <circle cx="78" cy="62" r="34" fill="#16a34a"/>
+      <circle cx="60" cy="46" r="32" fill="#22c55e"/>
+      <circle cx="52" cy="38" r="18" fill="#4ade80" fill-opacity="0.7"/>
+    </svg>
+  `),
+  prop_tree_stump: createSvgDataUri(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 60 60">
+      <ellipse cx="30" cy="52" rx="24" ry="7" fill="#000000" fill-opacity="0.35"/>
+      <rect x="15" y="28" width="30" height="22" rx="4" fill="#78350f"/>
+      <ellipse cx="30" cy="28" rx="15" ry="6" fill="#d97706"/>
+      <ellipse cx="30" cy="28" rx="10" ry="4" fill="#fef08a" stroke="#b45309" stroke-width="1.5"/>
+      <circle cx="30" cy="28" r="2" fill="#78350f"/>
+    </svg>
+  `),
+  prop_tent: createSvgDataUri(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">
+      <ellipse cx="40" cy="70" rx="36" ry="8" fill="#000000" fill-opacity="0.35"/>
+      <polygon points="10,68 70,68 40,16" fill="#d97706"/>
+      <polygon points="10,68 40,68 40,16" fill="#b45309"/>
+      <polygon points="32,68 48,68 40,36" fill="#1e293b"/>
+    </svg>
+  `),
+  prop_fence: createSvgDataUri(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 60 60">
+      <ellipse cx="30" cy="54" rx="26" ry="5" fill="#000000" fill-opacity="0.3"/>
+      <rect x="8" y="20" width="8" height="32" rx="2" fill="#92400e"/>
+      <rect x="44" y="20" width="8" height="32" rx="2" fill="#92400e"/>
+      <rect x="6" y="26" width="48" height="6" rx="1" fill="#b45309"/>
+      <rect x="6" y="38" width="48" height="6" rx="1" fill="#b45309"/>
+    </svg>
+  `),
+  prop_flower: createSvgDataUri(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+      <rect x="15" y="16" width="2" height="12" fill="#15803d"/>
+      <circle cx="16" cy="12" r="5" fill="#f43f5e"/>
+      <circle cx="16" cy="12" r="2" fill="#fef08a"/>
     </svg>
   `),
   prop_pine_tree: createSvgDataUri(`
@@ -362,7 +461,7 @@ export const SPRITE_MANIFEST: Record<string, string> = {
     </svg>
   `),
 
-  // --- 18 NIKASTUDIO FANTASY DUNGEON CHARACTER SPRITE SHEETS ---
+  // --- 19 FANTASY DUNGEON CHARACTER PORTRAITS & SPRITES ---
   char_cultist: '/assets/characters/cultist.png',
   char_skeleton_warrior: '/assets/characters/skeleton_warrior.png',
   char_goblin: '/assets/characters/goblin.png',
@@ -381,10 +480,28 @@ export const SPRITE_MANIFEST: Record<string, string> = {
   char_slime_king: '/assets/characters/slime_king.png',
   char_overlord: '/assets/characters/overlord.png',
   char_archangel: '/assets/characters/archangel.png',
+  char_bat: '/assets/characters/bat.png',
+  char_slime: '/assets/characters/slime.png',
+  char_elitearcher: '/assets/characters/elitearcher.png',
+  char_merchant: '/assets/characters/merchant.png',
 
   // --- 16x16 ROGUELIKE LANDSCAPE SPRITESHEET ---
   landscape_sheet: '/assets/roguelikeSheet_transparent.png'
 };
+
+// Global shared cache for 1024x1024 modular character action sheets (idle, walk, run, attack, hurt, death)
+const characterActionCache = new Map<string, HTMLImageElement>();
+export function getActionSheetImage(src: string): HTMLImageElement | null {
+  if (!src) return null;
+  let img = characterActionCache.get(src);
+  if (!img) {
+    img = new Image();
+    img.src = src;
+    characterActionCache.set(src, img);
+  }
+  if (img.complete && img.naturalWidth > 0) return img;
+  return null;
+}
 
 // ============================================================================
 // AUDIO SYNTHESIZER FOR TOP-DOWN ACTION
@@ -1128,533 +1245,1030 @@ const soundEngine = new ArenaSoundEngine();
 // MAP GENERATOR (ROADS, CONTAINER YARD, FOREST, SCATTERED LOOT)
 // ============================================================================
 
+// ============================================================================
+// 3. BUILDING PREFAB GENERATOR & MULTI-LAYER MAP ENGINE
+// ============================================================================
+
+interface BuildingStyleConfig {
+  roofTL: { col: number; row: number };
+  roofTM: { col: number; row: number };
+  roofTR: { col: number; row: number };
+  roofML?: { col: number; row: number };
+  roofMM?: { col: number; row: number };
+  roofMR?: { col: number; row: number };
+  wallL: { col: number; row: number };
+  wallM: { col: number; row: number };
+  wallR: { col: number; row: number };
+  wallWindow: { col: number; row: number };
+  foundationL: { col: number; row: number };
+  foundationM: { col: number; row: number };
+  foundationR: { col: number; row: number };
+  door: { col: number; row: number };
+  floor: { col: number; row: number; surface: TerrainSurface; color: string };
+  primaryMat: 'brick' | 'wood' | 'metal';
+}
+
+const BUILDING_STYLES: Record<BuildingStyle, BuildingStyleConfig> = {
+  terracotta: {
+    roofTL: { col: 2, row: 18 },
+    roofTM: { col: 3, row: 18 },
+    roofTR: { col: 4, row: 18 },
+    roofML: { col: 2, row: 19 },
+    roofMM: { col: 3, row: 19 },
+    roofMR: { col: 4, row: 19 },
+    wallL: { col: 20, row: 12 },
+    wallM: { col: 21, row: 12 },
+    wallR: { col: 22, row: 12 },
+    wallWindow: { col: 23, row: 12 },
+    foundationL: { col: 20, row: 13 },
+    foundationM: { col: 21, row: 13 },
+    foundationR: { col: 22, row: 13 },
+    door: { col: 19, row: 13 },
+    floor: { col: 20, row: 14, surface: 'stone', color: '#475569' },
+    primaryMat: 'brick'
+  },
+  wood: {
+    roofTL: { col: 10, row: 17 },
+    roofTM: { col: 11, row: 17 },
+    roofTR: { col: 12, row: 17 },
+    roofML: { col: 10, row: 18 },
+    roofMM: { col: 11, row: 18 },
+    roofMR: { col: 12, row: 18 },
+    wallL: { col: 13, row: 12 },
+    wallM: { col: 14, row: 12 },
+    wallR: { col: 15, row: 12 },
+    wallWindow: { col: 14, row: 13 },
+    foundationL: { col: 13, row: 13 },
+    foundationM: { col: 14, row: 13 },
+    foundationR: { col: 15, row: 13 },
+    door: { col: 11, row: 13 },
+    floor: { col: 12, row: 3, surface: 'dirt', color: '#78350f' },
+    primaryMat: 'wood'
+  },
+  castle: {
+    roofTL: { col: 21, row: 26 },
+    roofTM: { col: 22, row: 26 },
+    roofTR: { col: 23, row: 26 },
+    roofML: { col: 21, row: 27 },
+    roofMM: { col: 22, row: 27 },
+    roofMR: { col: 23, row: 27 },
+    wallL: { col: 20, row: 12 },
+    wallM: { col: 21, row: 12 },
+    wallR: { col: 22, row: 12 },
+    wallWindow: { col: 23, row: 12 },
+    foundationL: { col: 20, row: 13 },
+    foundationM: { col: 21, row: 13 },
+    foundationR: { col: 22, row: 13 },
+    door: { col: 20, row: 13 },
+    floor: { col: 20, row: 14, surface: 'stone', color: '#334155' },
+    primaryMat: 'brick'
+  },
+  stone: {
+    roofTL: { col: 21, row: 26 },
+    roofTM: { col: 22, row: 26 },
+    roofTR: { col: 23, row: 26 },
+    roofML: { col: 21, row: 27 },
+    roofMM: { col: 22, row: 27 },
+    roofMR: { col: 23, row: 27 },
+    wallL: { col: 20, row: 12 },
+    wallM: { col: 21, row: 12 },
+    wallR: { col: 22, row: 12 },
+    wallWindow: { col: 23, row: 12 },
+    foundationL: { col: 20, row: 13 },
+    foundationM: { col: 21, row: 13 },
+    foundationR: { col: 22, row: 13 },
+    door: { col: 19, row: 13 },
+    floor: { col: 21, row: 14, surface: 'stone', color: '#475569' },
+    primaryMat: 'brick'
+  },
+  brick: {
+    roofTL: { col: 12, row: 26 },
+    roofTM: { col: 13, row: 26 },
+    roofTR: { col: 14, row: 26 },
+    roofML: { col: 12, row: 27 },
+    roofMM: { col: 13, row: 27 },
+    roofMR: { col: 14, row: 27 },
+    wallL: { col: 24, row: 12 },
+    wallM: { col: 25, row: 12 },
+    wallR: { col: 26, row: 12 },
+    wallWindow: { col: 23, row: 12 },
+    foundationL: { col: 24, row: 13 },
+    foundationM: { col: 25, row: 13 },
+    foundationR: { col: 26, row: 13 },
+    door: { col: 19, row: 13 },
+    floor: { col: 22, row: 14, surface: 'stone', color: '#334155' },
+    primaryMat: 'brick'
+  }
+};
+
+/**
+ * 3. BUILDING PREFAB GENERATOR & DRAW FUNCTIONS
+ * Calculates correct corner, wall, window, roof, and door tile offsets from the sheet grid,
+ * and builds valid hitboxes so the player collides with walls and doors instead of walking through roofs.
+ */
+export function generateBuilding(
+  x: number, // tile column or pixel coordinate
+  y: number, // tile row or pixel coordinate
+  width: number, // width in tiles
+  height: number, // height in tiles
+  style: BuildingStyle = 'stone',
+  name = 'Building'
+): GeneratedBuilding {
+  const tileX = x > 180 ? Math.floor(x / WORLD_TILE_SIZE) : Math.floor(x);
+  const tileY = y > 180 ? Math.floor(y / WORLD_TILE_SIZE) : Math.floor(y);
+  const wTiles = Math.max(3, Math.floor(width));
+  const hTiles = Math.max(3, Math.floor(height));
+
+  const worldX = tileX * WORLD_TILE_SIZE;
+  const worldY = tileY * WORLD_TILE_SIZE;
+  const worldW = wTiles * WORLD_TILE_SIZE;
+  const worldH = hTiles * WORLD_TILE_SIZE;
+
+  const conf = BUILDING_STYLES[style] || BUILDING_STYLES.stone;
+  const tiles: BuildingTile[] = [];
+
+  const roofRowCount = hTiles >= 4 ? 2 : 1;
+  const doorRelC = Math.floor(wTiles / 2);
+
+  // Generate building tile slice offsets
+  for (let dr = 0; dr < hTiles; dr++) {
+    for (let dc = 0; dc < wTiles; dc++) {
+      const c = tileX + dc;
+      const r = tileY + dr;
+      let sheetCol = conf.wallM.col;
+      let sheetRow = conf.wallM.row;
+      let isRoof = false;
+
+      // 1. Roof Top Row
+      if (dr === 0) {
+        isRoof = true;
+        if (dc === 0) {
+          sheetCol = conf.roofTL.col;
+          sheetRow = conf.roofTL.row;
+        } else if (dc === wTiles - 1) {
+          sheetCol = conf.roofTR.col;
+          sheetRow = conf.roofTR.row;
+        } else {
+          sheetCol = conf.roofTM.col;
+          sheetRow = conf.roofTM.row;
+        }
+      }
+      // 2. Roof Lower / Overhang Row
+      else if (dr === 1 && roofRowCount > 1) {
+        isRoof = true;
+        if (dc === 0) {
+          sheetCol = conf.roofML?.col ?? conf.roofTL.col;
+          sheetRow = conf.roofML?.row ?? conf.roofTL.row;
+        } else if (dc === wTiles - 1) {
+          sheetCol = conf.roofMR?.col ?? conf.roofTR.col;
+          sheetRow = conf.roofMR?.row ?? conf.roofTR.row;
+        } else {
+          sheetCol = conf.roofMM?.col ?? conf.roofTM.col;
+          sheetRow = conf.roofMM?.row ?? conf.roofTM.row;
+        }
+      }
+      // 3. Wall Middle Rows
+      else if (dr < hTiles - 1) {
+        if (dc === 0) {
+          sheetCol = conf.wallL.col;
+          sheetRow = conf.wallL.row;
+        } else if (dc === wTiles - 1) {
+          sheetCol = conf.wallR.col;
+          sheetRow = conf.wallR.row;
+        } else if (dc % 2 === 1 && dc !== doorRelC) {
+          sheetCol = conf.wallWindow.col;
+          sheetRow = conf.wallWindow.row;
+        } else {
+          sheetCol = conf.wallM.col;
+          sheetRow = conf.wallM.row;
+        }
+      }
+      // 4. Door / Foundation Bottom Row
+      else {
+        if (dc === 0) {
+          sheetCol = conf.foundationL.col;
+          sheetRow = conf.foundationL.row;
+        } else if (dc === wTiles - 1) {
+          sheetCol = conf.foundationR.col;
+          sheetRow = conf.foundationR.row;
+        } else if (dc === doorRelC) {
+          sheetCol = conf.door.col;
+          sheetRow = conf.door.row;
+        } else {
+          sheetCol = conf.foundationM.col;
+          sheetRow = conf.foundationM.row;
+        }
+      }
+
+      tiles.push({
+        col: c,
+        row: r,
+        sheetCol,
+        sheetRow,
+        isRoof
+      });
+    }
+  }
+
+  // Hitbox & Doorway Opening (Solid walls and roofs block player movement)
+  const hitbox = {
+    x: worldX,
+    y: worldY,
+    w: worldW,
+    h: worldH
+  };
+
+  const doorWorldX = (tileX + doorRelC) * WORLD_TILE_SIZE;
+  const doorWorldY = (tileY + hTiles - 1) * WORLD_TILE_SIZE;
+  const doorway = {
+    x: doorWorldX + 4,
+    y: doorWorldY,
+    w: WORLD_TILE_SIZE - 8,
+    h: WORLD_TILE_SIZE
+  };
+
+  // Grouped Perimeter Props (Fences, Crates, Barrels, Trees)
+  const perimeterProps: SceneryProp[] = [];
+  const bldgId = `bldg_${tileX}_${tileY}`;
+
+  // 1. Stacked wood crate at corner
+  perimeterProps.push({
+    id: `${bldgId}_crate`,
+    x: worldX - 14,
+    y: worldY + worldH - 6,
+    type: 'crate_wood',
+    width: 32,
+    height: 32,
+    footprintRadius: 14,
+    hp: 60,
+    maxHp: 60,
+    materialDrop: 'wood',
+    dropAmount: 4,
+    spriteKey: 'prop_crate_wood',
+    sheetCol: 7,
+    sheetRow: 23
+  });
+
+  // 2. Storage barrel near entrance
+  perimeterProps.push({
+    id: `${bldgId}_barrel`,
+    x: doorWorldX + WORLD_TILE_SIZE + 14,
+    y: doorWorldY + 16,
+    type: 'barrel_oil',
+    width: 28,
+    height: 32,
+    footprintRadius: 12,
+    hp: 75,
+    maxHp: 75,
+    materialDrop: conf.primaryMat,
+    dropAmount: 4,
+    spriteKey: 'prop_barrel_oil',
+    sheetCol: 6,
+    sheetRow: 23
+  });
+
+  // 3. Fencing lining property perimeter
+  perimeterProps.push({
+    id: `${bldgId}_fence_l`,
+    x: worldX - 26,
+    y: worldY + worldH - 4,
+    type: 'fence',
+    width: 32,
+    height: 32,
+    footprintRadius: 10,
+    hp: 80,
+    maxHp: 80,
+    materialDrop: 'wood',
+    dropAmount: 3,
+    spriteKey: 'prop_fence',
+    sheetCol: 13,
+    sheetRow: 13
+  });
+
+  // 4. Perimeter Tree in garden/alley
+  perimeterProps.push({
+    id: `${bldgId}_tree`,
+    x: worldX + worldW + 28,
+    y: worldY + 20,
+    type: style === 'wood' ? 'pine_tree' : 'round_tree',
+    width: 36,
+    height: 48,
+    footprintRadius: 14,
+    hp: 90,
+    maxHp: 90,
+    materialDrop: 'wood',
+    dropAmount: 6,
+    spriteKey: style === 'wood' ? 'prop_pine_tree' : 'prop_round_tree',
+    sheetCol: style === 'wood' ? 16 : 13,
+    sheetRow: 9,
+    sheetTopRow: 8
+  });
+
+  // 5. Interior / Porch loot cache
+  const interiorLoot: GroundLootItem[] = [
+    {
+      id: `${bldgId}_loot`,
+      x: doorWorldX + WORLD_TILE_SIZE / 2,
+      y: doorWorldY + WORLD_TILE_SIZE / 2 - 6,
+      type: 'banana',
+      name: `${name} Ration Supply`,
+      spriteKey: 'loot_banana',
+      healHp: 25,
+      isCollected: false
+    }
+  ];
+
+  return {
+    id: bldgId,
+    name,
+    tileX,
+    tileY,
+    width: wTiles,
+    height: hTiles,
+    worldX,
+    worldY,
+    worldW,
+    worldH,
+    style,
+    tiles,
+    hitbox,
+    doorway,
+    perimeterProps,
+    interiorLoot
+  };
+}
+
+/**
+ * LAYER 2: drawHousePrefab(x, y, width, height, style, name)
+ * Builds complete 4x4 or 3x3 houses with matching roof lines, wall panels, windows, and doors.
+ */
+export function drawHousePrefab(
+  x: number,
+  y: number,
+  width: number = 4,
+  height: number = 4,
+  style: BuildingStyle = 'stone',
+  name: string = 'House'
+): GeneratedBuilding {
+  return generateBuilding(x, y, width, height, style, name);
+}
+
+/**
+ * LAYER 1: drawWaterBody(startX, startY, width, height)
+ * Renders a connected pond using official Kenney 9-slice water tile coordinates:
+ * - Top-Left Corner: (col: 0, row: 0)
+ * - Top Edge: (col: 1, row: 0)
+ * - Top-Right Corner: (col: 2, row: 0)
+ * - Left Edge: (col: 0, row: 1)
+ * - Inner Water Fill: (col: 1, row: 1)
+ * - Right Edge: (col: 2, row: 1)
+ * - Bottom-Left Corner: (col: 0, row: 2)
+ * - Bottom Edge: (col: 1, row: 2)
+ * - Bottom-Right Corner: (col: 2, row: 2)
+ */
+export function drawWaterBody(
+  tiles: TileData[][],
+  startX: number,
+  startY: number,
+  width: number,
+  height: number
+) {
+  for (let dy = 0; dy < height; dy++) {
+    for (let dx = 0; dx < width; dx++) {
+      const c = startX + dx;
+      const r = startY + dy;
+      if (r < 0 || r >= TILES_COUNT || c < 0 || c >= TILES_COUNT) continue;
+
+      let sheetCol = 1;
+      let sheetRow = 1;
+
+      if (dx === 0 && dy === 0) {
+        // Top-Left Corner: (col: 0, row: 0)
+        sheetCol = 0;
+        sheetRow = 0;
+      } else if (dx === width - 1 && dy === 0) {
+        // Top-Right Corner: (col: 2, row: 0)
+        sheetCol = 2;
+        sheetRow = 0;
+      } else if (dy === 0) {
+        // Top Edge: (col: 1, row: 0)
+        sheetCol = 1;
+        sheetRow = 0;
+      } else if (dx === 0 && dy === height - 1) {
+        // Bottom-Left Corner: (col: 0, row: 2)
+        sheetCol = 0;
+        sheetRow = 2;
+      } else if (dx === width - 1 && dy === height - 1) {
+        // Bottom-Right Corner: (col: 2, row: 2)
+        sheetCol = 2;
+        sheetRow = 2;
+      } else if (dy === height - 1) {
+        // Bottom Edge: (col: 1, row: 2)
+        sheetCol = 1;
+        sheetRow = 2;
+      } else if (dx === 0) {
+        // Left Edge: (col: 0, row: 1)
+        sheetCol = 0;
+        sheetRow = 1;
+      } else if (dx === width - 1) {
+        // Right Edge: (col: 2, row: 1)
+        sheetCol = 2;
+        sheetRow = 1;
+      } else {
+        // Inner Water Fill: (col: 1, row: 1)
+        sheetCol = 1;
+        sheetRow = 1;
+      }
+
+      tiles[r][c].surface = 'water';
+      tiles[r][c].baseColor = '#0284c7';
+      tiles[r][c].overlayCol = sheetCol;
+      tiles[r][c].overlayRow = sheetRow;
+      tiles[r][c].isWater = true;
+    }
+  }
+}
+
+/**
+ * LAYER 1: drawDirtRoad(startX, startY, length, direction, roadWidth)
+ * Renders connected dirt roads and crossroads with coherent tile indices:
+ * - Horizontal: col: 6, row: 0
+ * - Vertical: col: 7, row: 1
+ * - Intersection: col: 6, row: 1
+ */
+export function drawDirtRoad(
+  tiles: TileData[][],
+  startX: number,
+  startY: number,
+  length: number,
+  direction: 'horizontal' | 'vertical' = 'horizontal',
+  roadWidth: number = 2
+) {
+  const isHoriz = direction === 'horizontal';
+  const w = isHoriz ? length : roadWidth;
+  const h = isHoriz ? roadWidth : length;
+
+  for (let dy = 0; dy < h; dy++) {
+    for (let dx = 0; dx < w; dx++) {
+      const c = startX + dx;
+      const r = startY + dy;
+      if (r < 0 || r >= TILES_COUNT || c < 0 || c >= TILES_COUNT) continue;
+      if (tiles[r][c].isWater) continue; // Keep water bodies intact
+
+      let sheetCol = isHoriz ? 6 : 7;
+      let sheetRow = isHoriz ? 0 : 1;
+
+      // Crossing / intersection tile
+      if (tiles[r][c].isRoad) {
+        sheetCol = 6;
+        sheetRow = 1;
+      }
+
+      tiles[r][c].surface = 'dirt';
+      tiles[r][c].baseColor = '#78350f';
+      tiles[r][c].overlayCol = sheetCol;
+      tiles[r][c].overlayRow = sheetRow;
+      tiles[r][c].isRoad = true;
+    }
+  }
+}
+
+/**
+/**
+ * 2. MULTI-LAYER MAP ENGINE & WORLD GENERATION BLUEPRINT
+ * - LAYER 0: Solid Ground Base (100% Solid Grass across 160x160 world grid, eliminating black gaps)
+ * - LAYER 1: Structured Water & Dirt Regions (3 Lake features, interconnecting dirt paths, village squares)
+ * - LAYER 2: Prefab Structures (2 small villages built with 4x4 and 3x3 houses)
+ * - LAYER 3: Foliage, Camping Zones, and Y-Sorted Props (Pine forest, Round trees, Tents, Fences, Flowers, Stumps)
+ */
 function generateSuperAnimalStyleMap(): {
   tiles: TileData[][];
   scenery: SceneryProp[];
   groundLoot: GroundLootItem[];
+  buildings: GeneratedBuilding[];
 } {
   const tiles: TileData[][] = [];
   const scenery: SceneryProp[] = [];
   const groundLoot: GroundLootItem[] = [];
+  const buildings: GeneratedBuilding[] = [];
 
   const pseudoNoise = (x: number, y: number, seed: number) => {
     const val = Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453;
     return val - Math.floor(val);
   };
 
-  // 1. Generate 100 x 100 Sliced Tiles (5000px x 5000px) from roguelikeSheet_transparent.png
-  // Winding River function: curves gracefully from North-West to South-East
-  const getRiverCenter = (wy: number) => {
-    return 1750 + Math.sin(wy / 580) * 520 + Math.cos(wy / 1250) * 280;
-  };
-
-  // 5 Explorable Scientific Facilities / Outposts with Invisible Roofs
-  const BUILDINGS = [
-    {
-      id: 'bldg_genetics',
-      name: 'Genetics Field Laboratory',
-      minC: 17, maxC: 25, minR: 17, maxR: 25,
-      floorCol: 20, floorRow: 14, floorColor: '#334155', surface: 'stone' as TerrainSurface,
-      doorways: [{ c: 21, r: 25 }, { c: 22, r: 25 }, { c: 25, r: 21 }],
-      interiorWalls: [
-        { c: 21, r: 18 }, { c: 21, r: 19 }, { c: 21, r: 22 }, { c: 21, r: 23 }
-      ],
-      props: [
-        { c: 19, r: 19, type: 'desk_table' as const, w: 46, h: 42, radius: 20, sheetCol: 30, sheetRow: 18, mat: 'wood' as const, drop: 4 },
-        { c: 19, r: 23, type: 'bookshelf' as const, w: 44, h: 48, radius: 20, sheetCol: 27, sheetRow: 18, mat: 'wood' as const, drop: 4 },
-        { c: 23, r: 19, type: 'computer_console' as const, w: 46, h: 44, radius: 20, sheetCol: 34, sheetRow: 18, mat: 'metal' as const, drop: 5 },
-        { c: 23, r: 23, type: 'barrel_oil' as const, w: 38, h: 42, radius: 18, sheetCol: 42, sheetRow: 20, mat: 'metal' as const, drop: 4 }
-      ],
-      loot: [
-        { c: 19, r: 21, type: 'banana' as const },
-        { c: 24, r: 24, type: 'banana' as const },
-        { c: 23, r: 21, type: 'ammo_box' as const }
-      ]
-    },
-    {
-      id: 'bldg_armory',
-      name: 'Crossroads Field Armory & Outpost',
-      minC: 28, maxC: 36, minR: 44, maxR: 52,
-      floorCol: 8, floorRow: 3, floorColor: '#78350f', surface: 'dirt' as TerrainSurface,
-      doorways: [{ c: 32, r: 44 }, { c: 32, r: 52 }, { c: 28, r: 48 }],
-      interiorWalls: [
-        { c: 32, r: 46 }, { c: 32, r: 47 }, { c: 32, r: 49 }, { c: 32, r: 50 }
-      ],
-      props: [
-        { c: 30, r: 46, type: 'desk_table' as const, w: 48, h: 42, radius: 20, sheetCol: 30, sheetRow: 18, mat: 'wood' as const, drop: 4 },
-        { c: 34, r: 46, type: 'crate_wood' as const, w: 42, h: 42, radius: 18, sheetCol: 43, sheetRow: 20, mat: 'wood' as const, drop: 4 },
-        { c: 34, r: 50, type: 'computer_console' as const, w: 46, h: 44, radius: 20, sheetCol: 34, sheetRow: 18, mat: 'metal' as const, drop: 5 },
-        { c: 30, r: 50, type: 'bookshelf' as const, w: 44, h: 48, radius: 20, sheetCol: 27, sheetRow: 18, mat: 'wood' as const, drop: 4 }
-      ],
-      loot: [
-        { c: 30, r: 48, type: 'banana' as const },
-        { c: 34, r: 48, type: 'shield_cell' as const }
-      ]
-    },
-    {
-      id: 'bldg_ruins_archive',
-      name: 'Ancient Ruins Observatory Archive',
-      minC: 72, maxC: 80, minR: 22, maxR: 30,
-      floorCol: 20, floorRow: 15, floorColor: '#475569', surface: 'stone' as TerrainSurface,
-      doorways: [{ c: 72, r: 26 }, { c: 76, r: 30 }],
-      interiorWalls: [
-        { c: 75, r: 23 }, { c: 75, r: 24 }, { c: 75, r: 27 }, { c: 75, r: 28 }
-      ],
-      props: [
-        { c: 74, r: 24, type: 'stone_column' as const, w: 48, h: 62, radius: 20, sheetCol: 22, sheetRow: 14, mat: 'brick' as const, drop: 6 },
-        { c: 78, r: 24, type: 'bookshelf' as const, w: 44, h: 48, radius: 20, sheetCol: 27, sheetRow: 18, mat: 'wood' as const, drop: 4 },
-        { c: 78, r: 28, type: 'desk_table' as const, w: 48, h: 42, radius: 20, sheetCol: 30, sheetRow: 18, mat: 'wood' as const, drop: 4 }
-      ],
-      loot: [
-        { c: 77, r: 25, type: 'banana' as const },
-        { c: 74, r: 28, type: 'ammo_box' as const }
-      ]
-    },
-    {
-      id: 'bldg_desert_refinery',
-      name: 'Desert High-Energy Refinery',
-      minC: 68, maxC: 76, minR: 74, maxR: 82,
-      floorCol: 9, floorRow: 3, floorColor: '#334155', surface: 'stone' as TerrainSurface,
-      doorways: [{ c: 72, r: 74 }, { c: 68, r: 78 }],
-      interiorWalls: [
-        { c: 72, r: 76 }, { c: 72, r: 77 }, { c: 72, r: 79 }, { c: 72, r: 80 }
-      ],
-      props: [
-        { c: 70, r: 76, type: 'computer_console' as const, w: 46, h: 44, radius: 20, sheetCol: 34, sheetRow: 18, mat: 'metal' as const, drop: 5 },
-        { c: 74, r: 76, type: 'barrel_oil' as const, w: 38, h: 42, radius: 18, sheetCol: 42, sheetRow: 20, mat: 'metal' as const, drop: 4 },
-        { c: 74, r: 80, type: 'desk_table' as const, w: 48, h: 42, radius: 20, sheetCol: 30, sheetRow: 18, mat: 'wood' as const, drop: 4 }
-      ],
-      loot: [
-        { c: 71, r: 78, type: 'banana' as const },
-        { c: 75, r: 78, type: 'shield_cell' as const }
-      ]
-    },
-    {
-      id: 'bldg_chemical',
-      name: 'Chemical Synthesis Facility',
-      minC: 22, maxC: 30, minR: 70, maxR: 78,
-      floorCol: 13, floorRow: 3, floorColor: '#064e3b', surface: 'stone' as TerrainSurface,
-      doorways: [{ c: 30, r: 74 }, { c: 26, r: 70 }],
-      interiorWalls: [
-        { c: 26, r: 72 }, { c: 26, r: 73 }, { c: 26, r: 75 }, { c: 26, r: 76 }
-      ],
-      props: [
-        { c: 24, r: 72, type: 'desk_table' as const, w: 48, h: 42, radius: 20, sheetCol: 30, sheetRow: 18, mat: 'wood' as const, drop: 4 },
-        { c: 28, r: 72, type: 'barrel_oil' as const, w: 38, h: 42, radius: 18, sheetCol: 42, sheetRow: 20, mat: 'metal' as const, drop: 4 },
-        { c: 28, r: 76, type: 'computer_console' as const, w: 46, h: 44, radius: 20, sheetCol: 34, sheetRow: 18, mat: 'metal' as const, drop: 5 }
-      ],
-      loot: [
-        { c: 24, r: 74, type: 'banana' as const },
-        { c: 28, r: 74, type: 'ammo_box' as const }
-      ]
-    }
-  ];
-
+  // =========================================================================
+  // LAYER 0 (SOLID GROUND BASE): 100% Solid Grass across the 5120px World
+  // =========================================================================
   for (let r = 0; r < TILES_COUNT; r++) {
     const row: TileData[] = [];
     for (let c = 0; c < TILES_COUNT; c++) {
-      const wx = c * TILE_SIZE + TILE_SIZE / 2;
-      const wy = r * TILE_SIZE + TILE_SIZE / 2;
-
-      // Arterial Dirt Highways
-      const isRoadH = Math.abs(wy - 2450) < 65;
-      const isRoadV = Math.abs(wx - 2450) < 65;
-      const isCrossroad = isRoadH && isRoadV;
-
-      // Secondary winding path leading to the Ancient Ruins
-      const distToRuinsTrail = Math.abs(wy - (1800 - (wx - 2450) * 0.7));
-      const isRuinsTrail = wx >= 2400 && wx <= 3700 && distToRuinsTrail < 40;
-
-      // Winding River calculation
-      const riverCenter = getRiverCenter(wy);
-      const distToRiver = Math.abs(wx - riverCenter);
-      const isRiver = distToRiver < 115; // ~4-5 tiles wide
-
-      // Bridges crossing the river at road intersections
-      const isBridgeH = isRiver && Math.abs(wy - 2450) < 85;
-
-      // Ancient Stone Ruins Quadrant (North-East: x: 3300-4350, y: 800-1950)
-      const isRuinsZone = wx > 3300 && wx < 4350 && wy > 800 && wy < 1950;
-
-      // Desert Badlands in South (y > 3600)
-      const isDesertZone = wy > 3600;
-
-      let biome: BiomeType = 'meadows';
-      let surface: TerrainSurface = 'grass';
-      let baseColor = '#15803d';
-      let sheetCol = 0;
-      let sheetRow = 15;
-      let overlayCol: number | undefined = undefined;
-      let overlayRow: number | undefined = undefined;
-      let hasRoadMarking: TileData['hasRoadMarking'] = null;
-      let isWater = false;
-
-      // Check if tile is inside an explorable building (invisible roof: floor rendered directly!)
-      const bldg = BUILDINGS.find(b => c >= b.minC && c <= b.maxC && r >= b.minR && r <= b.maxR);
-
-      if (bldg) {
-        biome = 'ruins';
-        surface = bldg.surface;
-        baseColor = bldg.floorColor;
-        sheetCol = bldg.floorCol;
-        sheetRow = bldg.floorRow;
-        isWater = false;
-        hasRoadMarking = null;
-      } else if (isBridgeH) {
-        // Wooden plank bridge crossing over water
-        surface = 'dirt';
-        baseColor = '#78350f';
-        sheetCol = 12; // Wooden bridge plank tile
-        sheetRow = 3;
-        isWater = false;
-      } else if (isRiver) {
-        // Water tiles sliced from roguelike sheet
-        surface = 'water';
-        isWater = true;
-        baseColor = '#0284c7';
-        if (distToRiver < 55) {
-          // Deep clean water
-          sheetCol = 0;
-          sheetRow = 0;
-        } else {
-          // Rippling river water
-          sheetCol = 1;
-          sheetRow = 1;
-        }
-      } else if (isCrossroad) {
-        // Dirt intersection
-        surface = 'dirt';
-        baseColor = '#78350f';
-        sheetCol = 6;
-        sheetRow = 1;
-      } else if (isRoadH) {
-        // Horizontal dirt road
-        surface = 'dirt';
-        baseColor = '#78350f';
-        sheetCol = 6;
-        sheetRow = 0;
-        if (Math.abs(wy - 2450) < 15 && c % 4 === 0) hasRoadMarking = 'h_dash';
-      } else if (isRoadV) {
-        // Vertical dirt road
-        surface = 'dirt';
-        baseColor = '#78350f';
-        sheetCol = 7;
-        sheetRow = 1;
-        if (Math.abs(wx - 2450) < 15 && r % 4 === 0) hasRoadMarking = 'v_dash';
-      } else if (isRuinsTrail) {
-        // Dirt trail to ruins
-        surface = 'dirt';
-        baseColor = '#78350f';
-        sheetCol = 6;
-        sheetRow = 1;
-      } else if (isRuinsZone) {
-        // Ancient Flagstone Floor in ruins courtyard
-        biome = 'ruins';
-        surface = 'stone';
-        baseColor = '#475569';
-        const rn = pseudoNoise(c, r, 911);
-        if (rn > 0.6) {
-          sheetCol = 21; // Cracked stone tile
-          sheetRow = 14;
-        } else {
-          sheetCol = 20; // Smooth stone flagstone
-          sheetRow = 14;
-        }
-      } else if (isDesertZone) {
-        // Desert sand
-        biome = 'desert';
-        surface = 'sand';
-        baseColor = '#ca8a04';
-        sheetCol = 6;
-        sheetRow = 17;
-      } else {
-        // Meadows Grass with flora variation
-        biome = 'meadows';
-        surface = 'grass';
-        const gn = pseudoNoise(c, r, 303);
-        if (gn > 0.86) {
-          // Red flower cluster
-          sheetCol = 0;
-          sheetRow = 6;
-          baseColor = '#16a34a';
-        } else if (gn > 0.74) {
-          // Yellow flower cluster
-          sheetCol = 0;
-          sheetRow = 7;
-          baseColor = '#16a34a';
-        } else if (gn > 0.50) {
-          // Tuft grass
-          sheetCol = 1;
-          sheetRow = 15;
-          baseColor = '#15803d';
-        } else if (gn > 0.28) {
-          // Dense grass
-          sheetCol = 2;
-          sheetRow = 15;
-          baseColor = '#14532d';
-        } else {
-          // Standard grass
-          sheetCol = 0;
-          sheetRow = 15;
-          baseColor = '#15803d';
-        }
-      }
-
-      const detailType = Math.floor(pseudoNoise(c, r, 404) * 4);
+      // Solid base grass (Kenney roguelikeSheet tile col: 5, row: 0)
       row.push({
-        biome,
-        surface,
-        baseColor,
-        sheetCol,
-        sheetRow,
-        overlayCol,
-        overlayRow,
-        hasRoadMarking,
-        detailType,
-        isWater
+        biome: 'meadows',
+        surface: 'grass',
+        baseColor: '#15803d',
+        sheetCol: 5,
+        sheetRow: 0,
+        detailType: 0,
+        isWater: false,
+        isRoad: false
       });
     }
     tiles.push(row);
   }
 
-  // 2. Generate Scenery Props (Trees, Bushes, Columns, Walls, Crates, Barrels)
-  let objId = 1;
+  // =========================================================================
+  // LAYER 1: 3 DISTINCT LAKE FEATURES (9-Slice Connected Water Bodies)
+  // =========================================================================
+  // 1. Lake 1 (North-West Deep Pine Lake): 18 x 14 tiles
+  drawWaterBody(tiles, 34, 20, 18, 14);
 
-  // (0) Procedural Buildings Architecture: Walls, Doorways & Interior Furnishings (Invisible Roofs)
-  BUILDINGS.forEach(bldg => {
-    // A. Perimeter walls with doorways
-    for (let c = bldg.minC; c <= bldg.maxC; c++) {
-      for (let r = bldg.minR; r <= bldg.maxR; r++) {
-        const isPerimeter = c === bldg.minC || c === bldg.maxC || r === bldg.minR || r === bldg.maxR;
-        if (!isPerimeter) continue;
+  // 2. Lake 2 (South-West Mirror Lake): 22 x 16 tiles
+  drawWaterBody(tiles, 38, 102, 22, 16);
 
-        const isDoorway = bldg.doorways.some(d => d.c === c && d.r === r);
-        if (!isDoorway) {
-          scenery.push({
-            id: `bldg_wall_${objId++}`,
-            x: c * TILE_SIZE + TILE_SIZE / 2,
-            y: r * TILE_SIZE + TILE_SIZE / 2,
-            type: 'building_wall',
-            width: 50,
-            height: 52,
-            footprintRadius: 24,
-            hp: 450,
-            maxHp: 450,
-            materialDrop: 'brick',
-            dropAmount: 4,
-            spriteKey: 'prop_ruined_wall',
-            sheetCol: 21,
-            sheetRow: 12
-          });
-        }
-      }
-    }
+  // 3. Lake 3 (East Sunken Lake): 22 x 16 tiles
+  drawWaterBody(tiles, 114, 46, 22, 16);
 
-    // B. Interior Partition Walls
-    bldg.interiorWalls.forEach(iw => {
-      scenery.push({
-        id: `bldg_iwall_${objId++}`,
-        x: iw.c * TILE_SIZE + TILE_SIZE / 2,
-        y: iw.r * TILE_SIZE + TILE_SIZE / 2,
-        type: 'building_wall',
-        width: 50,
-        height: 50,
-        footprintRadius: 24,
-        hp: 400,
-        maxHp: 400,
-        materialDrop: 'brick',
-        dropAmount: 3,
-        spriteKey: 'prop_ruined_wall',
-        sheetCol: 20,
-        sheetRow: 12
-      });
-    });
+  // =========================================================================
+  // LAYER 1: INTERCONNECTING DIRT PATHS & ARTERIAL HIGHWAYS
+  // =========================================================================
+  // A. North-South Grand Avenue (crosses entire world, 3 tiles wide)
+  drawDirtRoad(tiles, 72, 0, 160, 'vertical', 3);
 
-    // C. Interior Furnishings (Desks, Consoles, Bookshelves)
-    bldg.props.forEach(p => {
-      scenery.push({
-        id: `bldg_prop_${objId++}`,
-        x: p.c * TILE_SIZE + TILE_SIZE / 2,
-        y: p.r * TILE_SIZE + TILE_SIZE / 2,
-        type: p.type,
-        width: p.w,
-        height: p.h,
-        footprintRadius: p.radius,
-        hp: 120,
-        maxHp: 120,
-        materialDrop: p.mat,
-        dropAmount: p.drop,
-        spriteKey: 'prop_crate_wood',
-        sheetCol: p.sheetCol,
-        sheetRow: p.sheetRow
-      });
-    });
+  // B. East-West Grand Avenue (crosses entire world, 3 tiles wide)
+  drawDirtRoad(tiles, 0, 75, 160, 'horizontal', 3);
 
-    // D. Interior Ground Loot
-    bldg.loot.forEach(l => {
-      groundLoot.push({
-        id: `loot_bldg_${objId++}`,
-        name: l.type === 'banana' ? 'Banana Snack' : l.type === 'shield_cell' ? 'Shield Cell' : 'Ammo Box',
-        x: l.c * TILE_SIZE + TILE_SIZE / 2,
-        y: l.r * TILE_SIZE + TILE_SIZE / 2,
-        type: l.type,
-        isCollected: false,
-        spriteKey: l.type === 'banana' ? 'loot_banana' : l.type === 'shield_cell' ? 'loot_shield_cell' : 'loot_ammo_box'
-      });
-    });
+  // C. Logging trail through Dense Pine Forest along left border
+  drawDirtRoad(tiles, 12, 0, 160, 'vertical', 2);
+
+  // D. Branch paths connecting Lakes and Villages
+  drawDirtRoad(tiles, 52, 38, 20, 'horizontal', 2); // Lake 1 to Village 1
+  drawDirtRoad(tiles, 60, 104, 12, 'horizontal', 2); // Lake 2 to South Avenue
+  drawDirtRoad(tiles, 92, 54, 22, 'horizontal', 2);  // Village 1 to Lake 3
+
+  // E. Crossroads connector to Village 2 (South-East)
+  drawDirtRoad(tiles, 75, 75, 29, 'horizontal', 2);
+  drawDirtRoad(tiles, 104, 75, 28, 'vertical', 2);
+
+  // =========================================================================
+  // LAYER 2: 2 SMALL VILLAGES (PREFAB STRUCTURES)
+  // =========================================================================
+  // --- VILLAGE 1: Millbrook Village (North-Central, around tile 72, 38) ---
+  const v1Buildings = [
+    drawHousePrefab(66, 32, 4, 4, 'stone', 'Millbrook Manor'),
+    drawHousePrefab(76, 32, 4, 4, 'wood', 'Millbrook Tavern'),
+    drawHousePrefab(66, 42, 3, 3, 'brick', 'Blacksmith Workshop'),
+    drawHousePrefab(76, 42, 3, 3, 'wood', 'Village Cottage')
+  ];
+  // Village 1 Courtyard / Plaza paths
+  drawDirtRoad(tiles, 64, 38, 18, 'horizontal', 3);
+  drawDirtRoad(tiles, 72, 30, 18, 'vertical', 3);
+
+  v1Buildings.forEach(b => {
+    buildings.push(b);
+    scenery.push(...b.perimeterProps);
+    groundLoot.push(...b.interiorLoot);
   });
 
-  // (A) Ancient Stone Ruins: Pillars, Arches & Broken Walls (North-East: 3300-4350, 800-1950)
-  for (let ry = 900; ry < 1900; ry += 160) {
-    for (let rx = 3400; rx < 4300; rx += 180) {
-      // Avoid building footprints
-      if (BUILDINGS.some(b => rx >= b.minC * TILE_SIZE - 30 && rx <= (b.maxC + 1) * TILE_SIZE + 30 && ry >= b.minR * TILE_SIZE - 30 && ry <= (b.maxR + 1) * TILE_SIZE + 30)) {
-        continue;
-      }
-      const pn = pseudoNoise(rx, ry, 555);
-      if (pn < 0.6) {
-        const isColumn = pn < 0.35;
+  // --- VILLAGE 2: Riverside Hamlet (South-East, around tile 105, 104) ---
+  const v2Buildings = [
+    drawHousePrefab(98, 96, 4, 4, 'wood', 'Riverside Lodge'),
+    drawHousePrefab(108, 96, 3, 4, 'stone', 'Hamlet Watchtower'),
+    drawHousePrefab(98, 108, 4, 3, 'terracotta', 'Herbalist Hall'),
+    drawHousePrefab(108, 108, 3, 3, 'brick', 'Hamlet Granary')
+  ];
+  // Village 2 internal paths
+  drawDirtRoad(tiles, 96, 103, 18, 'horizontal', 3);
+  drawDirtRoad(tiles, 104, 94, 20, 'vertical', 3);
+
+  v2Buildings.forEach(b => {
+    buildings.push(b);
+    scenery.push(...b.perimeterProps);
+    groundLoot.push(...b.interiorLoot);
+  });
+
+  // =========================================================================
+  // LAYER 3: DENSE PINE FOREST ZONE ALONG LEFT BORDER (Cols 0 to 24)
+  // =========================================================================
+  let propId = 1000;
+  for (let r = 2; r < TILES_COUNT - 2; r += 2) {
+    for (let c = 1; c < 24; c += 2) {
+      // Leave logging trail clear (around c: 12)
+      if (Math.abs(c - 12) <= 1) continue;
+
+      const n = pseudoNoise(c, r, 333);
+      if (n > 0.35) {
+        // Pine Tree (Conical Evergreen: col 16/18, row 9, top row 8)
         scenery.push({
-          id: `scenery_ruin_${objId++}`,
-          x: rx + (pseudoNoise(rx, ry, 11) - 0.5) * 40,
-          y: ry + (pseudoNoise(rx, ry, 22) - 0.5) * 40,
-          type: isColumn ? 'stone_column' : 'ruined_wall',
-          width: isColumn ? 50 : 54,
-          height: isColumn ? 68 : 56,
-          footprintRadius: 22,
-          hp: 140,
-          maxHp: 140,
-          materialDrop: 'brick',
-          dropAmount: 6,
-          spriteKey: isColumn ? 'prop_stone_column' : 'prop_ruined_wall',
-          sheetCol: isColumn ? 22 : 20,
-          sheetRow: isColumn ? 14 : 12
+          id: `pine_forest_${propId++}`,
+          x: c * WORLD_TILE_SIZE + 16,
+          y: r * WORLD_TILE_SIZE + 28,
+          type: 'pine_tree',
+          width: 36,
+          height: 48,
+          footprintRadius: 14,
+          hp: 90,
+          maxHp: 90,
+          materialDrop: 'wood',
+          dropAmount: 5,
+          spriteKey: 'prop_pine_tree',
+          sheetCol: n > 0.65 ? 18 : 16,
+          sheetRow: 9,
+          sheetTopRow: 8
+        });
+      } else if (n > 0.18) {
+        // Tree Stump (col: 28, row: 9)
+        scenery.push({
+          id: `stump_forest_${propId++}`,
+          x: c * WORLD_TILE_SIZE + 16,
+          y: r * WORLD_TILE_SIZE + 24,
+          type: 'tree_stump',
+          width: 32,
+          height: 32,
+          footprintRadius: 12,
+          hp: 50,
+          maxHp: 50,
+          materialDrop: 'wood',
+          dropAmount: 3,
+          spriteKey: 'prop_tree_stump',
+          sheetCol: 28,
+          sheetRow: 9
+        });
+      } else if (n > 0.08) {
+        // Forest Wildflowers (col: 1, row: 7)
+        scenery.push({
+          id: `flower_forest_${propId++}`,
+          x: c * WORLD_TILE_SIZE + 16,
+          y: r * WORLD_TILE_SIZE + 20,
+          type: 'flower',
+          width: 24,
+          height: 24,
+          footprintRadius: 0,
+          hp: 1,
+          maxHp: 1,
+          materialDrop: 'wood',
+          dropAmount: 0,
+          spriteKey: 'prop_flower',
+          sheetCol: 1,
+          sheetRow: 7
         });
       }
     }
   }
 
-  // (B) Forest Clusters & Scenery across the 5000px Map
-  for (let i = 0; i < 220; i++) {
-    const rx = 160 + Math.floor(pseudoNoise(i, 11, 777) * (MAP_SIZE - 320));
-    const ry = 160 + Math.floor(pseudoNoise(i, 22, 888) * (MAP_SIZE - 320));
-
-    // Avoid blocking crossroads center, roads, buildings, or the river body
-    if (Math.hypot(rx - 2450, ry - 2450) < 220) continue;
-    if (Math.abs(rx - 2450) < 85 || Math.abs(ry - 2450) < 85) continue;
-    if (BUILDINGS.some(b => rx >= b.minC * TILE_SIZE - 40 && rx <= (b.maxC + 1) * TILE_SIZE + 40 && ry >= b.minR * TILE_SIZE - 40 && ry <= (b.maxR + 1) * TILE_SIZE + 40)) {
-      continue;
+  // =========================================================================
+  // LAYER 3: CAMPING ZONES WITH TENTS
+  // =========================================================================
+  // Camp 1: Pine Ridge Camp (tile 28, 62; world: 896, 1984)
+  const camp1X = 28 * WORLD_TILE_SIZE;
+  const camp1Y = 62 * WORLD_TILE_SIZE;
+  // 3 Tents (col: 15, row: 24)
+  scenery.push(
+    {
+      id: `camp1_tent_1`,
+      x: camp1X - 24,
+      y: camp1Y - 10,
+      type: 'tent',
+      width: 44,
+      height: 40,
+      footprintRadius: 18,
+      hp: 100,
+      maxHp: 100,
+      materialDrop: 'wood',
+      dropAmount: 4,
+      spriteKey: 'prop_tent',
+      sheetCol: 15,
+      sheetRow: 24
+    },
+    {
+      id: `camp1_tent_2`,
+      x: camp1X + 36,
+      y: camp1Y - 14,
+      type: 'tent',
+      width: 44,
+      height: 40,
+      footprintRadius: 18,
+      hp: 100,
+      maxHp: 100,
+      materialDrop: 'wood',
+      dropAmount: 4,
+      spriteKey: 'prop_tent',
+      sheetCol: 15,
+      sheetRow: 24
+    },
+    {
+      id: `camp1_tent_3`,
+      x: camp1X,
+      y: camp1Y + 36,
+      type: 'tent',
+      width: 44,
+      height: 40,
+      footprintRadius: 18,
+      hp: 100,
+      maxHp: 100,
+      materialDrop: 'wood',
+      dropAmount: 4,
+      spriteKey: 'prop_tent',
+      sheetCol: 13,
+      sheetRow: 24
+    },
+    // Tree Stumps around campfire
+    {
+      id: `camp1_stump_1`,
+      x: camp1X - 16,
+      y: camp1Y + 14,
+      type: 'tree_stump',
+      width: 32,
+      height: 32,
+      footprintRadius: 12,
+      hp: 50,
+      maxHp: 50,
+      materialDrop: 'wood',
+      dropAmount: 3,
+      spriteKey: 'prop_tree_stump',
+      sheetCol: 28,
+      sheetRow: 9
+    },
+    {
+      id: `camp1_stump_2`,
+      x: camp1X + 24,
+      y: camp1Y + 14,
+      type: 'tree_stump',
+      width: 32,
+      height: 32,
+      footprintRadius: 12,
+      hp: 50,
+      maxHp: 50,
+      materialDrop: 'wood',
+      dropAmount: 3,
+      spriteKey: 'prop_tree_stump',
+      sheetCol: 28,
+      sheetRow: 9
     }
+  );
+  groundLoot.push(
+    {
+      id: 'camp1_loot_1',
+      x: camp1X + 4,
+      y: camp1Y + 12,
+      type: 'banana',
+      name: 'Camp Rations',
+      spriteKey: 'loot_banana',
+      healHp: 25,
+      isCollected: false
+    },
+    {
+      id: 'camp1_loot_2',
+      x: camp1X - 30,
+      y: camp1Y + 16,
+      type: 'shield_cell',
+      name: 'Camp Shield Battery',
+      spriteKey: 'loot_shield_cell',
+      grantShield: 30,
+      isCollected: false
+    }
+  );
 
-    const riverCenter = getRiverCenter(ry);
-    if (Math.abs(rx - riverCenter) < 135) continue; // Don't spawn inside river water
+  // Camp 2: Lakeside Outpost (tile 53, 18; world: 1696, 576)
+  const camp2X = 53 * WORLD_TILE_SIZE;
+  const camp2Y = 18 * WORLD_TILE_SIZE;
+  scenery.push(
+    {
+      id: `camp2_tent_1`,
+      x: camp2X - 20,
+      y: camp2Y,
+      type: 'tent',
+      width: 44,
+      height: 40,
+      footprintRadius: 18,
+      hp: 100,
+      maxHp: 100,
+      materialDrop: 'wood',
+      dropAmount: 4,
+      spriteKey: 'prop_tent',
+      sheetCol: 15,
+      sheetRow: 24
+    },
+    {
+      id: `camp2_tent_2`,
+      x: camp2X + 32,
+      y: camp2Y,
+      type: 'tent',
+      width: 44,
+      height: 40,
+      footprintRadius: 18,
+      hp: 100,
+      maxHp: 100,
+      materialDrop: 'wood',
+      dropAmount: 4,
+      spriteKey: 'prop_tent',
+      sheetCol: 15,
+      sheetRow: 24
+    },
+    {
+      id: `camp2_barrel_1`,
+      x: camp2X + 6,
+      y: camp2Y + 22,
+      type: 'barrel_oil',
+      width: 28,
+      height: 32,
+      footprintRadius: 12,
+      hp: 75,
+      maxHp: 75,
+      materialDrop: 'wood',
+      dropAmount: 3,
+      spriteKey: 'prop_barrel_oil',
+      sheetCol: 6,
+      sheetRow: 23
+    },
+    {
+      id: `camp2_fence_1`,
+      x: camp2X - 44,
+      y: camp2Y + 10,
+      type: 'fence',
+      width: 32,
+      height: 32,
+      footprintRadius: 10,
+      hp: 80,
+      maxHp: 80,
+      materialDrop: 'wood',
+      dropAmount: 3,
+      spriteKey: 'prop_fence',
+      sheetCol: 13,
+      sheetRow: 13
+    }
+  );
+  groundLoot.push({
+    id: 'camp2_loot_1',
+    x: camp2X + 8,
+    y: camp2Y - 10,
+    type: 'banana',
+    name: 'Lakeside Supplies',
+    spriteKey: 'loot_banana',
+    healHp: 25,
+    isCollected: false
+  });
 
-    let propType: SceneryProp['type'] = 'oak_tree';
-    let sheetCol = 15;
+  // Camp 3: Highland Clearing Camp (tile 132, 116; world: 4224, 3712)
+  const camp3X = 132 * WORLD_TILE_SIZE;
+  const camp3Y = 116 * WORLD_TILE_SIZE;
+  scenery.push(
+    {
+      id: `camp3_tent_1`,
+      x: camp3X - 22,
+      y: camp3Y - 10,
+      type: 'tent',
+      width: 44,
+      height: 40,
+      footprintRadius: 18,
+      hp: 100,
+      maxHp: 100,
+      materialDrop: 'wood',
+      dropAmount: 4,
+      spriteKey: 'prop_tent',
+      sheetCol: 15,
+      sheetRow: 24
+    },
+    {
+      id: `camp3_tent_2`,
+      x: camp3X + 28,
+      y: camp3Y - 10,
+      type: 'tent',
+      width: 44,
+      height: 40,
+      footprintRadius: 18,
+      hp: 100,
+      maxHp: 100,
+      materialDrop: 'wood',
+      dropAmount: 4,
+      spriteKey: 'prop_tent',
+      sheetCol: 15,
+      sheetRow: 24
+    },
+    {
+      id: `camp3_stump_1`,
+      x: camp3X + 2,
+      y: camp3Y + 18,
+      type: 'tree_stump',
+      width: 32,
+      height: 32,
+      footprintRadius: 12,
+      hp: 50,
+      maxHp: 50,
+      materialDrop: 'wood',
+      dropAmount: 3,
+      spriteKey: 'prop_tree_stump',
+      sheetCol: 28,
+      sheetRow: 9
+    }
+  );
+  groundLoot.push({
+    id: 'camp3_loot_1',
+    x: camp3X + 2,
+    y: camp3Y - 4,
+    type: 'ammo_box',
+    name: 'Highland Cache',
+    spriteKey: 'loot_ammo_box',
+    grantMats: { wood: 20, brick: 15, metal: 10 },
+    isCollected: false
+  });
+
+  // =========================================================================
+  // LAYER 3: SCATTERED STANDALONE PROPS OVER GRASS & DIRT
+  // Pine Trees (col: 16/18, row: 9), Round Trees (col: 13/14/15, row: 9), Fences, Flowers, Stumps
+  // =========================================================================
+  for (let i = 0; i < 350; i++) {
+    const rx = 850 + Math.floor(pseudoNoise(i, 11, 777) * (MAP_SIZE - 950));
+    const ry = 100 + Math.floor(pseudoNoise(i, 22, 888) * (MAP_SIZE - 200));
+
+    // Avoid center crossroads
+    if (Math.hypot(rx - 2560, ry - 2560) < 220) continue;
+
+    // Avoid highways
+    if (Math.abs(rx - 2304) < 70 || Math.abs(ry - 2400) < 70) continue;
+
+    // Avoid buildings
+    const insideBuilding = buildings.some(
+      b => rx >= b.worldX - 35 && rx <= b.worldX + b.worldW + 35 &&
+           ry >= b.worldY - 35 && ry <= b.worldY + b.worldH + 35
+    );
+    if (insideBuilding) continue;
+
+    // Avoid water bodies
+    const tileCol = Math.floor(rx / WORLD_TILE_SIZE);
+    const tileRow = Math.floor(ry / WORLD_TILE_SIZE);
+    if (tiles[tileRow]?.[tileCol]?.isWater) continue;
+
+    const roll = pseudoNoise(i, 33, 999);
+    let propType: SceneryProp['type'] = 'round_tree';
+    let sheetCol = 13;
     let sheetRow = 9;
-    let w = 72;
-    let h = 82;
-    let radius = 24;
+    let sheetTopRow: number | undefined = 8;
+    let w = 38;
+    let h = 48;
+    let radius = 15;
+    let hp = 85;
     let mat: SceneryProp['materialDrop'] = 'wood';
     let dropAmt = 5;
-    let hp = 70;
 
-    if (ry > 3600) {
-      // Desert biome: Palm, Cactus, Barrel, Campfire
-      const rn = pseudoNoise(i, 33, 999);
-      if (rn > 0.55) {
-        propType = 'cactus';
-        sheetCol = 19;
-        sheetRow = 9;
-        w = 48;
-        h = 64;
-        radius = 18;
-        hp = 40;
-        mat = 'wood';
-        dropAmt = 3;
-      } else if (rn > 0.25) {
-        propType = 'palm_tree';
-        sheetCol = 18;
-        sheetRow = 9;
-        w = 70;
-        h = 85;
-        radius = 24;
-      } else {
-        propType = 'barrel_oil';
-        sheetCol = 42;
-        sheetRow = 20;
-        w = 38;
-        h = 46;
-        radius = 16;
-        hp = 50;
-        mat = 'metal';
-        dropAmt = 4;
-      }
-    } else if (rx < 1600 && ry < 1800) {
-      // Whispering Pines Forest in North-West
-      const rn = pseudoNoise(i, 44, 111);
-      if (rn > 0.4) {
-        propType = 'pine_tree';
-        sheetCol = 16;
-        sheetRow = 9;
-        w = 68;
-        h = 85;
-        radius = 22;
-      } else {
-        propType = 'bush';
-        sheetCol = 16;
-        sheetRow = 10;
-        w = 48;
-        h = 44;
-        radius = 16;
-        hp = 30;
-        dropAmt = 2;
-      }
-    } else if (rx > 3000 && ry > 2400) {
-      // Autumn Grove in South-East
-      const rn = pseudoNoise(i, 55, 222);
-      if (rn > 0.45) {
-        propType = 'orange_tree';
-        sheetCol = 17;
-        sheetRow = 9;
-        w = 72;
-        h = 82;
-        radius = 24;
-      } else {
-        propType = 'oak_tree';
-        sheetCol = 15;
-        sheetRow = 9;
-      }
+    if (roll > 0.65) {
+      // Pine Tree: (Conical Evergreen: col 16 or 18, row 9, top 8)
+      propType = 'pine_tree';
+      sheetCol = roll > 0.82 ? 18 : 16;
+      sheetRow = 9;
+      sheetTopRow = 8;
+      w = 36;
+      h = 48;
+      radius = 14;
+      hp = 90;
+    } else if (roll > 0.35) {
+      // Round Tree: (Vibrant/Forest/Autumn: col 13, 14, or 15, row 9, top 8)
+      propType = 'round_tree';
+      sheetCol = roll > 0.55 ? 13 : (roll > 0.45 ? 15 : 14);
+      sheetRow = 9;
+      sheetTopRow = 8;
+      w = 38;
+      h = 48;
+      radius = 15;
+      hp = 85;
+    } else if (roll > 0.22) {
+      // Tree Stump: (col: 28, row: 9)
+      propType = 'tree_stump';
+      sheetCol = 28;
+      sheetRow = 9;
+      sheetTopRow = undefined;
+      w = 32;
+      h = 32;
+      radius = 12;
+      hp = 50;
+      dropAmt = 3;
+    } else if (roll > 0.12) {
+      // Wooden Fence: (col: 13, row: 13)
+      propType = 'fence';
+      sheetCol = 13;
+      sheetRow = 13;
+      sheetTopRow = undefined;
+      w = 32;
+      h = 32;
+      radius = 10;
+      hp = 70;
+      dropAmt = 2;
     } else {
-      // Meadows scattered foliage & supply crates
-      const rn = pseudoNoise(i, 66, 333);
-      if (rn > 0.8) {
-        propType = 'crate_wood';
-        sheetCol = 48;
-        sheetRow = 1;
-        w = 42;
-        h = 42;
-        radius = 18;
-        hp = 45;
-        dropAmt = 3;
-      } else if (rn > 0.6) {
-        propType = 'bush';
-        sheetCol = 16;
-        sheetRow = 10;
-        w = 48;
-        h = 44;
-        radius = 16;
-        hp = 30;
-        dropAmt = 2;
-      } else {
-        propType = 'oak_tree';
-        sheetCol = 15;
-        sheetRow = 9;
-      }
+      // Red / Yellow Wildflowers: (col: 1, row: 7)
+      propType = 'flower';
+      sheetCol = 1;
+      sheetRow = 7;
+      sheetTopRow = undefined;
+      w = 24;
+      h = 24;
+      radius = 0;
+      hp = 1;
+      dropAmt = 0;
     }
 
     scenery.push({
-      id: `scenery_${objId++}`,
+      id: `scatter_prop_${propId++}`,
       x: rx,
       y: ry,
       type: propType,
@@ -1671,15 +2285,14 @@ function generateSuperAnimalStyleMap(): {
     });
   }
 
-  // 3. Ground Loot Spawns (Bananas, Shield Cells, Ammo Boxes)
-  let lootId = 1;
-  for (let l = 0; l < 50; l++) {
-    const lx = 200 + Math.floor(pseudoNoise(l, 44, 123) * (MAP_SIZE - 400));
+  // Ground Loot Pickups scattered in clearings
+  let lootId = 100;
+  for (let l = 0; l < 45; l++) {
+    const lx = 800 + Math.floor(pseudoNoise(l, 44, 123) * (MAP_SIZE - 950));
     const ly = 200 + Math.floor(pseudoNoise(l, 55, 456) * (MAP_SIZE - 400));
-
-    // Avoid placing in deep river water
-    const riverCenter = getRiverCenter(ly);
-    if (Math.abs(lx - riverCenter) < 90) continue;
+    const tileCol = Math.floor(lx / WORLD_TILE_SIZE);
+    const tileRow = Math.floor(ly / WORLD_TILE_SIZE);
+    if (tiles[tileRow]?.[tileCol]?.isWater) continue;
 
     const roll = l % 4;
     if (roll === 0) {
@@ -1730,7 +2343,7 @@ function generateSuperAnimalStyleMap(): {
     }
   }
 
-  return { tiles, scenery, groundLoot };
+  return { tiles, scenery, groundLoot, buildings };
 }
 
 // ============================================================================
@@ -1769,7 +2382,23 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       img.src = src;
       imageAssets.current[key] = img;
     });
+
+    // Also preload the 1024x1024 modular character action sheets (idle, walk, run, attack, hurt, death)
+    Object.values(CHARACTER_ACTION_SHEETS).forEach(sheets => {
+      [sheets.idle, sheets.walk, sheets.run, sheets.attack, sheets.hurt, sheets.death].forEach(url => {
+        if (url && !characterActionCache.has(url)) {
+          const img = new Image();
+          img.src = url;
+          characterActionCache.set(url, img);
+        }
+      });
+    });
   }, []);
+
+  // Tracking animation transitions (damage, death)
+  const localDeathTimeRef = useRef<number>(0);
+  const lastDamageTimeRef = useRef<number>(0);
+  const prevLocalHpRef = useRef<number>(100);
 
   // Firestore Synced States
   const [arenaPlayers, setArenaPlayers] = useState<ArenaPlayer[]>([]);
@@ -1838,6 +2467,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     tiles: TileData[][];
     scenery: SceneryProp[];
     groundLoot: GroundLootItem[];
+    buildings: GeneratedBuilding[];
   } | null>(null);
 
   if (!worldDataRef.current) {
@@ -1923,6 +2553,13 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       setArenaPlayers(players);
       const me = players.find(p => p.uid === user.id);
       if (me) {
+        if (me.hp < prevLocalHpRef.current) {
+          lastDamageTimeRef.current = Date.now();
+        }
+        if (!me.isAlive && prevLocalHpRef.current > 0 && localDeathTimeRef.current === 0) {
+          localDeathTimeRef.current = Date.now();
+        }
+        prevLocalHpRef.current = me.hp;
         setLocalHp(me.hp);
         setLocalShield(me.shield);
         setIsAlive(me.isAlive);
@@ -2717,8 +3354,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           // Spatial Footstep Sound for Local Player
           if (now - lastLocalFootstepTime.current > 290) {
             lastLocalFootstepTime.current = now;
-            const tileCol = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(localX / TILE_SIZE)));
-            const tileRow = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(localY / TILE_SIZE)));
+            const tileCol = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(localX / WORLD_TILE_SIZE)));
+            const tileRow = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(localY / WORLD_TILE_SIZE)));
             const surface = worldDataRef.current?.tiles[tileRow]?.[tileCol]?.surface || 'grass';
             soundEngine.playSpatialFootstep(localX, localY, localX, localY, surface);
           }
@@ -2738,6 +3375,33 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                   blocked = true;
                   break;
                 }
+              }
+            }
+          }
+
+          // Building solid hitbox collision (Roof and walls block player movement)
+          if (!blocked && worldDataRef.current?.buildings) {
+            for (const bldg of worldDataRef.current.buildings) {
+              const hb = bldg.hitbox;
+              if (
+                nextX + collRadius > hb.x &&
+                nextX - collRadius < hb.x + hb.w &&
+                nextY + collRadius > hb.y &&
+                nextY - collRadius < hb.y + hb.h
+              ) {
+                const dw = bldg.doorway;
+                const isAtDoorX = nextX >= dw.x && nextX <= dw.x + dw.w;
+                const isAtDoorY = nextY >= dw.y - 12 && nextY <= dw.y + dw.h + 12;
+                if (isAtDoorX && isAtDoorY) {
+                  const roofLimitY = hb.y + WORLD_TILE_SIZE * (bldg.height >= 4 ? 2 : 1);
+                  if (nextY < roofLimitY) {
+                    blocked = true;
+                    break;
+                  }
+                  continue;
+                }
+                blocked = true;
+                break;
               }
             }
           }
@@ -2788,6 +3452,25 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           }
         }
 
+        // Unstuck safeguard: ensure player is never trapped inside building walls/roofs
+        if (worldDataRef.current?.buildings) {
+          for (const bldg of worldDataRef.current.buildings) {
+            const hb = bldg.hitbox;
+            if (
+              localX > hb.x + 10 && localX < hb.x + hb.w - 10 &&
+              localY > hb.y + 10 && localY < hb.y + hb.h - 10
+            ) {
+              const dw = bldg.doorway;
+              const isAtDoor = localX >= dw.x && localX <= dw.x + dw.w && localY >= dw.y - 10 && localY <= dw.y + dw.h + 10;
+              if (!isAtDoor) {
+                setLocalX(dw.x + dw.w / 2);
+                setLocalY(dw.y + dw.h + 24);
+                break;
+              }
+            }
+          }
+        }
+
         // Unstuck safeguard: ensure player is never trapped inside walls or bunkers (exclude ramps!)
         for (const st of structures) {
           if (st.type === 'brick_ramp') continue; // NEVER push player off ramps - ramps are walkable platforms!
@@ -2803,8 +3486,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         }
 
         // Water walking ripple particles
-        const curCol = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(localX / TILE_SIZE)));
-        const curRow = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(localY / TILE_SIZE)));
+        const curCol = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(localX / WORLD_TILE_SIZE)));
+        const curRow = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(localY / WORLD_TILE_SIZE)));
         if (worldDataRef.current?.tiles[curRow]?.[curCol]?.isWater && Math.random() < 0.2) {
           spawnParticles(localX, localY, '#38bdf8', 'spark', 2, 1.2);
         }
@@ -2870,8 +3553,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             const movedDist = Math.hypot(p.x - prevPos.x, p.y - prevPos.y);
             if (movedDist > 3.5 && now - prevPos.lastStepTime > 320) {
               prevPos.lastStepTime = now;
-              const enemyTileCol = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(p.x / TILE_SIZE)));
-              const enemyTileRow = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(p.y / TILE_SIZE)));
+              const enemyTileCol = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(p.x / WORLD_TILE_SIZE)));
+              const enemyTileRow = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(p.y / WORLD_TILE_SIZE)));
               const enemySurface = worldDataRef.current?.tiles[enemyTileRow]?.[enemyTileCol]?.surface || 'grass';
               soundEngine.playSpatialFootstep(p.x, p.y, localX, localY, enemySurface);
             }
@@ -2964,8 +3647,21 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
         let hit = false;
 
+        // Collision with building walls and roofs
+        if (worldDataRef.current?.buildings) {
+          for (const bldg of worldDataRef.current.buildings) {
+            const hb = bldg.hitbox;
+            if (p.x >= hb.x && p.x <= hb.x + hb.w && p.y >= hb.y && p.y <= hb.y + hb.h) {
+              hit = true;
+              soundEngine.playSpatialHit(p.x, p.y, localX, localY);
+              spawnParticles(p.x, p.y, '#94a3b8', 'stone_chip', 5, 2.5);
+              break;
+            }
+          }
+        }
+
         // Collision with props
-        if (worldDataRef.current) {
+        if (!hit && worldDataRef.current) {
           for (const sc of worldDataRef.current.scenery) {
             if (sc.hp > 0) {
               const dist = Math.hypot(p.x - sc.x, p.y - sc.y);
@@ -3079,74 +3775,131 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       // Translate world by Camera position
       ctx.translate(-camX, -camY);
 
-      // (A) LAYER 1: GROUND TERRAIN & ROADS (VIEWPORT CULLED)
-      const startCol = Math.max(0, Math.floor((camX - 20) / TILE_SIZE));
-      const endCol = Math.min(TILES_COUNT - 1, Math.ceil((camX + viewW + 20) / TILE_SIZE));
-      const startRow = Math.max(0, Math.floor((camY - 20) / TILE_SIZE));
-      const endRow = Math.min(TILES_COUNT - 1, Math.ceil((camY + viewH + 20) / TILE_SIZE));
+      // =======================================================================
+      // LAYER 0 (SOLID GROUND BASE): 100% SOLID GRASS (col: 5, row: 0)
+      // Iterates through every visible viewport cell to eliminate all black gaps!
+      // =======================================================================
+      const startCol = Math.max(0, Math.floor((camX - 32) / WORLD_TILE_SIZE));
+      const endCol = Math.min(TILES_COUNT - 1, Math.ceil((camX + viewW + 32) / WORLD_TILE_SIZE));
+      const startRow = Math.max(0, Math.floor((camY - 32) / WORLD_TILE_SIZE));
+      const endRow = Math.min(TILES_COUNT - 1, Math.ceil((camY + viewH + 32) / WORLD_TILE_SIZE));
 
       const sheetImg = imageAssets.current['landscape_sheet'];
       const hasSheet = sheetImg && sheetImg.complete && sheetImg.naturalWidth > 0;
 
+      ctx.imageSmoothingEnabled = false; // Crisp 16x16 Kenney pixel scaling
+      const solidGrassCoords = getTileSourceCoords(5, 0); // Solid grass: col 5, row 0 (sx: 5*17, sy: 0*17)
+
+      for (let r = startRow; r <= endRow; r++) {
+        for (let c = startCol; c <= endCol; c++) {
+          const tx = c * WORLD_TILE_SIZE;
+          const ty = r * WORLD_TILE_SIZE;
+
+          if (hasSheet) {
+            ctx.drawImage(
+              sheetImg,
+              solidGrassCoords.sx,
+              solidGrassCoords.sy,
+              TILE_SIZE,
+              TILE_SIZE,
+              tx,
+              ty,
+              WORLD_TILE_SIZE,
+              WORLD_TILE_SIZE
+            );
+          } else {
+            ctx.fillStyle = '#15803d';
+            ctx.fillRect(tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+          }
+        }
+      }
+
+      // =======================================================================
+      // LAYER 1 (STRUCTURED WATER & DIRT REGIONS): 9-Slice Ponds & Dirt Roads
+      // =======================================================================
       if (worldDataRef.current) {
-        ctx.imageSmoothingEnabled = false; // Crisp pixel art scaling for 16x16 tiles
         for (let r = startRow; r <= endRow; r++) {
           for (let c = startCol; c <= endCol; c++) {
-            const tile = worldDataRef.current.tiles[r][c];
-            const tx = c * TILE_SIZE;
-            const ty = r * TILE_SIZE;
+            const tile = worldDataRef.current.tiles[r]?.[c];
+            if (!tile) continue;
 
-            if (hasSheet && tile.sheetCol !== undefined && tile.sheetRow !== undefined) {
-              // 1. Draw base terrain tile sliced from sheet (17px step, 16px tile size)
-              ctx.drawImage(
-                sheetImg,
-                tile.sheetCol * 17,
-                tile.sheetRow * 17,
-                16,
-                16,
-                tx,
-                ty,
-                TILE_SIZE,
-                TILE_SIZE
-              );
-
-              // 2. Draw overlay if present
-              if (tile.overlayCol !== undefined && tile.overlayRow !== undefined) {
+            if (tile.overlayCol !== undefined && tile.overlayRow !== undefined) {
+              const tx = c * WORLD_TILE_SIZE;
+              const ty = r * WORLD_TILE_SIZE;
+              if (hasSheet) {
+                const { sx, sy } = getTileSourceCoords(tile.overlayCol, tile.overlayRow);
                 ctx.drawImage(
                   sheetImg,
-                  tile.overlayCol * 17,
-                  tile.overlayRow * 17,
-                  16,
-                  16,
+                  sx,
+                  sy,
+                  TILE_SIZE,
+                  TILE_SIZE,
                   tx,
                   ty,
-                  TILE_SIZE,
-                  TILE_SIZE
+                  WORLD_TILE_SIZE,
+                  WORLD_TILE_SIZE
                 );
+              } else {
+                ctx.fillStyle = tile.baseColor;
+                ctx.fillRect(tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
               }
-            } else {
-              // Fallback color
-              ctx.fillStyle = tile.baseColor;
-              ctx.fillRect(tx, ty, TILE_SIZE, TILE_SIZE);
-            }
-
-            // Road Markings
-            if (tile.hasRoadMarking === 'h_dash') {
-              ctx.fillStyle = '#fef08a';
-              ctx.fillRect(tx + 8, ty + 23, 34, 4);
-            } else if (tile.hasRoadMarking === 'v_dash') {
-              ctx.fillStyle = '#fef08a';
-              ctx.fillRect(tx + 23, ty + 8, 4, 34);
             }
           }
         }
       }
 
-      // (B) LAYER 2: Y-SORTING (DEPTH SORTING) RENDER QUEUE
-      // Every entity that has 2.5D visual depth is collected and sorted by Y!
+      // =======================================================================
+      // LAYER 2 (PREFAB STRUCTURES): 4x4 and 3x3 Houses (Roof, Walls, Doors)
+      // =======================================================================
+      if (worldDataRef.current?.buildings) {
+        for (const bldg of worldDataRef.current.buildings) {
+          const hb = bldg.hitbox;
+          // Viewport culling check
+          if (
+            hb.x + hb.w < camX - 40 ||
+            hb.x > camX + viewW + 40 ||
+            hb.y + hb.h < camY - 40 ||
+            hb.y > camY + viewH + 40
+          ) {
+            continue;
+          }
+
+          // Soft building ground shadow
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+          ctx.fillRect(hb.x + 4, hb.y + hb.h - 8, hb.w, 14);
+
+          // Draw building tiles (Roof Top row -> Wall Middle rows -> Door/Foundation Bottom row)
+          for (const t of bldg.tiles) {
+            const tx = t.col * WORLD_TILE_SIZE;
+            const ty = t.row * WORLD_TILE_SIZE;
+
+            if (hasSheet) {
+              const { sx, sy } = getTileSourceCoords(t.sheetCol, t.sheetRow);
+              ctx.drawImage(
+                sheetImg,
+                sx,
+                sy,
+                TILE_SIZE,
+                TILE_SIZE,
+                tx,
+                ty,
+                WORLD_TILE_SIZE,
+                WORLD_TILE_SIZE
+              );
+            } else {
+              ctx.fillStyle = t.isRoof ? '#991b1b' : '#64748b';
+              ctx.fillRect(tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+            }
+          }
+        }
+      }
+
+      // =======================================================================
+      // LAYER 3 (DECORATIONS & Y-SORTED PROPS): Trees, Fences, Tents, Flowers, Stumps
+      // =======================================================================
       const ySortQueue: YSortEntity[] = [];
 
-      // 1. Scenery Props (Trees, Shipping Containers, Barrels, Crates)
+      // 1. Scenery Props (Pine Trees, Round Trees, Fences, Tents, Flowers, Stumps)
       if (worldDataRef.current) {
         worldDataRef.current.scenery.forEach(sc => {
           // Viewport culling check
@@ -3166,44 +3919,204 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             render: (cContext) => {
               cContext.save();
 
-              if (hasSheet && sc.sheetCol !== undefined && sc.sheetRow !== undefined) {
-                // Ground shadow
-                cContext.fillStyle = 'rgba(0, 0, 0, 0.32)';
-                cContext.beginPath();
-                cContext.ellipse(sc.x, sc.y + 2, sc.footprintRadius * 1.1, sc.footprintRadius * 0.45, 0, 0, Math.PI * 2);
-                cContext.fill();
+              // 1. Normalize tile coordinates for any scenery prop
+              let col = sc.sheetCol;
+              let row = sc.sheetRow;
+              let topRow = sc.sheetTopRow;
 
-                // Crisp pixel sprite from 16x16 sheet
+              if (sc.type === 'pine_tree') {
+                if (col === undefined || col === 0 || row === 8) {
+                  col = 16;
+                  row = 9;
+                  topRow = 8;
+                }
+              } else if (sc.type === 'round_tree' || sc.type === 'oak_tree') {
+                if (col === undefined || col === 1 || row === 8) {
+                  col = 13;
+                  row = 9;
+                  topRow = 8;
+                }
+              } else if (sc.type === 'tree_stump') {
+                if (col === undefined || col === 0) {
+                  col = 28;
+                  row = 9;
+                }
+              } else if (sc.type === 'tent') {
+                if (col === undefined || col === 5) {
+                  col = 15;
+                  row = 24;
+                }
+              } else if (sc.type === 'fence') {
+                if (col === undefined || col === 12) {
+                  col = 13;
+                  row = 13;
+                }
+              } else if (sc.type === 'flower') {
+                if (col === undefined || col === 0) {
+                  col = 1;
+                  row = 7;
+                }
+              }
+
+              // 2. Soft ground shadow under prop
+              if (sc.type !== 'flower') {
+                cContext.fillStyle = 'rgba(0, 0, 0, 0.28)';
+                cContext.beginPath();
+                cContext.ellipse(sc.x, sc.y + 2, sc.footprintRadius * 1.15, sc.footprintRadius * 0.45, 0, 0, Math.PI * 2);
+                cContext.fill();
+              }
+
+              // 3. Render Sprite from Kenney roguelikeSheet
+              if (hasSheet && col !== undefined && row !== undefined) {
                 cContext.imageSmoothingEnabled = false;
-                cContext.drawImage(
-                  sheetImg,
-                  sc.sheetCol * 17,
-                  sc.sheetRow * 17,
-                  16,
-                  16,
-                  sc.x - sc.width / 2,
-                  sc.y - sc.height + sc.footprintRadius * 0.4,
-                  sc.width,
-                  sc.height
-                );
-              } else {
-                const img = imageAssets.current[sc.spriteKey];
-                if (img && img.complete && img.naturalWidth > 0) {
-                  // Draw anchored to bottom center (sc.x, sc.y)
+
+                if (topRow !== undefined) {
+                  // Two-tile tall structure (e.g. Kenney Pine / Round Tree: row 8 top crown + row 9 lower canopy & trunk)
+                  const { sx: sxTop, sy: syTop } = getTileSourceCoords(col, topRow);
+                  const { sx: sxBot, sy: syBot } = getTileSourceCoords(col, row);
+                  const halfH = sc.height * 0.53;
+
+                  // Upper canopy / spire
                   cContext.drawImage(
-                    img, 
-                    sc.x - sc.width / 2, 
-                    sc.y - sc.height + sc.footprintRadius * 0.4, 
-                    sc.width, 
+                    sheetImg,
+                    sxTop, syTop, TILE_SIZE, TILE_SIZE,
+                    sc.x - sc.width / 2,
+                    sc.y - sc.height,
+                    sc.width,
+                    halfH
+                  );
+                  // Lower canopy & trunk
+                  cContext.drawImage(
+                    sheetImg,
+                    sxBot, syBot, TILE_SIZE, TILE_SIZE,
+                    sc.x - sc.width / 2,
+                    sc.y - halfH + 1,
+                    sc.width,
+                    halfH
+                  );
+                } else {
+                  // Single tile prop (Stump, Tent, Fence, Flower, Crate, Barrel)
+                  const { sx, sy } = getTileSourceCoords(col, row);
+                  cContext.drawImage(
+                    sheetImg,
+                    sx, sy, TILE_SIZE, TILE_SIZE,
+                    sc.x - sc.width / 2,
+                    sc.y - sc.height + (sc.type === 'flower' ? 0 : 2),
+                    sc.width,
+                    sc.height
+                  );
+                }
+              } else {
+                // Fallback: Check loaded preloaded SVG image asset
+                const fallbackImg = imageAssets.current[sc.spriteKey] || 
+                                    (sc.type === 'round_tree' ? imageAssets.current['prop_oak_tree'] : null) ||
+                                    (sc.type === 'pine_tree' ? imageAssets.current['prop_pine_tree'] : null);
+                if (fallbackImg && fallbackImg.complete && fallbackImg.naturalWidth > 0) {
+                  cContext.drawImage(
+                    fallbackImg,
+                    sc.x - sc.width / 2,
+                    sc.y - sc.height + sc.footprintRadius * 0.35,
+                    sc.width,
                     sc.height
                   );
                 } else {
-                  // Procedural fallback
-                  cContext.translate(sc.x, sc.y);
-                  cContext.fillStyle = '#15803d';
-                  cContext.beginPath();
-                  cContext.arc(0, -sc.footprintRadius, sc.footprintRadius, 0, Math.PI * 2);
-                  cContext.fill();
+                  // Rich procedural fallback with visible trunk and foliage (never blends into grass!)
+                  if (sc.type === 'pine_tree') {
+                    // Brown wooden trunk
+                    cContext.fillStyle = '#78350f';
+                    cContext.fillRect(sc.x - 4, sc.y - 12, 8, 12);
+                    // Tier 1 (dark pine base)
+                    cContext.fillStyle = '#14532d';
+                    cContext.beginPath();
+                    cContext.moveTo(sc.x - sc.width * 0.44, sc.y - 8);
+                    cContext.lineTo(sc.x + sc.width * 0.44, sc.y - 8);
+                    cContext.lineTo(sc.x, sc.y - sc.height * 0.55);
+                    cContext.closePath();
+                    cContext.fill();
+                    // Tier 2 (mid green)
+                    cContext.fillStyle = '#166534';
+                    cContext.beginPath();
+                    cContext.moveTo(sc.x - sc.width * 0.36, sc.y - sc.height * 0.38);
+                    cContext.lineTo(sc.x + sc.width * 0.36, sc.y - sc.height * 0.38);
+                    cContext.lineTo(sc.x, sc.y - sc.height * 0.8);
+                    cContext.closePath();
+                    cContext.fill();
+                    // Tier 3 (bright peak)
+                    cContext.fillStyle = '#22c55e';
+                    cContext.beginPath();
+                    cContext.moveTo(sc.x - sc.width * 0.26, sc.y - sc.height * 0.65);
+                    cContext.lineTo(sc.x + sc.width * 0.26, sc.y - sc.height * 0.65);
+                    cContext.lineTo(sc.x, sc.y - sc.height);
+                    cContext.closePath();
+                    cContext.fill();
+                  } else if (sc.type === 'round_tree' || sc.type === 'oak_tree') {
+                    // Sturdy wooden trunk
+                    cContext.fillStyle = '#78350f';
+                    cContext.fillRect(sc.x - 5, sc.y - 16, 10, 16);
+                    // Canopy shadow base
+                    cContext.fillStyle = '#14532d';
+                    cContext.beginPath();
+                    cContext.arc(sc.x, sc.y - sc.height * 0.58, sc.width * 0.42, 0, Math.PI * 2);
+                    cContext.fill();
+                    // Foliage clusters
+                    cContext.fillStyle = '#16a34a';
+                    cContext.beginPath();
+                    cContext.arc(sc.x - sc.width * 0.15, sc.y - sc.height * 0.64, sc.width * 0.3, 0, Math.PI * 2);
+                    cContext.arc(sc.x + sc.width * 0.15, sc.y - sc.height * 0.6, sc.width * 0.32, 0, Math.PI * 2);
+                    cContext.fill();
+                    // Sunlit crown
+                    cContext.fillStyle = '#22c55e';
+                    cContext.beginPath();
+                    cContext.arc(sc.x, sc.y - sc.height * 0.74, sc.width * 0.28, 0, Math.PI * 2);
+                    cContext.fill();
+                  } else if (sc.type === 'tree_stump') {
+                    cContext.fillStyle = '#78350f';
+                    cContext.fillRect(sc.x - 8, sc.y - 12, 16, 12);
+                    cContext.fillStyle = '#d97706';
+                    cContext.beginPath();
+                    cContext.ellipse(sc.x, sc.y - 12, 8, 4, 0, 0, Math.PI * 2);
+                    cContext.fill();
+                    cContext.fillStyle = '#fef08a';
+                    cContext.beginPath();
+                    cContext.ellipse(sc.x, sc.y - 12, 5, 2.5, 0, 0, Math.PI * 2);
+                    cContext.fill();
+                  } else if (sc.type === 'tent') {
+                    cContext.fillStyle = '#d97706';
+                    cContext.beginPath();
+                    cContext.moveTo(sc.x - sc.width * 0.45, sc.y);
+                    cContext.lineTo(sc.x + sc.width * 0.45, sc.y);
+                    cContext.lineTo(sc.x, sc.y - sc.height * 0.85);
+                    cContext.closePath();
+                    cContext.fill();
+                    cContext.fillStyle = '#1e293b';
+                    cContext.beginPath();
+                    cContext.moveTo(sc.x - 6, sc.y);
+                    cContext.lineTo(sc.x + 6, sc.y);
+                    cContext.lineTo(sc.x, sc.y - sc.height * 0.5);
+                    cContext.closePath();
+                    cContext.fill();
+                  } else if (sc.type === 'fence') {
+                    cContext.fillStyle = '#92400e';
+                    cContext.fillRect(sc.x - sc.width * 0.4, sc.y - 14, 6, 14);
+                    cContext.fillRect(sc.x + sc.width * 0.4 - 6, sc.y - 14, 6, 14);
+                    cContext.fillStyle = '#b45309';
+                    cContext.fillRect(sc.x - sc.width * 0.45, sc.y - 12, sc.width * 0.9, 4);
+                    cContext.fillRect(sc.x - sc.width * 0.45, sc.y - 6, sc.width * 0.9, 4);
+                  } else if (sc.type === 'flower') {
+                    cContext.fillStyle = '#15803d';
+                    cContext.fillRect(sc.x - 1, sc.y - 10, 2, 10);
+                    cContext.fillStyle = '#f43f5e';
+                    cContext.beginPath();
+                    cContext.arc(sc.x, sc.y - 12, 5, 0, Math.PI * 2);
+                    cContext.fill();
+                    cContext.fillStyle = '#fef08a';
+                    cContext.beginPath();
+                    cContext.arc(sc.x, sc.y - 12, 2, 0, Math.PI * 2);
+                    cContext.fill();
+                  } else {
+                    cContext.fillStyle = '#b45309';
+                    cContext.fillRect(sc.x - sc.width / 2, sc.y - sc.height, sc.width, sc.height);
+                  }
                 }
               }
 
@@ -3516,8 +4429,41 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         // Check if fantasy character sprite sheet is available
         const resolvedSkinId = FANTASY_SKIN_ALIASES[skinId] || skinId;
         const skinDef = getFantasySkin(resolvedSkinId);
-        const sheetImg = imageAssets.current[`char_${resolvedSkinId}`] || 
+        const sheets = skinDef.actionSheets || CHARACTER_ACTION_SHEETS[resolvedSkinId] || CHARACTER_ACTION_SHEETS.hero;
+
+        // Determine active action state:
+        // 1. Death: if dead / hp <= 0
+        // 2. Hurt: if recent damage (< 320ms)
+        // 3. Attack: if recently fired (< 280ms)
+        // 4. Run / Walk: if moving (run if sprinting, walk otherwise)
+        // 5. Idle: standing still
+        const isDead = isLocal ? !isAlive : (hp <= 0);
+        const isHurt = isLocal ? (cNow - lastDamageTimeRef.current < 320) : false;
+        const isAttacking = isLocal ? (cNow - lastShotTime < 280) : false;
+        const isMoving = Math.abs(Math.sin(stride)) > 0.04;
+        const isSprinting = isMoving && isLocal && (!!keysPressed.current['shift'] || Math.abs(Math.sin(stride)) > 0.45);
+
+        let activeAction: 'idle' | 'walk' | 'run' | 'attack' | 'hurt' | 'death' = 'idle';
+        if (isDead) {
+          activeAction = 'death';
+        } else if (isHurt) {
+          activeAction = 'hurt';
+        } else if (isAttacking) {
+          activeAction = 'attack';
+        } else if (isSprinting) {
+          activeAction = 'run';
+        } else if (isMoving) {
+          activeAction = 'walk';
+        } else {
+          activeAction = 'idle';
+        }
+
+        const activeSheetSrc = sheets[activeAction] || sheets.idle;
+        const sheetImg = getActionSheetImage(activeSheetSrc) || 
+                         getActionSheetImage(sheets.idle) || 
+                         imageAssets.current[`char_${resolvedSkinId}`] || 
                          imageAssets.current[`char_${skinId}`] || 
+                         imageAssets.current['char_knight_hero'] ||
                          imageAssets.current['char_cultist'];
         const hasSheet = sheetImg && sheetImg.complete && sheetImg.naturalWidth > 0;
 
@@ -3525,47 +4471,60 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           // --- FULL 4-DIRECTION TOP-DOWN WALKING & IDLE PIXEL SPRITE ANIMATION ---
           cContext.save();
 
-          // Movement detection from stride
-          const isMoving = Math.abs(Math.sin(stride)) > 0.04;
-          const walkBob = isMoving ? Math.abs(Math.sin(stride)) * -2 : 0;
+          // Movement bobbing
+          const walkBob = (isMoving && !isDead) ? Math.abs(Math.sin(stride)) * -2 : 0;
           cContext.translate(0, walkBob);
 
           // Facing direction from aim angle (0: East, PI/2: South, -PI/2: North, PI / -PI: West)
           const sinA = Math.sin(angle);
           const cosA = Math.cos(angle);
 
-          // Row determination in 128x128 sheet (each row is 32px):
+          // Grid Layout in 1024x1024 modular sheets (4 directions):
           // Row 0 = Facing Down / South (towards viewer)
-          // Row 1 = Facing Left / West
-          // Row 2 = Facing Right / East
-          // Row 3 = Facing Up / North (away from viewer)
+          // Row 1 = Facing Up / North (away from viewer)
+          // Row 2 = Facing Left / West
+          // Row 3 = Facing Right / East
           let dirRow = 0;
           if (sinA > 0.45) {
             dirRow = 0; // Down
           } else if (sinA < -0.45) {
-            dirRow = 3; // Up
+            dirRow = 1; // Up
           } else if (cosA < 0) {
-            dirRow = 1; // Left
+            dirRow = 2; // Left
           } else {
-            dirRow = 2; // Right
+            dirRow = 3; // Right
           }
 
-          // Frame column in the row (0: Idle, 1: Walk Step A, 2: Walk Step B, 3: Action)
+          // Frame column calculation
           let frameCol = 0;
-          if (isMoving) {
-            const frameSpeed = 135;
-            const cycle = Math.floor(cNow / frameSpeed) % 4;
-            frameCol = cycle === 0 ? 0 : cycle === 1 ? 1 : cycle === 2 ? 0 : 2;
+          if (activeAction === 'death') {
+            const deathElapsed = isLocal ? (cNow - (localDeathTimeRef.current || cNow)) : 500;
+            frameCol = Math.min(3, Math.floor(Math.max(0, deathElapsed) / 130));
+          } else if (activeAction === 'hurt') {
+            const hurtElapsed = isLocal ? (cNow - lastDamageTimeRef.current) : 0;
+            frameCol = Math.min(3, Math.floor(Math.max(0, hurtElapsed) / 80));
+          } else if (activeAction === 'attack') {
+            const shotElapsed = isLocal ? (cNow - lastShotTime) : 0;
+            frameCol = Math.min(3, Math.floor(Math.max(0, shotElapsed) / 70));
+          } else if (activeAction === 'run') {
+            frameCol = Math.floor(cNow / 110) % 4;
+          } else if (activeAction === 'walk') {
+            frameCol = Math.floor(cNow / 140) % 4;
           } else {
-            frameCol = 0;
+            // Idle subtle breathing animation
+            frameCol = Math.floor(cNow / 260) % 4;
           }
 
-          const sx = frameCol * 32;
-          const sy = dirRow * 32;
-          const sw = 32;
-          const sh = 32;
+          // Support both 1024x1024 modular sheets (256x256 frames) and legacy sheets
+          const isModular1024 = sheetImg.naturalWidth >= 512;
+          const frameSize = isModular1024 ? 256 : 32;
 
-          // Scale 32x32 source frames cleanly to 48x48 pixel size on the 5000px map canvas
+          const sx = frameCol * frameSize;
+          const sy = dirRow * frameSize;
+          const sw = frameSize;
+          const sh = frameSize;
+
+          // Scale source frames cleanly to 48x48 pixel size on the 5000px map canvas
           const sprW = 48;
           const sprH = 48;
           cContext.imageSmoothingEnabled = false;
@@ -3576,41 +4535,43 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             sw,
             sh,
             -sprW / 2,
-            -sprH + 14,
+            -sprH + 16,
             sprW,
             sprH
           );
 
           cContext.restore();
 
-          // Held Weapon anchored & rotated towards crosshair
-          cContext.save();
-          cContext.rotate(angle);
-          const weaponItem = SHOP_ITEMS.find(i => i.id === weaponId) || equippedWeapon;
-          const beamCol = weaponItem?.stats?.beamColor || '#f97316';
+          // Held Weapon anchored & rotated towards crosshair (only if alive!)
+          if (!isDead) {
+            cContext.save();
+            cContext.rotate(angle);
+            const weaponItem = SHOP_ITEMS.find(i => i.id === weaponId) || equippedWeapon;
+            const beamCol = weaponItem?.stats?.beamColor || '#f97316';
 
-          // Hands reaching out
-          cContext.fillStyle = '#fed7aa';
-          cContext.beginPath();
-          cContext.roundRect(6, -8, 10, 4, 2);
-          cContext.roundRect(6, 4, 10, 4, 2);
-          cContext.fill();
+            // Hands reaching out
+            cContext.fillStyle = '#fed7aa';
+            cContext.beginPath();
+            cContext.roundRect(6, -8, 10, 4, 2);
+            cContext.roundRect(6, 4, 10, 4, 2);
+            cContext.fill();
 
-          // Weapon body
-          cContext.fillStyle = '#0f172a';
-          cContext.fillRect(10, -3, 14, 6);
-          cContext.fillStyle = beamCol;
-          cContext.fillRect(16, -2, 8, 4);
-          cContext.strokeStyle = '#020617';
-          cContext.lineWidth = 1;
-          cContext.strokeRect(10, -3, 14, 6);
+            // Weapon body
+            cContext.fillStyle = '#0f172a';
+            cContext.fillRect(10, -3, 14, 6);
+            cContext.fillStyle = beamCol;
+            cContext.fillRect(16, -2, 8, 4);
+            cContext.strokeStyle = '#020617';
+            cContext.lineWidth = 1;
+            cContext.strokeRect(10, -3, 14, 6);
 
-          // Glowing energy muzzle
-          cContext.fillStyle = beamCol;
-          cContext.beginPath();
-          cContext.arc(24, 0, 2.5, 0, 2 * Math.PI);
-          cContext.fill();
-          cContext.restore();
+            // Glowing energy muzzle
+            cContext.fillStyle = beamCol;
+            cContext.beginPath();
+            cContext.arc(24, 0, 2.5, 0, 2 * Math.PI);
+            cContext.fill();
+            cContext.restore();
+          }
         } else {
           // Fallback to geometric composite paper-doll if sprite still preloading
           cContext.rotate(angle);
@@ -4371,30 +5332,40 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 <mask id="minimap-storm-mask">
                   <rect x="0" y="0" width={MAP_SIZE} height={MAP_SIZE} fill="white" />
                   <circle 
-                    cx={stormCenter.current.x} 
-                    cy={stormCenter.current.y} 
-                    r={Math.max(0, stormRadius)} 
+                    cx={Number.isFinite(stormCenter.current?.x) ? stormCenter.current.x : 2560} 
+                    cy={Number.isFinite(stormCenter.current?.y) ? stormCenter.current.y : 2560} 
+                    r={Math.max(0, Number.isFinite(stormRadius) ? stormRadius : 3600)} 
                     fill="black" 
                   />
                 </mask>
               </defs>
 
-              {/* Biome colored quadrants for 5000px territory */}
-              <rect x="0" y="0" width="5000" height="3600" fill="#15803d" opacity="0.45" />
-              <rect x="0" y="3600" width="5000" height="1400" fill="#ca8a04" opacity="0.45" />
+              {/* World Blueprint: Dense Pine Forest Zone along west border */}
+              <rect x="0" y="0" width="800" height={MAP_SIZE} fill="#064e3b" opacity="0.6" />
 
-              {/* Winding River on Radar */}
-              <path d="M 1850,0 Q 2350,1250 1700,2450 T 2150,5000" stroke="#0284c7" strokeWidth="220" fill="none" opacity="0.6" />
+              {/* World Blueprint: Lush Green Meadows */}
+              <rect x="800" y="0" width={MAP_SIZE - 800} height={MAP_SIZE} fill="#15803d" opacity="0.45" />
 
-              {/* Ancient Stone Ruins Zone */}
-              <rect x="3300" y="800" width="1050" height="1150" fill="#475569" opacity="0.45" stroke="#94a3b8" strokeWidth="30" />
+              {/* 3 Structured Lakes on Radar */}
+              {/* Lake 1 (North-West) */}
+              <rect x="1088" y="640" width="576" height="448" rx="80" fill="#0284c7" opacity="0.75" />
+              {/* Lake 2 (South Mirror) */}
+              <rect x="1216" y="3264" width="704" height="512" rx="90" fill="#0284c7" opacity="0.75" />
+              {/* Lake 3 (East Sunken) */}
+              <rect x="3648" y="1472" width="704" height="512" rx="90" fill="#0284c7" opacity="0.75" />
 
-              {/* Dirt Arterial Highways (Dark Tan lines) */}
-              <line x1="0" y1="2450" x2="5000" y2="2450" stroke="#78350f" strokeWidth="130" opacity="0.85" />
-              <line x1="2450" y1="0" x2="2450" y2="5000" stroke="#78350f" strokeWidth="130" opacity="0.85" />
+              {/* Dirt Arterial Highways on Radar */}
+              <line x1="0" y1="2400" x2={MAP_SIZE} y2="2400" stroke="#78350f" strokeWidth="110" opacity="0.85" />
+              <line x1="2304" y1="0" x2="2304" y2={MAP_SIZE} stroke="#78350f" strokeWidth="110" opacity="0.85" />
+              {/* Forest Logging Trail */}
+              <line x1="384" y1="0" x2="384" y2={MAP_SIZE} stroke="#78350f" strokeWidth="70" opacity="0.7" />
+
+              {/* 2 Small Villages on Radar */}
+              <rect x="2100" y="1000" width="580" height="480" rx="40" fill="#334155" opacity="0.5" stroke="#fbbf24" strokeWidth="16" />
+              <rect x="3100" y="3050" width="580" height="480" rx="40" fill="#334155" opacity="0.5" stroke="#fbbf24" strokeWidth="16" />
 
               {/* Central Crossroads Ring */}
-              <circle cx="2450" cy="2450" r="320" fill="none" stroke="#d97706" strokeWidth="40" opacity="0.6" />
+              <circle cx="2304" cy="2400" r="280" fill="none" stroke="#d97706" strokeWidth="35" opacity="0.6" />
 
               {/* Transparent Violet Filter Outside Eye on Radar */}
               <rect 
@@ -4409,9 +5380,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
               {/* Shrinking Storm Safe Zone Ring */}
               <circle 
-                cx={stormCenter.current.x} 
-                cy={stormCenter.current.y} 
-                r={Math.max(0, stormRadius)} 
+                cx={Number.isFinite(stormCenter.current?.x) ? stormCenter.current.x : 2560} 
+                cy={Number.isFinite(stormCenter.current?.y) ? stormCenter.current.y : 2560} 
+                r={Math.max(0, Number.isFinite(stormRadius) ? stormRadius : 3600)} 
                 fill="none" 
                 stroke={isSurgeActive ? "#f43f5e" : "#d946ef"} 
                 strokeWidth="110" 
@@ -4420,8 +5391,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
               {/* Target Showdown Destination Center Blip */}
               <circle 
-                cx={targetFinalCenterRef.current.x} 
-                cy={targetFinalCenterRef.current.y} 
+                cx={Number.isFinite(targetFinalCenterRef.current?.x) ? targetFinalCenterRef.current.x : 2560} 
+                cy={Number.isFinite(targetFinalCenterRef.current?.y) ? targetFinalCenterRef.current.y : 2560} 
                 r="75" 
                 fill="#fbbf24" 
                 stroke="#ffffff" 
@@ -4430,31 +5401,54 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               />
 
               {/* Ground Loot Bananas & Caches */}
-              {worldDataRef.current?.groundLoot.map(l => !l.isCollected && (
-                <circle key={l.id} cx={l.x} cy={l.y} r="35" fill="#facc15" opacity="0.8" />
-              ))}
+              <g id="minimap-ground-loot">
+                {(worldDataRef.current?.groundLoot || [])
+                  .filter(l => !l.isCollected && Number.isFinite(l.x) && Number.isFinite(l.y))
+                  .map(l => (
+                    <circle key={`loot_${l.id}`} cx={l.x} cy={l.y} r="35" fill="#facc15" opacity="0.8" />
+                  ))}
+              </g>
 
               {/* Supply Drops */}
-              {crates.map(c => !c.isClaimed && (
-                <circle key={c.id} cx={c.x} cy={c.y} r="80" fill="#facc15" stroke="#ffffff" strokeWidth="25" />
-              ))}
+              <g id="minimap-crates">
+                {(crates || [])
+                  .filter(c => !c.isClaimed && Number.isFinite(c.x) && Number.isFinite(c.y))
+                  .map(c => (
+                    <circle key={`crate_${c.id}`} cx={c.x} cy={c.y} r="80" fill="#facc15" stroke="#ffffff" strokeWidth="25" />
+                  ))}
+              </g>
 
               {/* Placed Structures */}
-              {structures.map(s => (
-                <rect key={s.id} x={s.x - 35} y={s.y - 35} width="70" height="70" fill={s.type === 'wood_wall' ? '#b45309' : s.type === 'brick_ramp' ? '#ea580c' : '#06b6d4'} />
-              ))}
+              <g id="minimap-structures">
+                {(structures || [])
+                  .filter(s => Number.isFinite(s.x) && Number.isFinite(s.y))
+                  .map(s => (
+                    <rect 
+                      key={`struct_${s.id}`} 
+                      x={s.x - 35} 
+                      y={s.y - 35} 
+                      width="70" 
+                      height="70" 
+                      fill={s.type === 'wood_wall' ? '#b45309' : s.type === 'brick_ramp' ? '#ea580c' : '#06b6d4'} 
+                    />
+                  ))}
+              </g>
 
               {/* Enemy Players (Red) */}
-              {arenaPlayers.map(p => p.uid !== user.id && p.isAlive && (
-                <circle key={p.uid} cx={p.x} cy={p.y} r="90" fill="#ef4444" stroke="#ffffff" strokeWidth="25" />
-              ))}
+              <g id="minimap-enemies">
+                {(arenaPlayers || [])
+                  .filter(p => p.uid !== user.id && p.isAlive && Number.isFinite(p.x) && Number.isFinite(p.y))
+                  .map(p => (
+                    <circle key={`player_${p.uid}`} cx={p.x} cy={p.y} r="90" fill="#ef4444" stroke="#ffffff" strokeWidth="25" />
+                  ))}
+              </g>
 
               {/* Camera Viewport Bounding Box */}
               <rect 
-                x={cameraRef.current.x} 
-                y={cameraRef.current.y} 
-                width={viewDims.width} 
-                height={viewDims.height} 
+                x={Number.isFinite(cameraRef.current?.x) ? cameraRef.current.x : 0} 
+                y={Number.isFinite(cameraRef.current?.y) ? cameraRef.current.y : 0} 
+                width={Number.isFinite(viewDims?.width) && viewDims.width > 0 ? viewDims.width : 1000} 
+                height={Number.isFinite(viewDims?.height) && viewDims.height > 0 ? viewDims.height : 650} 
                 fill="none" 
                 stroke="#38bdf8" 
                 strokeWidth="50" 
@@ -4462,7 +5456,14 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               />
 
               {/* Local Player (Green Blip) */}
-              <circle cx={localX} cy={localY} r="110" fill="#10b981" stroke="#ffffff" strokeWidth="30" />
+              <circle 
+                cx={Number.isFinite(localX) ? localX : 2560} 
+                cy={Number.isFinite(localY) ? localY : 2560} 
+                r="110" 
+                fill="#10b981" 
+                stroke="#ffffff" 
+                strokeWidth="30" 
+              />
             </svg>
 
             {/* Radar Header Label */}

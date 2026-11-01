@@ -49,36 +49,6 @@ import {
 export type SkinCard = FantasySkinDefinition;
 export const ALL_SKIN_CARDS: SkinCard[] = ALL_FANTASY_SKINS;
 
-/**
- * PixelCharacterPreview:
- * Slices the front-facing (Row 0, Frame 0) 32x32 character sprite from a 128x128 
- * Fantasy Dungeon sprite sheet and renders it razor-sharp with image-rendering: pixelated.
- */
-export const PixelCharacterPreview: React.FC<{
-  sheetSrc: string;
-  size?: number;
-  className?: string;
-  isLocked?: boolean;
-}> = ({ sheetSrc, size = 80, className = '', isLocked = false }) => {
-  // A 32x32 frame is 1/4 (25%) of the 128x128 sprite sheet.
-  // Setting backgroundSize to (size * 4)px makes the 32x32 frame occupy exactly size x size px!
-  return (
-    <div
-      className={`relative select-none pointer-events-none ${className}`}
-      style={{
-        width: `${size}px`,
-        height: `${size}px`,
-        backgroundImage: `url(${sheetSrc})`,
-        backgroundPosition: '0 0',
-        backgroundRepeat: 'no-repeat',
-        backgroundSize: `${size * 4}px ${size * 4}px`,
-        imageRendering: 'pixelated',
-        filter: isLocked ? 'brightness(0) opacity(0.25) blur(0.5px)' : 'drop-shadow(0 6px 12px rgba(0,0,0,0.5))',
-      }}
-    />
-  );
-};
-
 // ============================================================================
 // BOOSTER PACK CONFIGURATIONS & DROP PROBABILITIES (0.5% MYTHIC DROP RATE)
 // ============================================================================
@@ -146,10 +116,10 @@ export const BOOSTER_PACKS: BoosterPackConfig[] = [
   {
     id: 'super_gold_pack',
     name: 'Super Gold Dungeon Pack',
-    subtitle: 'All 18 Fantasy Dungeon Champions',
+    subtitle: 'All 19 Fantasy Dungeon Champions',
     price: 250,
     badge: 'High-Tier Booster',
-    description: 'Premium golden foil booster containing all 18 fantasy dungeon characters with boosted Epic & Legendary odds!',
+    description: 'Premium golden foil booster containing all 19 fantasy dungeon characters with boosted Epic & Legendary odds!',
     foilColor: 'from-amber-400 via-yellow-600 to-slate-950',
     packBorder: 'border-yellow-300',
     accentGlow: 'shadow-yellow-500/50',
@@ -797,10 +767,17 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
 
                       {/* Character Illustration Frame */}
                       <div className="relative my-3 rounded-2xl bg-slate-950/80 border border-white/20 p-3 flex items-center justify-center overflow-hidden shadow-inner h-32">
-                        <PixelCharacterPreview
-                          sheetSrc={card.sheetImg || card.imageSrc}
-                          size={84}
-                          className="group-hover:scale-110 transition-transform"
+                        <img 
+                          src={card.portraitPath || card.spritePath || `/assets/characters/${card.id}.png`} 
+                          alt={card.name} 
+                          className="w-24 h-24 object-contain pixelated drop-shadow-[0_8px_16px_rgba(0,0,0,0.6)] group-hover:scale-110 transition-transform" 
+                          style={{ imageRendering: 'pixelated' }}
+                          onError={(e) => {
+                            const fallback = card.spritePath || `/assets/characters/${card.id}.png`;
+                            if (e.currentTarget.src !== fallback && !e.currentTarget.src.endsWith(fallback)) {
+                              e.currentTarget.src = fallback;
+                            }
+                          }}
                         />
                       </div>
 
@@ -860,10 +837,17 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
 
                       {/* Mystery Silhouetted Frame */}
                       <div className="my-3 rounded-2xl bg-slate-900/60 border border-slate-800 p-3 flex flex-col items-center justify-center h-32 relative overflow-hidden">
-                        <PixelCharacterPreview
-                          sheetSrc={card.sheetImg || card.imageSrc}
-                          size={72}
-                          isLocked={true}
+                        <img 
+                          src={card.portraitPath || card.spritePath || `/assets/characters/${card.id}.png`} 
+                          alt="Locked Skin" 
+                          className="w-24 h-24 object-contain pixelated brightness-0 opacity-20 blur-[0.5px]" 
+                          style={{ imageRendering: 'pixelated' }}
+                          onError={(e) => {
+                            const fallback = card.spritePath || `/assets/characters/${card.id}.png`;
+                            if (e.currentTarget.src !== fallback && !e.currentTarget.src.endsWith(fallback)) {
+                              e.currentTarget.src = fallback;
+                            }
+                          }}
                         />
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                           <Lock className="w-8 h-8 text-slate-500 drop-shadow" />
@@ -1231,10 +1215,17 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
 
                       {/* Character Artwork Frame */}
                       <div className="relative my-4 rounded-2xl bg-slate-950/80 border border-white/20 p-4 flex items-center justify-center overflow-hidden shadow-inner h-40">
-                        <PixelCharacterPreview 
-                          sheetSrc={pulledCard.sheetImg || pulledCard.imageSrc} 
-                          size={112} 
-                          className="animate-in zoom-in-75 duration-300 drop-shadow-[0_12px_24px_rgba(0,0,0,0.8)]" 
+                        <img 
+                          src={pulledCard.portraitPath || pulledCard.spritePath || `/assets/characters/${pulledCard.id}.png`} 
+                          alt={pulledCard.name} 
+                          className="w-28 h-28 object-contain pixelated drop-shadow-[0_12px_24px_rgba(0,0,0,0.8)] animate-in zoom-in-75 duration-300" 
+                          style={{ imageRendering: 'pixelated' }}
+                          onError={(e) => {
+                            const fallback = pulledCard.spritePath || `/assets/characters/${pulledCard.id}.png`;
+                            if (e.currentTarget.src !== fallback && !e.currentTarget.src.endsWith(fallback)) {
+                              e.currentTarget.src = fallback;
+                            }
+                          }}
                         />
                       </div>
 

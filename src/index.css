@@ -18,3 +18,9 @@ html:not(.dark) {
   color: #0f172a;
 }
 
+.pixelated {
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
