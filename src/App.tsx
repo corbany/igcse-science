@@ -957,7 +957,7 @@ export default function App() {
             battleState={battleState}
             onBack={() => setCurrentTab('lessons')}
             onNavigateToArena={
-              (!isEffectiveStudent || battleState?.status === 'IN_PROGRESS')
+              (!isEffectiveStudent || battleState?.status === 'IN_PROGRESS' || battleState?.isLobbyOpen)
                 ? () => setCurrentTab('royale')
                 : undefined
             }
@@ -986,8 +986,18 @@ export default function App() {
                 setCurrentTab('lessons');
               }}
             />
+          ) : battleState?.isLobbyOpen ? (
+            <GameLobby
+              user={effectiveUser || user}
+              onEnterBattle={() => setBattleArenaActive(true)}
+              onBackToStudy={() => setCurrentTab('lessons')}
+              onOpenShop={() => {
+                setShopInitialTab('shop');
+                setCurrentTab('shop');
+              }}
+            />
           ) : (
-            /* Student tries to access royale when instructor hasn't started the game */
+            /* Student tries to access royale when instructor has not opened the lobby */
             <div className="max-w-2xl mx-auto my-10 p-6 sm:p-8 bg-slate-900/95 border border-slate-800 rounded-3xl shadow-2xl text-center space-y-6 backdrop-blur-md">
               <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-3xl mx-auto shadow-lg shadow-amber-500/10">
                 <Lock className="w-8 h-8 text-amber-400" />
@@ -995,20 +1005,20 @@ export default function App() {
               <div className="space-y-2">
                 <span className="text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 inline-flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-                  <span>Match Locked</span>
+                  <span>Lobby Closed</span>
                 </span>
                 <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-                  Waiting for Instructor to Start Game
+                  Royale Tournament Lobby is Closed
                 </h2>
                 <p className="text-xs sm:text-sm text-slate-300 max-w-lg mx-auto leading-relaxed">
-                  Students do not have access to the Battle Royale arena until the instructor officially starts the tournament match. You currently have full access to the Avatar Shop and your personal card collection!
+                  Students do not have access to the Revision Royale game until your instructor opens the tournament lobby. When the instructor opens the lobby, this screen will automatically grant access to the pre-game lobby where you can ready up with your classmates!
                 </p>
               </div>
 
               {/* Real-time listener pulse banner */}
-              <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-center gap-2.5 text-xs font-semibold text-cyan-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping"></span>
-                <span>Live status: Waiting for host... You will join automatically when launched!</span>
+              <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-center gap-2.5 text-xs font-semibold text-amber-400">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping"></span>
+                <span>Live Status: Waiting for your instructor to open the lobby...</span>
               </div>
 
               {/* Accessible alternatives for students */}

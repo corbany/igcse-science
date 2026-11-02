@@ -15,7 +15,9 @@ import {
   CheckCircle2,
   XCircle,
   Eye,
-  Award
+  Award,
+  Lock,
+  Unlock
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { 
@@ -29,7 +31,8 @@ import {
   startBattleRoyale, 
   resetBattleEvent,
   dropMidGameSupplyCrate,
-  SHOP_ITEMS 
+  SHOP_ITEMS,
+  setLobbyOpen 
 } from '../services/firebaseGameService';
 
 interface AdminBattleControlProps {
@@ -167,8 +170,23 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
     }
   };
 
+  const handleToggleLobby = async () => {
+    const nextState = !battleState?.isLobbyOpen;
+    try {
+      await setLobbyOpen(nextState);
+      setFeedback(nextState 
+        ? '🔓 Tournament Lobby is now OPEN! Students can now access the waiting room.' 
+        : '🔒 Tournament Lobby is now CLOSED. Student access is locked.'
+      );
+      setTimeout(() => setFeedback(null), 4000);
+    } catch (e: any) {
+      setFeedback(`Failed to update lobby access: ${e.message}`);
+    }
+  };
+
   const readyCount = lobbyPlayers.filter(p => p.isReady).length;
   const isMatchLive = battleState?.status === 'IN_PROGRESS';
+  const isLobbyOpen = Boolean(battleState?.isLobbyOpen);
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12">
@@ -187,9 +205,16 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
                 <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
                   Revision Royale
                 </span>
+                <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                  isLobbyOpen 
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 animate-pulse' 
+                    : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                }`}>
+                  {isLobbyOpen ? 'Lobby: OPEN' : 'Lobby: CLOSED'}
+                </span>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
-                Manage tournament schedules, launch live multiplayer battles, and reset arena state.
+                Manage student lobby access, tournament schedules, launch live multiplayer battles, and reset arena state.
               </p>
             </div>
           </div>
@@ -213,6 +238,62 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
             <span>{feedback}</span>
           </div>
         )}
+      </div>
+
+      {/* STUDENT LOBBY ACCESS GATE CONTROLLER */}
+      <div className={`p-5 sm:p-6 rounded-3xl border transition shadow-xl ${
+        isLobbyOpen 
+          ? 'bg-gradient-to-r from-emerald-950/70 via-slate-900 to-slate-900 border-emerald-500/40 shadow-emerald-500/10'
+          : 'bg-gradient-to-r from-amber-950/70 via-slate-900 to-slate-900 border-amber-500/40 shadow-amber-500/10'
+      }`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className={`w-3 h-3 rounded-full ${isLobbyOpen ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+              <span className="text-xs font-black uppercase tracking-wider text-slate-300">Student Access Gate</span>
+              <span className={`text-[11px] font-black uppercase px-2.5 py-0.5 rounded-full border ${
+                isLobbyOpen 
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
+                  : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+              }`}>
+                {isLobbyOpen ? 'LOBBY OPEN TO STUDENTS' : 'LOBBY CLOSED TO STUDENTS'}
+              </span>
+            </div>
+            <h2 className="text-lg font-black text-white">
+              {isLobbyOpen 
+                ? 'Tournament Lobby Is OPEN' 
+                : 'Tournament Lobby Is CLOSED (Students Locked Out)'}
+            </h2>
+            <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
+              {isLobbyOpen 
+                ? 'Students can now click Royale in the navigation, enter the lobby waiting room, customize weapons and skins, and ready up.' 
+                : 'Students do NOT have access to the Royale game until you determine when the lobby is open. Any student trying to access Royale will see a locked screen.'}
+            </p>
+          </div>
+
+          <div className="shrink-0 flex items-center gap-3">
+            <button
+              onClick={handleToggleLobby}
+              className={`px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center gap-2 transition shadow-lg active:scale-95 cursor-pointer ${
+                isLobbyOpen
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30'
+                  : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30'
+              }`}
+            >
+              {isLobbyOpen ? (
+                <>
+                  <Lock className="w-4 h-4" />
+                  <span>Close Lobby for Students</span>
+                </>
+              ) : (
+                <>
+                  <Unlock className="w-4 h-4" />
+                  <span>Open Lobby for Students</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Primary Launch & Match Status Grid */}

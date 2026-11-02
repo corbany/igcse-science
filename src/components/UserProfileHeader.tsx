@@ -236,15 +236,25 @@ export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
                   <Swords className="w-3.5 h-3.5 text-white animate-spin-slow" />
                   <span>Royale (LIVE!)</span>
                 </button>
+              ) : battleState?.isLobbyOpen ? (
+                <button
+                  onClick={handleOpenRoyale}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black text-xs transition shadow-md shadow-cyan-500/20 active:scale-95 cursor-pointer animate-pulse"
+                  title="Tournament Lobby is Open! Join waiting room now"
+                >
+                  <Swords className="w-3.5 h-3.5 text-cyan-200" />
+                  <span className="hidden sm:inline">Join Lobby (OPEN!)</span>
+                  <span className="sm:hidden">Lobby Open</span>
+                </button>
               ) : (
                 <button
                   onClick={handleOpenRoyale}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-400 text-xs font-bold transition hover:text-slate-300 hover:border-slate-700 cursor-pointer"
-                  title="Battle Royale is locked until your instructor starts the match"
+                  title="Royale tournament lobby is closed until opened by your instructor"
                 >
                   <Lock className="w-3.5 h-3.5 text-slate-500" />
-                  <span className="hidden sm:inline">Royale (Locked)</span>
-                  <span className="sm:hidden">Locked</span>
+                  <span className="hidden sm:inline">Royale (Lobby Closed)</span>
+                  <span className="sm:hidden">Closed</span>
                 </button>
               )
             )}

@@ -287,16 +287,30 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="hidden sm:inline">Shop & Cards</span>
             </button>
 
-            {/* Quick Revision Royale Action Button (Gated for students until instructor starts match) */}
-            {isStudent && battleState?.status !== 'IN_PROGRESS' ? (
+            {/* Quick Revision Royale Action Button (Gated for students until instructor opens lobby) */}
+            {isStudent && battleState?.status !== 'IN_PROGRESS' && !battleState?.isLobbyOpen ? (
               <button
                 onClick={() => setCurrentTab('royale')}
-                title="Battle Royale is locked until your instructor starts the match"
+                title="Royale is locked until your instructor opens the tournament lobby"
                 className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-950/80 text-slate-400 hover:text-slate-300 font-bold transition flex items-center gap-1.5 cursor-pointer"
               >
                 <Lock className="w-3.5 h-3.5 text-slate-500" />
-                <span className="hidden sm:inline">Royale (Locked)</span>
-                <span className="sm:hidden">Locked</span>
+                <span className="hidden sm:inline">Royale (Closed)</span>
+                <span className="sm:hidden">Closed</span>
+              </button>
+            ) : isStudent && battleState?.isLobbyOpen && battleState?.status !== 'IN_PROGRESS' ? (
+              <button
+                onClick={() => setCurrentTab('royale')}
+                title="Tournament Lobby is OPEN! Click to enter waiting room"
+                className={`text-xs px-2.5 py-1.5 rounded-lg border font-black transition flex items-center gap-1.5 shadow-xs cursor-pointer ${
+                  currentTab === 'royale'
+                    ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-cyan-500/25 ring-2 ring-cyan-400/50'
+                    : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/30 animate-pulse'
+                }`}
+              >
+                <span className="text-sm">🎮</span>
+                <span className="hidden sm:inline">Lobby (OPEN)</span>
+                <span className="sm:hidden">Lobby</span>
               </button>
             ) : (
               <button
@@ -667,9 +681,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                         : theme === 'dark' ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-slate-100 text-slate-800'
                     }`}
                   >
-                    <span className="text-base shrink-0">🎮</span>
+                    <span className="text-base shrink-0">
+                      {isStudent && battleState?.status !== 'IN_PROGRESS' && !battleState?.isLobbyOpen ? '🔒' : isStudent && battleState?.status === 'IN_PROGRESS' ? '⚔️' : '🎮'}
+                    </span>
                     <div className="text-left">
-                      <div className="font-semibold text-amber-400">Revision Royale Arena</div>
+                      <div className="font-semibold text-amber-400 flex items-center gap-1.5">
+                        <span>Revision Royale Arena</span>
+                        {isStudent && battleState?.status !== 'IN_PROGRESS' && !battleState?.isLobbyOpen && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 border border-slate-700">Closed</span>
+                        )}
+                        {isStudent && battleState?.isLobbyOpen && battleState?.status !== 'IN_PROGRESS' && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">Lobby Open</span>
+                        )}
+                        {isStudent && battleState?.status === 'IN_PROGRESS' && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse">Live</span>
+                        )}
+                      </div>
                       <div className="text-[10px] text-slate-400 font-normal">Live 2D battle, wall building & crates</div>
                     </div>
                   </button>

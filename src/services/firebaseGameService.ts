@@ -153,6 +153,7 @@ export interface BattleEventConfig {
 
 export interface BattleEventState {
   status: 'LOBBY' | 'IN_PROGRESS' | 'ENDED';
+  isLobbyOpen?: boolean; // When true, instructor has opened the lobby for students
   startedAt: string | null;
   stormRadius: number;
   stormCenter: { x: number; y: number };
@@ -1216,6 +1217,7 @@ const DEFAULT_EVENT_CONFIG: BattleEventConfig = {
 
 const DEFAULT_EVENT_STATE: BattleEventState = {
   status: 'LOBBY',
+  isLobbyOpen: false, // Students do not have access until instructor opens the lobby
   startedAt: null,
   stormRadius: 3600,
   stormCenter: { x: 2500, y: 2500 },
@@ -1264,6 +1266,23 @@ export const updateBattleConfig = async (config: Partial<BattleEventConfig>): Pr
     await setDoc(configDoc, config, { merge: true });
   } catch (err) {
     handleFirestoreError(err, 'updateBattleConfig');
+  }
+};
+
+/**
+ * Teacher host control: Open or close the tournament lobby for students
+ */
+export const setLobbyOpen = async (isOpen: boolean): Promise<void> => {
+  const current = getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE);
+  const updated: BattleEventState = { ...current, isLobbyOpen: isOpen };
+  setLocalGameItem(LOCAL_BATTLE_STATE_KEY, updated);
+
+  if (!canPerformFirestoreWrite()) return;
+  try {
+    const stateDoc = doc(db, 'battleEvent', 'state');
+    await setDoc(stateDoc, { isLobbyOpen: isOpen }, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, 'setLobbyOpen');
   }
 };
 
@@ -1467,14 +1486,17 @@ export const startBattleRoyale = async (): Promise<void> => {
   const randomFinalX = Math.round(1300 + Math.random() * 2400);
   const randomFinalY = Math.round(1300 + Math.random() * 2400);
 
-  batch.set(stateDoc, {
+  const liveState: BattleEventState = {
     status: 'IN_PROGRESS',
+    isLobbyOpen: true,
     startedAt: new Date().toISOString(),
     stormRadius: 3600,
     stormCenter: { x: arenaCenter, y: arenaCenter },
     stormFinalCenter: { x: randomFinalX, y: randomFinalY },
     currentWinner: null
-  });
+  };
+  setLocalGameItem(LOCAL_BATTLE_STATE_KEY, liveState);
+  batch.set(stateDoc, liveState);
 
   await batch.commit();
 };
@@ -1483,6 +1505,13 @@ export const startBattleRoyale = async (): Promise<void> => {
  * Teacher host action: Reset match and clear arena
  */
 export const resetBattleEvent = async (): Promise<void> => {
+  setLocalGameItem(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE);
+  setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, []);
+  setLocalGameItem(LOCAL_STRUCTURES_KEY, []);
+  setLocalGameItem(LOCAL_CRATES_KEY, []);
+
+  if (!canPerformFirestoreWrite()) return;
+
   const batch = writeBatch(db);
 
   // Clear players
@@ -1500,7 +1529,7 @@ export const resetBattleEvent = async (): Promise<void> => {
   const cratesSnap = await getDocs(cratesColl);
   cratesSnap.forEach(c => batch.delete(c.ref));
 
-  // Reset state to LOBBY
+  // Reset state to LOBBY (closed by default)
   const stateDoc = doc(db, 'battleEvent', 'state');
   batch.set(stateDoc, DEFAULT_EVENT_STATE);
 
