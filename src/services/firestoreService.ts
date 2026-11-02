@@ -1165,6 +1165,266 @@ export async function removeStudentFromClass(classId: string, studentId: string)
   return true;
 }
 
+export interface MoveStudentOptions {
+  instructorName?: string;
+  instructorEmail?: string;
+  notifyStudent?: boolean;
+}
+
+export interface MoveStudentResult {
+  success: boolean;
+  message: string;
+  sourceClass?: ClassItem | null;
+  targetClass?: ClassItem | null;
+  studentName?: string;
+}
+
+/**
+ * Move a student from one class to another, preserving their full progress, quiz records,
+ * and syllabus completion history.
+ */
+export async function moveStudentToClass(
+  studentId: string,
+  sourceClassId: string,
+  targetClassId: string,
+  options?: MoveStudentOptions
+): Promise<MoveStudentResult> {
+  if (!studentId || !sourceClassId || !targetClassId) {
+    return { success: false, message: 'Invalid student or class IDs provided.' };
+  }
+
+  if (sourceClassId === targetClassId) {
+    return { success: false, message: 'The student is already enrolled in this class.' };
+  }
+
+  // 1. Resolve source and target classes
+  let sourceClass: ClassItem | null = null;
+  let targetClass: ClassItem | null = null;
+
+  // Check local classes
+  const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, []);
+  sourceClass = localClasses.find(c => c.id === sourceClassId) || (sourceClassId === DEFAULT_CLASS_ITEM.id ? DEFAULT_CLASS_ITEM : null);
+  targetClass = localClasses.find(c => c.id === targetClassId) || (targetClassId === DEFAULT_CLASS_ITEM.id ? DEFAULT_CLASS_ITEM : null);
+
+  // If not found locally, query Firestore
+  if (!sourceClass && sourceClassId !== DEFAULT_CLASS_ITEM.id) {
+    try {
+      const snap = await getDoc(doc(db, 'classes', sourceClassId));
+      if (snap.exists()) sourceClass = snap.data() as ClassItem;
+    } catch {}
+  }
+  if (!targetClass && targetClassId !== DEFAULT_CLASS_ITEM.id) {
+    try {
+      const snap = await getDoc(doc(db, 'classes', targetClassId));
+      if (snap.exists()) targetClass = snap.data() as ClassItem;
+    } catch {}
+  }
+
+  if (!targetClass) {
+    return { success: false, message: 'Target destination class could not be found.' };
+  }
+
+  // 2. Locate student's enrollment data from source class
+  const sourceStudentKey = `${LOCAL_STUDENTS_PREFIX}${sourceClassId}`;
+  const localSourceStudents = getLocalItem<ClassStudentItem[]>(sourceStudentKey, []);
+  let studentData = localSourceStudents.find(s => s.studentId === studentId);
+
+  // If not in local source list, check Firestore
+  if (!studentData) {
+    try {
+      const snap = await getDoc(doc(db, 'classes', sourceClassId, 'students', studentId));
+      if (snap.exists()) {
+        studentData = snap.data() as ClassStudentItem;
+      }
+    } catch {}
+  }
+
+  // If still not found, check user profile or registered students
+  if (!studentData) {
+    try {
+      const userSnap = await getDoc(doc(db, 'users', studentId));
+      if (userSnap.exists()) {
+        const u = userSnap.data();
+        studentData = {
+          studentId: u.uid || studentId,
+          name: u.name || 'Student',
+          email: u.email || '',
+          tier: u.tier || 'Core',
+          joinedAt: new Date().toISOString(),
+          lastActive: new Date().toISOString(),
+          completedLessonsCount: 0,
+          quizScores: {},
+          subtopicQuizScores: {},
+          topicConfidence: {},
+          trafficLights: {},
+          weakTopics: []
+        };
+      }
+    } catch {}
+  }
+
+  if (!studentData) {
+    studentData = {
+      studentId,
+      name: 'Student',
+      email: '',
+      tier: 'Core',
+      joinedAt: new Date().toISOString(),
+      lastActive: new Date().toISOString(),
+      completedLessonsCount: 0,
+      quizScores: {},
+      subtopicQuizScores: {},
+      topicConfidence: {},
+      trafficLights: {},
+      weakTopics: []
+    };
+  }
+
+  const studentName = studentData.name;
+  const now = new Date().toISOString();
+
+  // Create updated enrollment object for target class
+  const targetEnrollmentData: ClassStudentItem = {
+    ...studentData,
+    lastActive: now
+  };
+
+  // 3. Local Storage Updates:
+  // Remove from source class
+  setLocalItem(sourceStudentKey, localSourceStudents.filter(s => s.studentId !== studentId));
+
+  // Add to target class
+  const targetStudentKey = `${LOCAL_STUDENTS_PREFIX}${targetClassId}`;
+  const localTargetStudents = getLocalItem<ClassStudentItem[]>(targetStudentKey, []);
+  const targetExistingIdx = localTargetStudents.findIndex(s => s.studentId === studentId);
+  if (targetExistingIdx >= 0) {
+    localTargetStudents[targetExistingIdx] = targetEnrollmentData;
+  } else {
+    localTargetStudents.push(targetEnrollmentData);
+  }
+  setLocalItem(targetStudentKey, localTargetStudents);
+
+  // Update student's enrolled classes list locally
+  const enrolledKey = `${LOCAL_ENROLLED_PREFIX}${studentId}`;
+  const localEnrolled = getLocalItem<ClassItem[]>(enrolledKey, []);
+  const updatedEnrolled = localEnrolled.filter(c => c.id !== sourceClassId);
+  if (!updatedEnrolled.some(c => c.id === targetClassId)) {
+    updatedEnrolled.push(targetClass);
+  }
+  setLocalItem(enrolledKey, updatedEnrolled);
+
+  // Update LOCAL_CLASSES_KEY studentCounts
+  const allLocalClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, []);
+  const srcIdx = allLocalClasses.findIndex(c => c.id === sourceClassId);
+  if (srcIdx >= 0) {
+    allLocalClasses[srcIdx].studentCount = Math.max(0, (allLocalClasses[srcIdx].studentCount || 1) - 1);
+  }
+  const tgtIdx = allLocalClasses.findIndex(c => c.id === targetClassId);
+  if (tgtIdx >= 0) {
+    allLocalClasses[tgtIdx].studentCount = (allLocalClasses[tgtIdx].studentCount || 0) + 1;
+  }
+  setLocalItem(LOCAL_CLASSES_KEY, allLocalClasses);
+
+  // 4. In-App Notification for Student
+  const notificationId = `notif_move_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+  const notifPayload = {
+    id: notificationId,
+    type: 'class_reassigned',
+    recipientStudentId: studentId,
+    studentName,
+    sourceClassId,
+    sourceClassName: sourceClass?.name || 'Previous Class',
+    targetClassId,
+    targetClassName: targetClass.name,
+    targetClassCode: targetClass.classCode,
+    instructorName: options?.instructorName || 'Your Instructor',
+    instructorEmail: options?.instructorEmail || '',
+    message: `You were moved from ${sourceClass?.name || 'your previous class'} to ${targetClass.name} (Code: ${targetClass.classCode}). All your syllabus progress and quiz scores have been preserved.`,
+    createdAt: now,
+    read: false
+  };
+
+  const existingNotifs = getLocalItem<any[]>(LOCAL_NOTIFICATIONS_KEY, []);
+  existingNotifs.unshift(notifPayload);
+  setLocalItem(LOCAL_NOTIFICATIONS_KEY, existingNotifs);
+
+  // 5. Firestore Operations
+  try {
+    // Write student doc in target class
+    const targetStudentRef = doc(db, 'classes', targetClassId, 'students', studentId);
+    await setDoc(targetStudentRef, cleanFirestoreData(targetEnrollmentData), { merge: true });
+
+    // Delete student doc in source class
+    const sourceStudentRef = doc(db, 'classes', sourceClassId, 'students', studentId);
+    await deleteDoc(sourceStudentRef);
+
+    // Update studentCount on both classes
+    await updateDoc(doc(db, 'classes', sourceClassId), { studentCount: increment(-1) }).catch(() => {});
+    await updateDoc(doc(db, 'classes', targetClassId), { studentCount: increment(1) }).catch(() => {});
+
+    // Update user profile enrolledClassIds
+    try {
+      const userRef = doc(db, 'users', studentId);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const curEnrolled: string[] = userSnap.data().enrolledClassIds || [];
+        const nextEnrolled = curEnrolled.filter(id => id !== sourceClassId);
+        if (!nextEnrolled.includes(targetClassId)) {
+          nextEnrolled.push(targetClassId);
+        }
+        await updateDoc(userRef, { enrolledClassIds: nextEnrolled });
+      }
+    } catch {}
+
+    // Store notification in firestore
+    setDoc(doc(db, 'notifications', notificationId), cleanFirestoreData(notifPayload)).catch(() => {});
+  } catch (err) {
+    console.warn('Firestore move student error (offline fallback preserved):', err);
+  }
+
+  // 6. Broadcast global events so open listeners update
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('igcse_classes_updated'));
+    window.dispatchEvent(new CustomEvent('igcse_progress_updated'));
+  }
+
+  return {
+    success: true,
+    message: `Successfully moved ${studentName} to ${targetClass.name} (Code: ${targetClass.classCode}).`,
+    sourceClass,
+    targetClass,
+    studentName
+  };
+}
+
+/**
+ * Move multiple students from one class to another simultaneously.
+ */
+export async function moveMultipleStudentsToClass(
+  studentIds: string[],
+  sourceClassId: string,
+  targetClassId: string,
+  options?: MoveStudentOptions
+): Promise<{ successfulCount: number; failedCount: number; message: string }> {
+  let successfulCount = 0;
+  let failedCount = 0;
+
+  for (const sid of studentIds) {
+    const res = await moveStudentToClass(sid, sourceClassId, targetClassId, options);
+    if (res.success) {
+      successfulCount++;
+    } else {
+      failedCount++;
+    }
+  }
+
+  return {
+    successfulCount,
+    failedCount,
+    message: `Moved ${successfulCount} student${successfulCount === 1 ? '' : 's'} successfully${failedCount > 0 ? ` (${failedCount} failed)` : ''}.`
+  };
+}
+
 // -------------------------------------------------------------
 // INSTRUCTOR TASKS & STUDENT HOMEWORK ASSIGNMENTS
 // -------------------------------------------------------------
@@ -2042,6 +2302,7 @@ export function subscribeToClassTasks(
       callback(filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
     }, (err) => {
       console.warn('Tasks onSnapshot error, falling back to local:', err);
+      fetchClassTasks(classId, instructorId, allowedClassIds).then(callback).catch(() => {});
     });
   } catch {
     // Offline
@@ -2084,7 +2345,8 @@ export function subscribeToTaskSubmissions(
     unsubFirestore = onSnapshot(subCol, () => {
       fetchTaskSubmissions(taskId, classId).then(callback).catch(() => {});
     }, (err) => {
-      console.warn('Submissions onSnapshot error:', err);
+      console.warn('Submissions onSnapshot error, falling back to local:', err);
+      fetchTaskSubmissions(taskId, classId).then(callback).catch(() => {});
     });
   } catch {
     // Offline
@@ -2137,7 +2399,8 @@ export function subscribeToClassStudents(
       setLocalItem(studentKey, updated);
       callback(updated);
     }, (err) => {
-      console.warn('Class students onSnapshot error:', err);
+      console.warn('Class students onSnapshot error, falling back to local:', err);
+      fetchStudentsInClass(classId).then(callback).catch(() => {});
     });
   } catch {
     // Offline
@@ -2182,7 +2445,8 @@ export function subscribeToStudentTasks(
     unsubFirestore = onSnapshot(tasksCol, () => {
       fetchTasksForStudent(student, enrolledClassIds, studentProgress).then(callback).catch(() => {});
     }, (err) => {
-      console.warn('Student tasks onSnapshot error:', err);
+      console.warn('Student tasks onSnapshot error, falling back to local:', err);
+      fetchTasksForStudent(student, enrolledClassIds, studentProgress).then(callback).catch(() => {});
     });
   } catch {
     // Offline

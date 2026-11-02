@@ -800,8 +800,60 @@ export const calculateLevelFromXP = (xp: number = 0): { level: number; currentLe
 };
 
 // ============================================================================
-// PROFILE & INVENTORY MANAGEMENT
+// PROFILE & INVENTORY MANAGEMENT & OFFLINE QUOTA FALLBACK
 // ============================================================================
+
+// Local storage keys for resilient offline & quota-exceeded fallback
+export const LOCAL_BATTLE_CONFIG_KEY = 'igcse_battle_config_fallback';
+export const LOCAL_BATTLE_STATE_KEY = 'igcse_battle_state_fallback';
+export const LOCAL_LOBBY_PLAYERS_KEY = 'igcse_battle_lobby_fallback';
+export const LOCAL_ARENA_PLAYERS_KEY = 'igcse_battle_players_fallback';
+export const LOCAL_STRUCTURES_KEY = 'igcse_battle_structures_fallback';
+export const LOCAL_CRATES_KEY = 'igcse_battle_crates_fallback';
+
+export function getLocalGameItem<T>(key: string, defaultVal: T): T {
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(key) : null;
+    return raw ? JSON.parse(raw) : defaultVal;
+  } catch {
+    return defaultVal;
+  }
+}
+
+export function setLocalGameItem(key: string, value: any): void {
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(key, JSON.stringify(value));
+    }
+  } catch {
+    // quota exceeded or private mode
+  }
+}
+
+let isFirestoreQuotaExhausted = false;
+let quotaExhaustedTimestamp = 0;
+const QUOTA_BACKOFF_MS = 60000; // 60s cooldown
+
+export const handleFirestoreError = (err: any, context?: string): void => {
+  if (err?.code === 'resource-exhausted' || (err?.message && err.message.toLowerCase().includes('quota exceeded'))) {
+    if (!isFirestoreQuotaExhausted) {
+      console.warn(`[Firestore Quota Exceeded] ${context || 'Listener'}: Switching seamlessly to local offline fallback mode.`);
+    }
+    isFirestoreQuotaExhausted = true;
+    quotaExhaustedTimestamp = Date.now();
+  } else {
+    console.warn(`[Firestore ${context || 'Listener'}]`, err?.message || err);
+  }
+};
+
+export const canPerformFirestoreWrite = (): boolean => {
+  if (!isFirestoreQuotaExhausted) return true;
+  if (Date.now() - quotaExhaustedTimestamp > QUOTA_BACKOFF_MS) {
+    isFirestoreQuotaExhausted = false;
+    return true;
+  }
+  return false;
+};
 
 const DEFAULT_GAME_PROFILE: UserGameProfile = {
   uid: '',
@@ -828,72 +880,90 @@ export const subscribeToGameProfile = (
   callback: (profile: UserGameProfile) => void
 ): (() => void) => {
   if (!uid) return () => {};
-  const userDocRef = doc(db, 'users', uid);
+  
+  const localKey = `igcse_game_profile_${uid}`;
+  const localCached = getLocalGameItem<UserGameProfile | null>(localKey, null);
+  if (localCached) {
+    callback(localCached);
+  }
 
-  return onSnapshot(userDocRef, (snap) => {
-    if (snap.exists()) {
-      const data = snap.data();
-      const xp = Number(data.xp || 0);
-      const level = Number(data.level || calculateLevelFromXP(xp).level);
-      
-      const isInstructor = data.role === 'instructor';
-      const all20SkinIds = [
-        'quantum_physicist', 'laser_optics_tech', 'polar_astronomer', 'circuit_engineer',
-        'robotics_mechanist', 'biohazard_specialist', 'virology_researcher', 'plant_pathologist',
-        'field_botanist', 'field_entomologist', 'crystallographer', 'marine_diver',
-        'paleontologist', 'cryo_glaciologist', 'mining_geologist', 'radiation_hazard_suit',
-        'pharmaceutical_tech', 'bioinformatics_dev', 'wildlife_ecologist', 'classic_chemist',
-        // Aliases & legacy IDs
-        'cyber_scientist', 'cyber_chemist', 'tesla_electrician', 'tesla_overlord',
-        'particle_specialist', 'supernova_cosmologist', 'botanist', 'geneticist',
-        'neuro_technologist', 'chrono_quantum_pioneer', 'astrophysicist', 'exoplanet_geologist',
-        'cosmic_radiation_tech', 'astro_chemist', 'mad_alchemist', 'alchemist_robes',
-        'cyborg_assistant', 'steampunk_inventor', 'antimatter_researcher'
-      ];
-      const all10WeaponIds = [
-        'bunsen_burner', 'acid_pipette', 'cryo_freeze_ray', 'laser_pointer',
-        'tesla_coil', 'centrifuge_sonic_blaster', 'particle_accelerator', 'biohazard_railgun',
-        'quantum_displacer', 'antimatter_annihilator'
-      ];
-      const allPowerIds = ['element_shield', 'damage_boost', 'quantum_dash', 'matter_synthesizer'];
+  try {
+    const userDocRef = doc(db, 'users', uid);
+    return onSnapshot(userDocRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        const xp = Number(data.xp || 0);
+        const level = Number(data.level || calculateLevelFromXP(xp).level);
+        
+        const isInstructor = data.role === 'instructor';
+        const all20SkinIds = [
+          'quantum_physicist', 'laser_optics_tech', 'polar_astronomer', 'circuit_engineer',
+          'robotics_mechanist', 'biohazard_specialist', 'virology_researcher', 'plant_pathologist',
+          'field_botanist', 'field_entomologist', 'crystallographer', 'marine_diver',
+          'paleontologist', 'cryo_glaciologist', 'mining_geologist', 'radiation_hazard_suit',
+          'pharmaceutical_tech', 'bioinformatics_dev', 'wildlife_ecologist', 'classic_chemist',
+          // Aliases & legacy IDs
+          'cyber_scientist', 'cyber_chemist', 'tesla_electrician', 'tesla_overlord',
+          'particle_specialist', 'supernova_cosmologist', 'botanist', 'geneticist',
+          'neuro_technologist', 'chrono_quantum_pioneer', 'astrophysicist', 'exoplanet_geologist',
+          'cosmic_radiation_tech', 'astro_chemist', 'mad_alchemist', 'alchemist_robes',
+          'cyborg_assistant', 'steampunk_inventor', 'antimatter_researcher'
+        ];
+        const all10WeaponIds = [
+          'bunsen_burner', 'acid_pipette', 'cryo_freeze_ray', 'laser_pointer',
+          'tesla_coil', 'centrifuge_sonic_blaster', 'particle_accelerator', 'biohazard_railgun',
+          'quantum_displacer', 'antimatter_annihilator'
+        ];
+        const allPowerIds = ['element_shield', 'damage_boost', 'quantum_dash', 'matter_synthesizer'];
 
-      const inv = isInstructor 
-        ? Array.from(new Set([...all20SkinIds, ...all10WeaponIds, ...allPowerIds]))
-        : (Array.isArray(data.inventory) ? data.inventory : DEFAULT_GAME_PROFILE.inventory);
-      
-      const skins = isInstructor 
-        ? all20SkinIds 
-        : (Array.isArray(data.unlockedSkins) 
-            ? data.unlockedSkins 
-            : inv.filter(id => all20SkinIds.includes(id)));
-      if (!skins.includes('classic_chemist')) {
-        skins.unshift('classic_chemist');
+        const inv = isInstructor 
+          ? Array.from(new Set([...all20SkinIds, ...all10WeaponIds, ...allPowerIds]))
+          : (Array.isArray(data.inventory) ? data.inventory : DEFAULT_GAME_PROFILE.inventory);
+        
+        const skins = isInstructor 
+          ? all20SkinIds 
+          : (Array.isArray(data.unlockedSkins) 
+              ? data.unlockedSkins 
+              : inv.filter(id => all20SkinIds.includes(id)));
+        if (!skins.includes('classic_chemist')) {
+          skins.unshift('classic_chemist');
+        }
+
+        const profile: UserGameProfile = {
+          uid,
+          level: isInstructor ? 99 : level,
+          xp,
+          role: data.role,
+          gold: isInstructor ? 999999 : Number(data.gold ?? DEFAULT_GAME_PROFILE.gold),
+          wood: isInstructor ? 9999 : Number(data.wood ?? DEFAULT_GAME_PROFILE.wood),
+          brick: isInstructor ? 9999 : Number(data.brick ?? DEFAULT_GAME_PROFILE.brick),
+          metal: isInstructor ? 9999 : Number(data.metal ?? DEFAULT_GAME_PROFILE.metal),
+          avatar: data.equippedSkin || data.avatar || DEFAULT_GAME_PROFILE.avatar,
+          equippedSkin: data.equippedSkin || data.avatar || DEFAULT_GAME_PROFILE.avatar,
+          equippedWeapon: data.equippedWeapon || DEFAULT_GAME_PROFILE.equippedWeapon,
+          equippedPower: data.equippedPower || DEFAULT_GAME_PROFILE.equippedPower,
+          inventory: inv,
+          unlockedSkins: skins,
+          monthlyCrown: isInstructor ? true : Boolean(data.monthlyCrown)
+        };
+        setLocalGameItem(localKey, profile);
+        callback(profile);
+      } else {
+        const fallback = { ...DEFAULT_GAME_PROFILE, uid };
+        setLocalGameItem(localKey, fallback);
+        callback(fallback);
       }
-
-      const profile: UserGameProfile = {
-        uid,
-        level: isInstructor ? 99 : level,
-        xp,
-        role: data.role,
-        gold: isInstructor ? 999999 : Number(data.gold ?? DEFAULT_GAME_PROFILE.gold),
-        wood: isInstructor ? 9999 : Number(data.wood ?? DEFAULT_GAME_PROFILE.wood),
-        brick: isInstructor ? 9999 : Number(data.brick ?? DEFAULT_GAME_PROFILE.brick),
-        metal: isInstructor ? 9999 : Number(data.metal ?? DEFAULT_GAME_PROFILE.metal),
-        avatar: data.equippedSkin || data.avatar || DEFAULT_GAME_PROFILE.avatar,
-        equippedSkin: data.equippedSkin || data.avatar || DEFAULT_GAME_PROFILE.avatar,
-        equippedWeapon: data.equippedWeapon || DEFAULT_GAME_PROFILE.equippedWeapon,
-        equippedPower: data.equippedPower || DEFAULT_GAME_PROFILE.equippedPower,
-        inventory: inv,
-        unlockedSkins: skins,
-        monthlyCrown: isInstructor ? true : Boolean(data.monthlyCrown)
-      };
-      callback(profile);
-    } else {
-      callback({ ...DEFAULT_GAME_PROFILE, uid });
-    }
-  }, (err) => {
-    console.error('Error subscribing to game profile:', err);
-  });
+    }, (err) => {
+      handleFirestoreError(err, 'subscribeToGameProfile');
+      const fallback = getLocalGameItem<UserGameProfile>(localKey, { ...DEFAULT_GAME_PROFILE, uid });
+      callback(fallback);
+    });
+  } catch (err) {
+    handleFirestoreError(err, 'subscribeToGameProfile');
+    const fallback = getLocalGameItem<UserGameProfile>(localKey, { ...DEFAULT_GAME_PROFILE, uid });
+    callback(fallback);
+    return () => {};
+  }
 };
 
 /**
@@ -987,17 +1057,47 @@ export interface ModuleClaimResult {
   };
 }
 
+const LOCAL_CLAIMED_MODULES_PREFIX = 'igcse_claimed_modules_';
+
+function getClaimedModulesSet(uid: string): Set<string> {
+  const list = getLocalGameItem<string[]>(`${LOCAL_CLAIMED_MODULES_PREFIX}${uid}`, []);
+  return new Set(list);
+}
+
+function saveClaimedModuleLocally(uid: string, moduleId: string): void {
+  const currentSet = getClaimedModulesSet(uid);
+  currentSet.add(moduleId);
+  setLocalGameItem(`${LOCAL_CLAIMED_MODULES_PREFIX}${uid}`, Array.from(currentSet));
+}
+
 /**
- * Check if a student has already claimed rewards for a specific revision module
+ * Check if a student has already claimed rewards for a specific revision module.
+ * Prioritizes fast local storage check to avoid unnecessary Firestore read quota.
  */
 export const checkModuleClaimed = async (uid: string, moduleId: string): Promise<boolean> => {
   if (!uid || !moduleId) return false;
+
+  // 1. Check local cache first - instant and zero Firestore read cost
+  const localClaimed = getClaimedModulesSet(uid);
+  if (localClaimed.has(moduleId)) {
+    return true;
+  }
+
+  // If quota is exhausted or circuit-breaker active, return local check result immediately
+  if (!canPerformFirestoreWrite()) {
+    return false;
+  }
+
   try {
     const claimDocRef = doc(db, 'users', uid, 'completedModules', moduleId);
     const snap = await getDoc(claimDocRef);
-    return snap.exists();
-  } catch (e) {
-    console.error('Error checking claimed module:', e);
+    if (snap.exists()) {
+      saveClaimedModuleLocally(uid, moduleId);
+      return true;
+    }
+    return false;
+  } catch (e: any) {
+    handleFirestoreError(e, 'checkModuleClaimed');
     return false;
   }
 };
@@ -1026,10 +1126,8 @@ export const claimModuleRevisionReward = async (
     };
   }
 
-  const claimDocRef = doc(db, 'users', uid, 'completedModules', moduleId);
-  const claimSnap = await getDoc(claimDocRef);
-
-  if (claimSnap.exists()) {
+  const localClaimed = getClaimedModulesSet(uid);
+  if (localClaimed.has(moduleId)) {
     return {
       success: false,
       alreadyClaimed: true,
@@ -1046,22 +1144,56 @@ export const claimModuleRevisionReward = async (
     gold: 20
   };
 
-  const userDocRef = doc(db, 'users', uid);
+  // Mark claimed locally immediately
+  saveClaimedModuleLocally(uid, moduleId);
 
-  // Write claim record
-  await setDoc(claimDocRef, {
-    claimedAt: new Date().toISOString(),
-    ...rewards
-  });
+  // Update local profile immediately
+  const localProfile = getLocalGameItem<UserGameProfile | null>(`igcse_game_profile_${uid}`, null);
+  if (localProfile) {
+    const updated = {
+      ...localProfile,
+      wood: (localProfile.wood || 0) + rewards.wood,
+      brick: (localProfile.brick || 0) + rewards.brick,
+      metal: (localProfile.metal || 0) + rewards.metal,
+      xp: (localProfile.xp || 0) + rewards.xp,
+      gold: (localProfile.gold || 0) + rewards.gold
+    };
+    setLocalGameItem(`igcse_game_profile_${uid}`, updated);
+  }
 
-  // Increment student profile
-  await setDoc(userDocRef, {
-    wood: increment(rewards.wood),
-    brick: increment(rewards.brick),
-    metal: increment(rewards.metal),
-    xp: increment(rewards.xp),
-    gold: increment(rewards.gold)
-  }, { merge: true });
+  if (canPerformFirestoreWrite()) {
+    try {
+      const claimDocRef = doc(db, 'users', uid, 'completedModules', moduleId);
+      const claimSnap = await getDoc(claimDocRef);
+
+      if (claimSnap.exists()) {
+        return {
+          success: false,
+          alreadyClaimed: true,
+          message: 'Module completed! Complete topic quizzes for additional materials.'
+        };
+      }
+
+      const userDocRef = doc(db, 'users', uid);
+
+      // Write claim record
+      await setDoc(claimDocRef, {
+        claimedAt: new Date().toISOString(),
+        ...rewards
+      });
+
+      // Increment student profile
+      await setDoc(userDocRef, {
+        wood: increment(rewards.wood),
+        brick: increment(rewards.brick),
+        metal: increment(rewards.metal),
+        xp: increment(rewards.xp),
+        gold: increment(rewards.gold)
+      }, { merge: true });
+    } catch (e: any) {
+      handleFirestoreError(e, 'claimModuleRevisionReward');
+    }
+  }
 
   return {
     success: true,
@@ -1096,22 +1228,43 @@ const DEFAULT_EVENT_STATE: BattleEventState = {
 export const subscribeToBattleConfig = (
   callback: (config: BattleEventConfig) => void
 ): (() => void) => {
-  const configDoc = doc(db, 'battleEvent', 'config');
-  return onSnapshot(configDoc, (snap) => {
-    if (snap.exists()) {
-      callback(snap.data() as BattleEventConfig);
-    } else {
-      callback(DEFAULT_EVENT_CONFIG);
-    }
-  });
+  const cached = getLocalGameItem<BattleEventConfig>(LOCAL_BATTLE_CONFIG_KEY, DEFAULT_EVENT_CONFIG);
+  callback(cached);
+
+  try {
+    const configDoc = doc(db, 'battleEvent', 'config');
+    return onSnapshot(configDoc, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data() as BattleEventConfig;
+        setLocalGameItem(LOCAL_BATTLE_CONFIG_KEY, data);
+        callback(data);
+      } else {
+        callback(DEFAULT_EVENT_CONFIG);
+      }
+    }, (err) => {
+      handleFirestoreError(err, 'subscribeToBattleConfig');
+      callback(getLocalGameItem<BattleEventConfig>(LOCAL_BATTLE_CONFIG_KEY, DEFAULT_EVENT_CONFIG));
+    });
+  } catch (err) {
+    handleFirestoreError(err, 'subscribeToBattleConfig');
+    return () => {};
+  }
 };
 
 /**
  * Teacher control: Update tournament schedule
  */
 export const updateBattleConfig = async (config: Partial<BattleEventConfig>): Promise<void> => {
-  const configDoc = doc(db, 'battleEvent', 'config');
-  await setDoc(configDoc, config, { merge: true });
+  const current = getLocalGameItem<BattleEventConfig>(LOCAL_BATTLE_CONFIG_KEY, DEFAULT_EVENT_CONFIG);
+  setLocalGameItem(LOCAL_BATTLE_CONFIG_KEY, { ...current, ...config });
+
+  if (!canPerformFirestoreWrite()) return;
+  try {
+    const configDoc = doc(db, 'battleEvent', 'config');
+    await setDoc(configDoc, config, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, 'updateBattleConfig');
+  }
 };
 
 /**
@@ -1120,14 +1273,27 @@ export const updateBattleConfig = async (config: Partial<BattleEventConfig>): Pr
 export const subscribeToBattleState = (
   callback: (state: BattleEventState) => void
 ): (() => void) => {
-  const stateDoc = doc(db, 'battleEvent', 'state');
-  return onSnapshot(stateDoc, (snap) => {
-    if (snap.exists()) {
-      callback(snap.data() as BattleEventState);
-    } else {
-      callback(DEFAULT_EVENT_STATE);
-    }
-  });
+  const cached = getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE);
+  callback(cached);
+
+  try {
+    const stateDoc = doc(db, 'battleEvent', 'state');
+    return onSnapshot(stateDoc, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data() as BattleEventState;
+        setLocalGameItem(LOCAL_BATTLE_STATE_KEY, data);
+        callback(data);
+      } else {
+        callback(DEFAULT_EVENT_STATE);
+      }
+    }, (err) => {
+      handleFirestoreError(err, 'subscribeToBattleState');
+      callback(getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE));
+    });
+  } catch (err) {
+    handleFirestoreError(err, 'subscribeToBattleState');
+    return () => {};
+  }
 };
 
 /**
@@ -1136,14 +1302,26 @@ export const subscribeToBattleState = (
 export const subscribeToLobby = (
   callback: (players: LobbyPlayer[]) => void
 ): (() => void) => {
-  const lobbyColl = collection(db, 'battleEvent', 'lobby', 'members');
-  return onSnapshot(lobbyColl, (snap) => {
-    const list: LobbyPlayer[] = [];
-    snap.forEach((docSnap) => {
-      list.push(docSnap.data() as LobbyPlayer);
+  const cached = getLocalGameItem<LobbyPlayer[]>(LOCAL_LOBBY_PLAYERS_KEY, []);
+  callback(cached);
+
+  try {
+    const lobbyColl = collection(db, 'battleEvent', 'lobby', 'members');
+    return onSnapshot(lobbyColl, (snap) => {
+      const list: LobbyPlayer[] = [];
+      snap.forEach((docSnap) => {
+        list.push(docSnap.data() as LobbyPlayer);
+      });
+      setLocalGameItem(LOCAL_LOBBY_PLAYERS_KEY, list);
+      callback(list);
+    }, (err) => {
+      handleFirestoreError(err, 'subscribeToLobby');
+      callback(getLocalGameItem<LobbyPlayer[]>(LOCAL_LOBBY_PLAYERS_KEY, []));
     });
-    callback(list);
-  });
+  } catch (err) {
+    handleFirestoreError(err, 'subscribeToLobby');
+    return () => {};
+  }
 };
 
 /**
@@ -1151,11 +1329,20 @@ export const subscribeToLobby = (
  */
 export const joinLobby = async (player: LobbyPlayer): Promise<void> => {
   if (!player.uid) return;
-  const playerDoc = doc(db, 'battleEvent', 'lobby', 'members', player.uid);
-  await setDoc(playerDoc, {
-    ...player,
-    joinedAt: new Date().toISOString()
-  });
+  const currentLobby = getLocalGameItem<LobbyPlayer[]>(LOCAL_LOBBY_PLAYERS_KEY, []);
+  const nextLobby = [...currentLobby.filter(p => p.uid !== player.uid), { ...player, joinedAt: new Date().toISOString() }];
+  setLocalGameItem(LOCAL_LOBBY_PLAYERS_KEY, nextLobby);
+
+  if (!canPerformFirestoreWrite()) return;
+  try {
+    const playerDoc = doc(db, 'battleEvent', 'lobby', 'members', player.uid);
+    await setDoc(playerDoc, {
+      ...player,
+      joinedAt: new Date().toISOString()
+    });
+  } catch (err) {
+    handleFirestoreError(err, 'joinLobby');
+  }
 };
 
 /**
@@ -1163,8 +1350,16 @@ export const joinLobby = async (player: LobbyPlayer): Promise<void> => {
  */
 export const leaveLobby = async (uid: string): Promise<void> => {
   if (!uid) return;
-  const playerDoc = doc(db, 'battleEvent', 'lobby', 'members', uid);
-  await deleteDoc(playerDoc);
+  const currentLobby = getLocalGameItem<LobbyPlayer[]>(LOCAL_LOBBY_PLAYERS_KEY, []);
+  setLocalGameItem(LOCAL_LOBBY_PLAYERS_KEY, currentLobby.filter(p => p.uid !== uid));
+
+  if (!canPerformFirestoreWrite()) return;
+  try {
+    const playerDoc = doc(db, 'battleEvent', 'lobby', 'members', uid);
+    await deleteDoc(playerDoc);
+  } catch (err) {
+    handleFirestoreError(err, 'leaveLobby');
+  }
 };
 
 /**
@@ -1347,14 +1542,26 @@ export const declareBattleWinner = async (winner: { uid: string; name: string; a
 export const subscribeToArenaPlayers = (
   callback: (players: ArenaPlayer[]) => void
 ): (() => void) => {
-  const playersColl = collection(db, 'battleEvent', 'players', 'items');
-  return onSnapshot(playersColl, (snap) => {
-    const list: ArenaPlayer[] = [];
-    snap.forEach((docSnap) => {
-      list.push(docSnap.data() as ArenaPlayer);
+  const cached = getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []);
+  if (cached.length > 0) callback(cached);
+
+  try {
+    const playersColl = collection(db, 'battleEvent', 'players', 'items');
+    return onSnapshot(playersColl, (snap) => {
+      const list: ArenaPlayer[] = [];
+      snap.forEach((docSnap) => {
+        list.push(docSnap.data() as ArenaPlayer);
+      });
+      setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, list);
+      callback(list);
+    }, (err) => {
+      handleFirestoreError(err, 'subscribeToArenaPlayers');
+      callback(getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []));
     });
-    callback(list);
-  });
+  } catch (err) {
+    handleFirestoreError(err, 'subscribeToArenaPlayers');
+    return () => {};
+  }
 };
 
 /**
@@ -1363,6 +1570,12 @@ export const subscribeToArenaPlayers = (
  */
 export const ensureArenaPlayer = async (player: ArenaPlayer): Promise<void> => {
   if (!player.uid) return;
+  const currentPlayers = getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []);
+  if (!currentPlayers.some(p => p.uid === player.uid)) {
+    setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, [...currentPlayers, player]);
+  }
+
+  if (!canPerformFirestoreWrite()) return;
   const playerDoc = doc(db, 'battleEvent', 'players', 'items', player.uid);
   try {
     const snap = await getDoc(playerDoc);
@@ -1382,7 +1595,7 @@ export const ensureArenaPlayer = async (player: ArenaPlayer): Promise<void> => {
       }
     }
   } catch (err) {
-    console.warn('Could not ensure arena player existence:', err);
+    handleFirestoreError(err, 'ensureArenaPlayer');
   }
 };
 
@@ -1395,11 +1608,22 @@ export const updatePlayerPosition = async (
   data: Partial<ArenaPlayer>
 ): Promise<void> => {
   if (!uid) return;
+  // Always update local cache so other components on this device/tab have latest position
+  const currentPlayers = getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []);
+  const idx = currentPlayers.findIndex(p => p.uid === uid);
+  if (idx >= 0) {
+    currentPlayers[idx] = { ...currentPlayers[idx], ...data };
+  } else {
+    currentPlayers.push({ ...data, uid } as ArenaPlayer);
+  }
+  setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, currentPlayers);
+
+  if (!canPerformFirestoreWrite()) return;
   const playerDoc = doc(db, 'battleEvent', 'players', 'items', uid);
   try {
     await setDoc(playerDoc, data, { merge: true });
   } catch (err) {
-    console.warn('Error syncing player position:', err);
+    handleFirestoreError(err, 'updatePlayerPosition');
   }
 };
 
@@ -1412,15 +1636,45 @@ export const damageArenaPlayer = async (
   attackerUid?: string
 ): Promise<{ killed: boolean }> => {
   if (!targetUid) return { killed: false };
+
+  // Update local cache first
+  const currentPlayers = getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []);
+  const targetLocal = currentPlayers.find(p => p.uid === targetUid);
+  let localKilled = false;
+  if (targetLocal && targetLocal.isAlive) {
+    let actualDamage = damageAmount;
+    if (targetLocal.metalShieldActiveUntil && targetLocal.metalShieldActiveUntil > Date.now()) {
+      actualDamage = Math.round(actualDamage * 0.5);
+    }
+    let newShield = targetLocal.shield;
+    let newHp = targetLocal.hp;
+    if (newShield > 0) {
+      if (newShield >= actualDamage) {
+        newShield -= actualDamage;
+        actualDamage = 0;
+      } else {
+        actualDamage -= newShield;
+        newShield = 0;
+      }
+    }
+    newHp = Math.max(0, newHp - actualDamage);
+    localKilled = newHp <= 0;
+    targetLocal.shield = newShield;
+    targetLocal.hp = newHp;
+    targetLocal.isAlive = !localKilled;
+    setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, currentPlayers);
+  }
+
+  if (!canPerformFirestoreWrite()) return { killed: localKilled };
+
   const targetDoc = doc(db, 'battleEvent', 'players', 'items', targetUid);
   try {
     const snap = await getDoc(targetDoc);
-    if (!snap.exists()) return { killed: false };
+    if (!snap.exists()) return { killed: localKilled };
 
     const current = snap.data() as ArenaPlayer;
     if (!current.isAlive) return { killed: false };
 
-    // Metal bunker active 50% damage reduction
     let actualDamage = damageAmount;
     if (current.metalShieldActiveUntil && current.metalShieldActiveUntil > Date.now()) {
       actualDamage = Math.round(actualDamage * 0.5);
@@ -1458,8 +1712,8 @@ export const damageArenaPlayer = async (
 
     return { killed: isKilled };
   } catch (err) {
-    console.warn('Error damaging player:', err);
-    return { killed: false };
+    handleFirestoreError(err, 'damageArenaPlayer');
+    return { killed: localKilled };
   }
 };
 
@@ -1469,14 +1723,26 @@ export const damageArenaPlayer = async (
 export const subscribeToStructures = (
   callback: (structures: ArenaStructure[]) => void
 ): (() => void) => {
-  const coll = collection(db, 'battleEvent', 'structures', 'items');
-  return onSnapshot(coll, (snap) => {
-    const list: ArenaStructure[] = [];
-    snap.forEach((docSnap) => {
-      list.push(docSnap.data() as ArenaStructure);
+  const cached = getLocalGameItem<ArenaStructure[]>(LOCAL_STRUCTURES_KEY, []);
+  callback(cached);
+
+  try {
+    const coll = collection(db, 'battleEvent', 'structures', 'items');
+    return onSnapshot(coll, (snap) => {
+      const list: ArenaStructure[] = [];
+      snap.forEach((docSnap) => {
+        list.push(docSnap.data() as ArenaStructure);
+      });
+      setLocalGameItem(LOCAL_STRUCTURES_KEY, list);
+      callback(list);
+    }, (err) => {
+      handleFirestoreError(err, 'subscribeToStructures');
+      callback(getLocalGameItem<ArenaStructure[]>(LOCAL_STRUCTURES_KEY, []));
     });
-    callback(list);
-  });
+  } catch (err) {
+    handleFirestoreError(err, 'subscribeToStructures');
+    return () => {};
+  }
 };
 
 /**
@@ -1488,6 +1754,11 @@ export const placeArenaStructure = async (
   builderUid: string
 ): Promise<boolean> => {
   if (!builderUid || !structure.id) return false;
+
+  const currentStructs = getLocalGameItem<ArenaStructure[]>(LOCAL_STRUCTURES_KEY, []);
+  setLocalGameItem(LOCAL_STRUCTURES_KEY, [...currentStructs, structure]);
+
+  if (!canPerformFirestoreWrite()) return true;
 
   const structDoc = doc(db, 'battleEvent', 'structures', 'items', structure.id);
   const playerDoc = doc(db, 'battleEvent', 'players', 'items', builderUid);
@@ -1508,8 +1779,8 @@ export const placeArenaStructure = async (
 
     return true;
   } catch (err) {
-    console.warn('Error placing arena structure:', err);
-    return false;
+    handleFirestoreError(err, 'placeArenaStructure');
+    return true;
   }
 };
 
@@ -1518,6 +1789,21 @@ export const placeArenaStructure = async (
  */
 export const damageArenaStructure = async (structureId: string, damage: number): Promise<void> => {
   if (!structureId) return;
+
+  const currentStructs = getLocalGameItem<ArenaStructure[]>(LOCAL_STRUCTURES_KEY, []);
+  const structIdx = currentStructs.findIndex(s => s.id === structureId);
+  if (structIdx >= 0) {
+    const newHp = currentStructs[structIdx].hp - damage;
+    if (newHp <= 0) {
+      currentStructs.splice(structIdx, 1);
+    } else {
+      currentStructs[structIdx].hp = newHp;
+    }
+    setLocalGameItem(LOCAL_STRUCTURES_KEY, currentStructs);
+  }
+
+  if (!canPerformFirestoreWrite()) return;
+
   const structDoc = doc(db, 'battleEvent', 'structures', 'items', structureId);
   try {
     const snap = await getDoc(structDoc);
@@ -1532,7 +1818,7 @@ export const damageArenaStructure = async (structureId: string, damage: number):
       await setDoc(structDoc, { hp: newHp }, { merge: true });
     }
   } catch (err) {
-    console.warn('Error damaging structure:', err);
+    handleFirestoreError(err, 'damageArenaStructure');
   }
 };
 
@@ -1542,14 +1828,26 @@ export const damageArenaStructure = async (structureId: string, damage: number):
 export const subscribeToSupplyCrates = (
   callback: (crates: SupplyCrate[]) => void
 ): (() => void) => {
-  const coll = collection(db, 'battleEvent', 'crates', 'items');
-  return onSnapshot(coll, (snap) => {
-    const list: SupplyCrate[] = [];
-    snap.forEach((docSnap) => {
-      list.push(docSnap.data() as SupplyCrate);
+  const cached = getLocalGameItem<SupplyCrate[]>(LOCAL_CRATES_KEY, []);
+  callback(cached);
+
+  try {
+    const coll = collection(db, 'battleEvent', 'crates', 'items');
+    return onSnapshot(coll, (snap) => {
+      const list: SupplyCrate[] = [];
+      snap.forEach((docSnap) => {
+        list.push(docSnap.data() as SupplyCrate);
+      });
+      setLocalGameItem(LOCAL_CRATES_KEY, list);
+      callback(list);
+    }, (err) => {
+      handleFirestoreError(err, 'subscribeToSupplyCrates');
+      callback(getLocalGameItem<SupplyCrate[]>(LOCAL_CRATES_KEY, []));
     });
-    callback(list);
-  });
+  } catch (err) {
+    handleFirestoreError(err, 'subscribeToSupplyCrates');
+    return () => {};
+  }
 };
 
 /**

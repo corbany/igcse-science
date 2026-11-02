@@ -3320,6 +3320,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   useEffect(() => {
     let animationFrameId: number;
     let lastPositionSync = 0;
+    let lastSyncedX = 0;
+    let lastSyncedY = 0;
+    let lastSyncedAngle = 0;
     let lastStormDamageTime = 0;
 
     const gameLoop = () => {
@@ -3534,9 +3537,14 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           });
         }
 
-        // Sync position to Firestore throttled at ~120ms
-        if (now - lastPositionSync > 120) {
+        // Sync position to Firestore throttled to preserve Firestore quota (750ms + distance threshold)
+        const distMoved = Math.hypot(localX - lastSyncedX, localY - lastSyncedY);
+        const angleDiff = Math.abs(angle - lastSyncedAngle);
+        if (now - lastPositionSync > 750 && (distMoved > 16 || angleDiff > 0.35 || now - lastPositionSync > 3000)) {
           lastPositionSync = now;
+          lastSyncedX = localX;
+          lastSyncedY = localY;
+          lastSyncedAngle = angle;
           updatePlayerPosition(user.id, {
             x: Math.round(localX),
             y: Math.round(localY),

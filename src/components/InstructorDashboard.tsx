@@ -35,7 +35,8 @@ import {
   AlertCircle,
   UserCheck,
   Calendar,
-  X
+  X,
+  ArrowRightLeft
 } from 'lucide-react';
 import { InstructorTasksManager } from './InstructorTasksManager';
 import { 
@@ -74,7 +75,10 @@ import {
   shareClassWithInstructor,
   removeSharedInstructorFromClass,
   updatePastStudentQuizResultsWithNewTrafficLightParameters,
-  UpdatePastQuizResultsSummary
+  UpdatePastQuizResultsSummary,
+  moveStudentToClass,
+  moveMultipleStudentsToClass,
+  DEFAULT_CLASS_ITEM
 } from '../services/firestoreService';
 import { allSubtopicsData } from '../data/subtopicSlidesData';
 import { UserProfile, ScienceSubject } from '../types';
@@ -149,6 +153,14 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   const [shareEmailInput, setShareEmailInput] = useState<string>('');
   const [sharingClass, setSharingClass] = useState<boolean>(false);
   const [shareFeedbackMsg, setShareFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Move students to different class modal state
+  const [showMoveModal, setShowMoveModal] = useState<boolean>(false);
+  const [studentsToMove, setStudentsToMove] = useState<{ studentId: string; name: string; currentClassId: string; currentClassName: string }[]>([]);
+  const [targetClassIdForMove, setTargetClassIdForMove] = useState<string>('');
+  const [movingStudents, setMovingStudents] = useState<boolean>(false);
+  const [notifyStudentOnMove, setNotifyStudentOnMove] = useState<boolean>(true);
+  const [selectedStudentIdsForBatch, setSelectedStudentIdsForBatch] = useState<Set<string>>(new Set());
 
   // Recalculate past student quiz results with new traffic light parameters
   const [updatingQuizParameters, setUpdatingQuizParameters] = useState<boolean>(false);
@@ -281,6 +293,123 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
       setSelectedClass(prev => prev ? { ...prev, studentCount: Math.max(0, prev.studentCount - 1) } : null);
       setActionNotice(`${studentName} removed from class.`);
       setTimeout(() => setActionNotice(null), 3000);
+    }
+  };
+
+  const handleOpenMoveModalSingle = (
+    student: { studentId: string; name: string },
+    sourceClassId?: string,
+    sourceClassName?: string
+  ) => {
+    const srcId = sourceClassId || selectedClass?.id || DEFAULT_CLASS_ITEM.id;
+    const srcName = sourceClassName || selectedClass?.name || DEFAULT_CLASS_ITEM.name;
+    setStudentsToMove([{
+      studentId: student.studentId,
+      name: student.name,
+      currentClassId: srcId,
+      currentClassName: srcName
+    }]);
+
+    const allCandidateClasses = classes.concat(
+      classes.some(c => c.id === DEFAULT_CLASS_ITEM.id) ? [] : [DEFAULT_CLASS_ITEM]
+    );
+    const available = allCandidateClasses.filter(c => c.id !== srcId);
+    setTargetClassIdForMove(available[0]?.id || '');
+    setShowMoveModal(true);
+  };
+
+  const handleOpenMoveModalBatch = () => {
+    if (selectedStudentIdsForBatch.size === 0 || !selectedClass) return;
+    const toMove = classStudents
+      .filter(s => selectedStudentIdsForBatch.has(s.studentId))
+      .map(s => ({
+        studentId: s.studentId,
+        name: s.name,
+        currentClassId: selectedClass.id,
+        currentClassName: selectedClass.name
+      }));
+    if (toMove.length === 0) return;
+    setStudentsToMove(toMove);
+
+    const allCandidateClasses = classes.concat(
+      classes.some(c => c.id === DEFAULT_CLASS_ITEM.id) ? [] : [DEFAULT_CLASS_ITEM]
+    );
+    const available = allCandidateClasses.filter(c => c.id !== selectedClass.id);
+    setTargetClassIdForMove(available[0]?.id || '');
+    setShowMoveModal(true);
+  };
+
+  const toggleSelectAllStudents = () => {
+    if (selectedStudentIdsForBatch.size === classStudents.length) {
+      setSelectedStudentIdsForBatch(new Set());
+    } else {
+      setSelectedStudentIdsForBatch(new Set(classStudents.map(s => s.studentId)));
+    }
+  };
+
+  const toggleSelectStudent = (studentId: string) => {
+    setSelectedStudentIdsForBatch(prev => {
+      const next = new Set(prev);
+      if (next.has(studentId)) {
+        next.delete(studentId);
+      } else {
+        next.add(studentId);
+      }
+      return next;
+    });
+  };
+
+  const handleConfirmMoveStudents = async () => {
+    if (!targetClassIdForMove || studentsToMove.length === 0) return;
+    setMovingStudents(true);
+    try {
+      const sourceClassId = studentsToMove[0].currentClassId;
+      const studentIds = studentsToMove.map(s => s.studentId);
+      
+      const result = await moveMultipleStudentsToClass(
+        studentIds,
+        sourceClassId,
+        targetClassIdForMove,
+        {
+          instructorName: currentUser.name,
+          instructorEmail: currentUser.email,
+          notifyStudent: notifyStudentOnMove
+        }
+      );
+
+      const allCandidateClasses = classes.concat(
+        classes.some(c => c.id === DEFAULT_CLASS_ITEM.id) ? [] : [DEFAULT_CLASS_ITEM]
+      );
+      const targetClassObj = allCandidateClasses.find(c => c.id === targetClassIdForMove);
+      const targetName = targetClassObj?.name || 'new class';
+
+      if (selectedClass && selectedClass.id === sourceClassId) {
+        setClassStudents(prev => prev.filter(s => !studentIds.includes(s.studentId)));
+        setSelectedClass(prev => prev ? {
+          ...prev,
+          studentCount: Math.max(0, prev.studentCount - result.successfulCount)
+        } : null);
+      }
+
+      if (selectedStudentForAnalysis && studentIds.includes(selectedStudentForAnalysis.studentId)) {
+        setSelectedStudentForAnalysis(null);
+      }
+
+      setSelectedStudentIdsForBatch(new Set());
+      setShowMoveModal(false);
+      setStudentsToMove([]);
+
+      const msg = studentsToMove.length === 1 
+        ? `Successfully moved ${studentsToMove[0].name} to ${targetName}!`
+        : `Successfully moved ${result.successfulCount} students to ${targetName}!`;
+      setActionNotice(msg);
+      setTimeout(() => setActionNotice(null), 5000);
+
+      await loadInstructorClasses();
+    } catch (err: any) {
+      alert(`Error moving student(s): ${err?.message || 'Operation failed'}`);
+    } finally {
+      setMovingStudents(false);
     }
   };
 
@@ -1041,148 +1170,205 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                         </p>
                       </div>
                     ) : (
-                      <div className="overflow-x-auto rounded-2xl border border-slate-800">
-                        <table className="min-w-full text-xs text-left text-slate-200">
-                          <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-800">
-                            <tr>
-                              <th className="p-3">Student</th>
-                              <th className="p-3">Tier</th>
-                              <th className="p-3">Slide Decks Completed</th>
-                              <th className="p-3">Syllabus %</th>
-                              <th className="p-3">Traffic Lights</th>
-                              <th className="p-3">Quiz Scores</th>
-                              <th className="p-3">Weak Topics</th>
-                              <th className="p-3">Last Active</th>
-                              <th className="p-3">Action</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800 bg-slate-900/60">
-                            {classStudents.map(std => {
-                              const bioScore = std.quizScores?.biology ? Math.round((std.quizScores.biology.score / std.quizScores.biology.total) * 100) : '-';
-                              const chemScore = std.quizScores?.chemistry ? Math.round((std.quizScores.chemistry.score / std.quizScores.chemistry.total) * 100) : '-';
-                              const physScore = std.quizScores?.physics ? Math.round((std.quizScores.physics.score / std.quizScores.physics.total) * 100) : '-';
+                      <div className="space-y-2">
+                        {/* Batch Action Toolbar */}
+                        {selectedStudentIdsForBatch.size > 0 && (
+                          <div className="flex items-center justify-between p-3 rounded-xl bg-indigo-950/60 border border-indigo-500/40 text-xs animate-in fade-in">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
+                              <span className="font-bold text-white">
+                                {selectedStudentIdsForBatch.size} {selectedStudentIdsForBatch.size === 1 ? 'student' : 'students'} selected
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={handleOpenMoveModalBatch}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition shadow-sm"
+                              >
+                                <ArrowRightLeft className="w-3.5 h-3.5" />
+                                <span>Move Selected to Another Class</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedStudentIdsForBatch(new Set())}
+                                className="px-2.5 py-1.5 rounded-lg text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800 transition"
+                              >
+                                Clear Selection
+                              </button>
+                            </div>
+                          </div>
+                        )}
 
-                              const studentDecksSet = new Set<string>([
-                                ...(std.completedLessons || []),
-                                ...Object.keys(std.trafficLights || {}),
-                                ...Object.keys(std.subtopicQuizScores || {})
-                              ]);
-                              const decksCompleted = Math.max(std.completedLessonsCount || 0, studentDecksSet.size);
-                              const slideDeckPct = Math.min(100, Math.round((decksCompleted / 106) * 100));
-                              const syllabusPct = Math.min(100, Math.round((studentDecksSet.size / 106) * 100));
+                        <div className="overflow-x-auto rounded-2xl border border-slate-800">
+                          <table className="min-w-full text-xs text-left text-slate-200">
+                            <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-800">
+                              <tr>
+                                <th className="p-3 w-8">
+                                  <input
+                                    type="checkbox"
+                                    checked={classStudents.length > 0 && selectedStudentIdsForBatch.size === classStudents.length}
+                                    onChange={toggleSelectAllStudents}
+                                    title="Select all students for batch action"
+                                    className="rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 w-3.5 h-3.5 cursor-pointer"
+                                  />
+                                </th>
+                                <th className="p-3">Student</th>
+                                <th className="p-3">Tier</th>
+                                <th className="p-3">Slide Decks Completed</th>
+                                <th className="p-3">Syllabus %</th>
+                                <th className="p-3">Traffic Lights</th>
+                                <th className="p-3">Quiz Scores</th>
+                                <th className="p-3">Weak Topics</th>
+                                <th className="p-3">Last Active</th>
+                                <th className="p-3">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800 bg-slate-900/60">
+                              {classStudents.map(std => {
+                                const isSelected = selectedStudentIdsForBatch.has(std.studentId);
+                                const bioScore = std.quizScores?.biology ? Math.round((std.quizScores.biology.score / std.quizScores.biology.total) * 100) : '-';
+                                const chemScore = std.quizScores?.chemistry ? Math.round((std.quizScores.chemistry.score / std.quizScores.chemistry.total) * 100) : '-';
+                                const physScore = std.quizScores?.physics ? Math.round((std.quizScores.physics.score / std.quizScores.physics.total) * 100) : '-';
 
-                              const greenCount = Object.values(std.trafficLights || {}).filter(t => t === 'green').length;
-                              const orangeCount = Object.values(std.trafficLights || {}).filter(t => t === 'orange').length;
-                              const redCount = Object.values(std.trafficLights || {}).filter(t => t === 'red').length;
+                                const studentDecksSet = new Set<string>([
+                                  ...(std.completedLessons || []),
+                                  ...Object.keys(std.trafficLights || {}),
+                                  ...Object.keys(std.subtopicQuizScores || {})
+                                ]);
+                                const decksCompleted = Math.max(std.completedLessonsCount || 0, studentDecksSet.size);
+                                const slideDeckPct = Math.min(100, Math.round((decksCompleted / 106) * 100));
+                                const syllabusPct = Math.min(100, Math.round((studentDecksSet.size / 106) * 100));
 
-                              return (
-                                <tr key={std.studentId} className="hover:bg-slate-800/40 transition">
-                                  <td className="p-3">
-                                    <button
-                                      onClick={() => setSelectedStudentForAnalysis(std)}
-                                      className="text-left group/std hover:opacity-90 transition"
-                                      title="Click to view detailed quiz results & syllabus analysis"
-                                    >
-                                      <div className="font-semibold text-white group-hover/std:text-purple-300 flex items-center gap-1.5">
-                                        <span>{std.name}</span>
-                                        <Eye className="w-3 h-3 text-purple-400 opacity-0 group-hover/std:opacity-100 transition" />
-                                      </div>
-                                      <div className="text-[10px] text-slate-400 font-mono">{std.email}</div>
-                                    </button>
-                                  </td>
-                                  <td className="p-3">
-                                    <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
-                                      std.tier === 'Extended' ? 'bg-amber-500/20 text-amber-300' : 'bg-blue-500/20 text-blue-300'
-                                    }`}>
-                                      {std.tier}
-                                    </span>
-                                  </td>
-                                  <td className="p-3">
-                                    <div className="space-y-1">
-                                      <div className="flex items-center justify-between text-[11px] font-mono">
-                                        <span className="font-bold text-emerald-400">{decksCompleted} / 106</span>
-                                        <span className="text-slate-400">{slideDeckPct}%</span>
-                                      </div>
-                                      <div className="w-24 h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                                        <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${slideDeckPct}%` }} />
-                                      </div>
-                                    </div>
-                                  </td>
-                                  <td className="p-3">
-                                    <div className="space-y-1">
-                                      <div className="flex items-center justify-between text-[11px] font-mono">
-                                        <span className="font-bold text-sky-400">{syllabusPct}%</span>
-                                      </div>
-                                      <div className="w-20 h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                                        <div className="h-full bg-sky-500 rounded-full" style={{ width: `${syllabusPct}%` }} />
-                                      </div>
-                                    </div>
-                                  </td>
-                                  <td className="p-3">
-                                    <div className="flex items-center gap-1.5 text-[11px] font-mono">
-                                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title="Green Mastery">
-                                        🟢 {greenCount}
-                                      </span>
-                                      <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30" title="Orange Needs Revision">
-                                        🟠 {orangeCount}
-                                      </span>
-                                      <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30" title="Red Priority">
-                                        🔴 {redCount}
-                                      </span>
-                                    </div>
-                                  </td>
-                                  <td className="p-3">
-                                    <div className="flex items-center gap-1.5 font-mono text-[11px]">
-                                      <span className="text-emerald-400" title="Biology">B: {bioScore}%</span>
-                                      <span className="text-slate-600">•</span>
-                                      <span className="text-sky-400" title="Chemistry">C: {chemScore}%</span>
-                                      <span className="text-slate-600">•</span>
-                                      <span className="text-amber-400" title="Physics">P: {physScore}%</span>
-                                    </div>
-                                  </td>
-                                  <td className="p-3">
-                                    {std.weakTopics && std.weakTopics.length > 0 ? (
-                                      <div className="flex flex-wrap gap-1">
-                                        {std.weakTopics.slice(0, 3).map((wt, wIdx) => (
-                                          <span key={`${wt}-${wIdx}`} className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-semibold">
-                                            {wt}
-                                          </span>
-                                        ))}
-                                        {std.weakTopics.length > 3 && (
-                                          <span className="text-[10px] text-slate-500">+{std.weakTopics.length - 3}</span>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <span className="text-emerald-400 text-[11px] font-medium">None flagged</span>
-                                    )}
-                                  </td>
-                                  <td className="p-3 text-[11px] text-slate-400">
-                                    {std.lastActive ? new Date(std.lastActive).toLocaleDateString() : 'Recently'}
-                                  </td>
-                                  <td className="p-3">
-                                    <div className="flex items-center gap-1.5">
+                                const greenCount = Object.values(std.trafficLights || {}).filter(t => t === 'green').length;
+                                const orangeCount = Object.values(std.trafficLights || {}).filter(t => t === 'orange').length;
+                                const redCount = Object.values(std.trafficLights || {}).filter(t => t === 'red').length;
+
+                                return (
+                                  <tr key={std.studentId} className={`transition ${isSelected ? 'bg-indigo-950/30' : 'hover:bg-slate-800/40'}`}>
+                                    <td className="p-3">
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => toggleSelectStudent(std.studentId)}
+                                        className="rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 w-3.5 h-3.5 cursor-pointer"
+                                      />
+                                    </td>
+                                    <td className="p-3">
                                       <button
                                         onClick={() => setSelectedStudentForAnalysis(std)}
-                                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 border border-purple-500/30 text-[11px] font-bold transition"
-                                        title="View individual practice quiz results & syllabus analysis"
+                                        className="text-left group/std hover:opacity-90 transition"
+                                        title="Click to view detailed quiz results & syllabus analysis"
                                       >
-                                        <Eye className="w-3 h-3 text-purple-400" />
-                                        <span>Analysis</span>
+                                        <div className="font-semibold text-white group-hover/std:text-purple-300 flex items-center gap-1.5">
+                                          <span>{std.name}</span>
+                                          <Eye className="w-3 h-3 text-purple-400 opacity-0 group-hover/std:opacity-100 transition" />
+                                        </div>
+                                        <div className="text-[10px] text-slate-400 font-mono">{std.email}</div>
                                       </button>
-                                      <button
-                                        onClick={() => handleRemoveStudent(std.studentId, std.name)}
-                                        className="p-1 text-slate-500 hover:text-rose-400 transition"
-                                        title="Remove from class"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                                    </td>
+                                    <td className="p-3">
+                                      <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
+                                        std.tier === 'Extended' ? 'bg-amber-500/20 text-amber-300' : 'bg-blue-500/20 text-blue-300'
+                                      }`}>
+                                        {std.tier}
+                                      </span>
+                                    </td>
+                                    <td className="p-3">
+                                      <div className="space-y-1">
+                                        <div className="flex items-center justify-between text-[11px] font-mono">
+                                          <span className="font-bold text-emerald-400">{decksCompleted} / 106</span>
+                                          <span className="text-slate-400">{slideDeckPct}%</span>
+                                        </div>
+                                        <div className="w-24 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                                          <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${slideDeckPct}%` }} />
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td className="p-3">
+                                      <div className="space-y-1">
+                                        <div className="flex items-center justify-between text-[11px] font-mono">
+                                          <span className="font-bold text-sky-400">{syllabusPct}%</span>
+                                        </div>
+                                        <div className="w-20 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                                          <div className="h-full bg-sky-500 rounded-full" style={{ width: `${syllabusPct}%` }} />
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td className="p-3">
+                                      <div className="flex items-center gap-1.5 text-[11px] font-mono">
+                                        <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title="Green Mastery">
+                                          🟢 {greenCount}
+                                        </span>
+                                        <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30" title="Orange Needs Revision">
+                                          🟠 {orangeCount}
+                                        </span>
+                                        <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30" title="Red Priority">
+                                          🔴 {redCount}
+                                        </span>
+                                      </div>
+                                    </td>
+                                    <td className="p-3">
+                                      <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                                        <span className="text-emerald-400" title="Biology">B: {bioScore}%</span>
+                                        <span className="text-slate-600">•</span>
+                                        <span className="text-sky-400" title="Chemistry">C: {chemScore}%</span>
+                                        <span className="text-slate-600">•</span>
+                                        <span className="text-amber-400" title="Physics">P: {physScore}%</span>
+                                      </div>
+                                    </td>
+                                    <td className="p-3">
+                                      {std.weakTopics && std.weakTopics.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1">
+                                          {std.weakTopics.slice(0, 3).map((wt, wIdx) => (
+                                            <span key={`${wt}-${wIdx}`} className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-semibold">
+                                              {wt}
+                                            </span>
+                                          ))}
+                                          {std.weakTopics.length > 3 && (
+                                            <span className="text-[10px] text-slate-500">+{std.weakTopics.length - 3}</span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <span className="text-emerald-400 text-[11px] font-medium">None flagged</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 text-[11px] text-slate-400">
+                                      {std.lastActive ? new Date(std.lastActive).toLocaleDateString() : 'Recently'}
+                                    </td>
+                                    <td className="p-3">
+                                      <div className="flex items-center gap-1.5">
+                                        <button
+                                          onClick={() => setSelectedStudentForAnalysis(std)}
+                                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 border border-purple-500/30 text-[11px] font-bold transition"
+                                          title="View individual practice quiz results & syllabus analysis"
+                                        >
+                                          <Eye className="w-3 h-3 text-purple-400" />
+                                          <span>Analysis</span>
+                                        </button>
+                                        <button
+                                          onClick={() => handleOpenMoveModalSingle(std)}
+                                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 text-[11px] font-bold transition"
+                                          title="Move student to a different class"
+                                        >
+                                          <ArrowRightLeft className="w-3 h-3 text-indigo-400" />
+                                          <span>Move</span>
+                                        </button>
+                                        <button
+                                          onClick={() => handleRemoveStudent(std.studentId, std.name)}
+                                          className="p-1 text-slate-500 hover:text-rose-400 transition"
+                                          title="Remove from class"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1648,6 +1834,18 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                                 className="text-[11px] px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded transition font-medium"
                               >
                                 Nudge
+                              </button>
+                              <button
+                                onClick={() => handleOpenMoveModalSingle(
+                                  { studentId: std.id, name: std.name },
+                                  selectedClass?.id,
+                                  selectedClass?.name
+                                )}
+                                className="flex items-center gap-1 px-2 py-1 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 rounded text-[11px] font-bold transition"
+                                title="Move student to a different class"
+                              >
+                                <ArrowRightLeft className="w-3 h-3 text-indigo-400" />
+                                <span>Move</span>
                               </button>
                             </div>
                           </td>
@@ -2484,23 +2682,183 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                   Close Analysis
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    const studentId = selectedStudentForAnalysis.studentId;
-                    setSelectedStudentForAnalysis(null);
-                    setDashboardTab('tasks');
-                  }}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 transition flex items-center gap-1.5 shadow-md shadow-purple-600/30"
-                >
-                  <Calendar className="w-3.5 h-3.5" />
-                  <span>Assign Task to This Student</span>
-                </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const student = {
+                        studentId: selectedStudentForAnalysis.studentId,
+                        name: selectedStudentForAnalysis.name
+                      };
+                      handleOpenMoveModalSingle(student, selectedClass?.id, selectedClass?.name);
+                    }}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-indigo-200 bg-indigo-600/25 hover:bg-indigo-600/40 border border-indigo-500/40 transition flex items-center gap-1.5 shadow-sm"
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-300" />
+                    <span>Move Class</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const studentId = selectedStudentForAnalysis.studentId;
+                      setSelectedStudentForAnalysis(null);
+                      setDashboardTab('tasks');
+                    }}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 transition flex items-center gap-1.5 shadow-md shadow-purple-600/30"
+                  >
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>Assign Task to This Student</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         );
       })()}
+
+      {/* Move Student(s) to Another Class Modal */}
+      {showMoveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-indigo-500/40 rounded-3xl max-w-lg w-full p-6 sm:p-7 space-y-5 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center">
+                  <ArrowRightLeft className="w-5 h-5 text-indigo-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">
+                    {studentsToMove.length === 1 ? 'Move Student to Another Class' : `Move ${studentsToMove.length} Students to Another Class`}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    From: <span className="text-slate-200 font-semibold">{studentsToMove[0]?.currentClassName || 'Current Class'}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!movingStudents) {
+                    setShowMoveModal(false);
+                    setStudentsToMove([]);
+                  }
+                }}
+                disabled={movingStudents}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Students Selected List */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-300">
+                {studentsToMove.length === 1 ? 'Student to Reassign:' : `Selected Students (${studentsToMove.length}):`}
+              </label>
+              <div className="max-h-32 overflow-y-auto p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
+                {studentsToMove.map(s => (
+                  <div key={s.studentId} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-slate-900/80 border border-slate-800/80">
+                    <span className="font-semibold text-slate-200">{s.name}</span>
+                    <span className="text-[10px] text-slate-400 font-mono">ID: {s.studentId.slice(0, 10)}...</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Target Class Selection */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-300">
+                Select Destination Class <span className="text-rose-400">*</span>
+              </label>
+              {(() => {
+                const currentSrcId = studentsToMove[0]?.currentClassId;
+                const allCandidateClasses = classes.concat(
+                  classes.some(c => c.id === DEFAULT_CLASS_ITEM.id) ? [] : [DEFAULT_CLASS_ITEM]
+                ).filter(c => c.id !== currentSrcId);
+
+                if (allCandidateClasses.length === 0) {
+                  return (
+                    <div className="p-3 rounded-xl bg-rose-950/30 border border-rose-500/30 text-rose-300 text-xs">
+                      No other classes available to transfer into. Please create a new class first.
+                    </div>
+                  );
+                }
+
+                return (
+                  <select
+                    value={targetClassIdForMove}
+                    onChange={(e) => setTargetClassIdForMove(e.target.value)}
+                    disabled={movingStudents}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs focus:outline-hidden focus:border-indigo-500"
+                  >
+                    {allCandidateClasses.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} {c.subject && c.subject !== 'all' ? `(${c.subject})` : ''} — Code: {c.classCode || 'Standard'} ({c.studentCount || 0} students)
+                      </option>
+                    ))}
+                  </select>
+                );
+              })()}
+            </div>
+
+            {/* Progress Preservation Guarantee Info Box */}
+            <div className="p-3.5 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 space-y-1.5 text-xs">
+              <div className="font-semibold text-indigo-300 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-indigo-400" />
+                <span>Progress & Records Guaranteed</span>
+              </div>
+              <p className="text-slate-300 text-[11px] leading-relaxed">
+                Reassigning preserves all completed lesson decks (106/106), quiz score breakdowns, confidence traffic lights (Green/Amber/Red), identified weak topics, XP, and badges seamlessly.
+              </p>
+            </div>
+
+            {/* In-app Notification Toggle */}
+            <label className="flex items-center gap-2.5 cursor-pointer text-xs text-slate-300 select-none">
+              <input
+                type="checkbox"
+                checked={notifyStudentOnMove}
+                onChange={(e) => setNotifyStudentOnMove(e.target.checked)}
+                disabled={movingStudents}
+                className="rounded border-slate-700 bg-slate-950 text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+              />
+              <span>Send in-app notification to student(s) about this class transfer</span>
+            </label>
+
+            {/* Modal Buttons */}
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMoveModal(false);
+                  setStudentsToMove([]);
+                }}
+                disabled={movingStudents}
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMoveStudents}
+                disabled={movingStudents || !targetClassIdForMove}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition shadow-md shadow-indigo-600/30 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {movingStudents ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span>Moving Student(s)...</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowRightLeft className="w-3.5 h-3.5" />
+                    <span>Confirm Class Transfer</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Recalculate Past Quiz Results Summary Modal */}
       {updateResultsModalSummary && (
