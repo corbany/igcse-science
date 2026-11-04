@@ -23,7 +23,8 @@ import {
   MapPin,
   Radio,
   Eye,
-  Info
+  Info,
+  Lock
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { 
@@ -45,6 +46,7 @@ import {
   claimSupplyCrate, 
   declareBattleWinner, 
   resetBattleEvent,
+  endBattleRoyale,
   dropMidGameSupplyCrate,
   SHOP_ITEMS,
   ShopItem,
@@ -2359,6 +2361,17 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const handleExit = onExit || onExitArena;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  const handleInstructorEndMatch = async () => {
+    if (!window.confirm('Are you sure you want to terminate this battle match? The top active survivor will be crowned champion.')) {
+      return;
+    }
+    try {
+      await endBattleRoyale();
+    } catch (e: any) {
+      console.warn('Failed to end battle royale from arena HUD:', e);
+    }
+  };
+
   // Asset Preloader Cache
   const imageAssets = useRef<Record<string, HTMLImageElement>>({});
   const [assetsPreloaded, setAssetsPreloaded] = useState<boolean>(false);
@@ -2436,6 +2449,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const [matchElapsedSeconds, setMatchElapsedSeconds] = useState<number>(0);
   const [isSurgeActive, setIsSurgeActive] = useState<boolean>(false);
   const wasSurgingRef = useRef<boolean>(false);
+  const lastStormDamageTimeRef = useRef<number>(0);
 
   // Spatial Audio Footsteps tracking
   const lastLocalFootstepTime = useRef<number>(0);
@@ -3323,7 +3337,6 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     let lastSyncedX = 0;
     let lastSyncedY = 0;
     let lastSyncedAngle = 0;
-    let lastStormDamageTime = 0;
 
     const gameLoop = () => {
       const canvas = canvasRef.current;
@@ -3605,15 +3618,20 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       // Dynamically modulate background music tension
       soundEngine.updateMusicTension(storm.progress, storm.isSurging && isMatchActive);
 
-      // Damage only occurs when player is outside the eye of the storm during an active match
+      // Damage only occurs when player is outside the eye of the storm during an active match (8 HP decrease per second)
       const distFromCenter = Math.hypot(localX - stormCenter.current.x, localY - stormCenter.current.y);
       const isOutsideEye = distFromCenter > storm.radius;
       if (isOutsideEye && isAlive && isMatchActive) {
-        if (now - lastStormDamageTime > 1000) {
-          lastStormDamageTime = now;
+        if (now - lastStormDamageTimeRef.current >= 1000) {
+          lastStormDamageTimeRef.current = now;
           soundEngine.playSpatialHit(localX, localY, localX, localY);
-          addFloatingText(localX, localY - 32, '⚡ -5 STORM DAMAGE', '#c084fc');
-          damageArenaPlayer(user.id, 5).then(res => {
+          addFloatingText(localX, localY - 32, '⚡ -8 STORM DAMAGE', '#c084fc');
+          setLocalHp(prev => {
+            const nextHp = Math.max(0, prev - 8);
+            if (nextHp <= 0) setIsAlive(false);
+            return nextHp;
+          });
+          damageArenaPlayer(user.id, 8, undefined, true).then(res => {
             if (res.killed) setIsAlive(false);
           });
         }
@@ -5262,6 +5280,18 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             <Compass className="w-4 h-4 text-cyan-400" />
           </button>
 
+          {/* Instructor End Match Host Control */}
+          {isInstructor && (
+            <button
+              onClick={handleInstructorEndMatch}
+              className="px-3 py-1.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white font-black text-xs transition cursor-pointer flex items-center gap-1 shadow-md shadow-rose-600/30"
+              title="Terminate match now and award Victory Royale"
+            >
+              <span>🛑</span>
+              <span className="hidden sm:inline">End Match</span>
+            </button>
+          )}
+
           {/* Leave Battle */}
           <button
             onClick={handleExit}
@@ -5831,6 +5861,34 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                   {crateFeedback}
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* TOURNAMENT ACCESS LOCKDOWN FOR STUDENTS BETWEEN SET ROYALE TOURNAMENTS */}
+        {!isInstructor && battleState?.status !== 'IN_PROGRESS' && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-md animate-in fade-in">
+            <div className="bg-slate-900 border border-amber-500/40 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl text-center space-y-5">
+              <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-3xl mx-auto shadow-lg shadow-amber-500/20">
+                <Lock className="w-8 h-8 text-amber-400" />
+              </div>
+              <div className="space-y-2">
+                <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                  Arena Closed Between Tournaments
+                </span>
+                <h3 className="text-xl font-black text-white">Royale Tournament is Not Active</h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Students cannot enter the Battle Royale arena on their own between scheduled tournaments. Please wait in the lobby until your instructor launches the next live match.
+                </p>
+              </div>
+              <div className="pt-2">
+                <button
+                  onClick={handleExit}
+                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-xs uppercase tracking-wider transition active:scale-95 shadow-lg shadow-emerald-600/25 cursor-pointer"
+                >
+                  Return to Study Hub & Lessons
+                </button>
+              </div>
             </div>
           </div>
         )}

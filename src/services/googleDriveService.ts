@@ -1030,22 +1030,32 @@ export function getManualSlideOverrides(): Record<string, { presentationId: stri
   }
 }
 
-export function saveManualSlideOverride(subtopicCode: string, input: string, title?: string): boolean {
+import { saveSharedSlideOverride } from './firestoreService';
+
+export function saveManualSlideOverride(subtopicCode: string, input: string, title?: string, instructorEmail?: string): boolean {
   try {
     const id = extractGooglePresentationId(input);
     if (!id) return false;
     const current = getManualSlideOverrides();
-    current[subtopicCode] = {
+    const item = {
       presentationId: id,
       title: title || `${subtopicCode} Google Slides Presentation`,
       embedUrl: buildGoogleSlidesEmbedUrl(id),
       directUrl: buildGoogleSlidesDirectUrl(id)
     };
+    current[subtopicCode] = item;
+    current[subtopicCode.toUpperCase()] = item;
     localStorage.setItem(MANUAL_SLIDES_STORAGE_KEY, JSON.stringify(current));
+
+    // Automatically sync to Firestore so all students receive the teacher's slides
+    saveSharedSlideOverride(subtopicCode, item, instructorEmail).catch(err => {
+      console.warn('Background sync of slide override to Firestore:', err);
+    });
     return true;
   } catch (e) {
     console.error('Failed to save manual slide override', e);
     return false;
   }
 }
+
 

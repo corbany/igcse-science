@@ -4,6 +4,7 @@ import {
   CheckCircle2, 
   Star, 
   TrendingUp, 
+  TrendingDown,
   BookOpen, 
   Clock, 
   Award, 
@@ -22,9 +23,27 @@ import {
   ArrowLeft,
   RefreshCw,
   Trophy,
-  User
+  User,
+  Target,
+  Zap,
+  Activity,
+  History,
+  RotateCcw
 } from 'lucide-react';
-import { StudentProgress, UserProfile, TrafficLightStatus } from '../types';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ReferenceLine,
+  Legend
+} from 'recharts';
+import { StudentProgress, UserProfile, TrafficLightStatus, ScienceSubject } from '../types';
 import { syllabusItems } from '../data/syllabusData';
 import { allSubtopicsData } from '../data/subtopicSlidesData';
 import { 
@@ -201,6 +220,262 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
   // Subject and traffic filters
   const [activeCategory, setActiveCategory] = useState<'all' | 'biology' | 'chemistry' | 'physics'>('all');
   const [trafficFilter, setTrafficFilter] = useState<'all' | 'red' | 'orange' | 'green'>('all');
+
+  // Tracker View Modes: 'trends' | 'curriculum' | 'confidence' | 'all'
+  const [trackerTab, setTrackerTab] = useState<'trends' | 'curriculum' | 'confidence' | 'all'>('trends');
+
+  // Performance Trends states
+  const [trendsSubject, setTrendsSubject] = useState<'all' | 'biology' | 'chemistry' | 'physics'>('all');
+  const [showBenchmarkComparison, setShowBenchmarkComparison] = useState<boolean>(false);
+
+  // Subtopic metadata lookup for quick name and subject resolution
+  const subtopicMetaMap = useMemo(() => {
+    const map = new Map<string, { title: string; subject: ScienceSubject; topicName: string }>();
+    allSubtopicsData.forEach(sub => {
+      map.set(sub.subtopicCode, {
+        title: sub.title,
+        subject: sub.subject,
+        topicName: sub.topicName
+      });
+    });
+    return map;
+  }, []);
+
+  // Compute student quiz progression over time
+  const studentQuizTrendData = useMemo(() => {
+    const rawScores = activeProgress.subtopicQuizScores || {};
+    const entries = Object.entries(rawScores);
+
+    const items: Array<{
+      subtopicCode: string;
+      title: string;
+      subject: ScienceSubject;
+      score: number;
+      total: number;
+      percentage: number;
+      passed: boolean;
+      date: string;
+      timestamp: number;
+      formattedDate: string;
+      displayLabel: string;
+      movingAvg?: number;
+      displayIndex?: number;
+      isSample?: boolean;
+    }> = [];
+
+    entries.forEach(([code, data]) => {
+      if (!data) return;
+      const meta = subtopicMetaMap.get(code);
+      const subject: ScienceSubject = meta?.subject || (code.startsWith('B') ? 'biology' : code.startsWith('C') ? 'chemistry' : 'physics');
+
+      if (trendsSubject !== 'all' && subject !== trendsSubject) {
+        return;
+      }
+
+      const timestamp = data.date ? new Date(data.date).getTime() : 0;
+      const validTimestamp = isNaN(timestamp) || timestamp === 0 ? Date.now() : timestamp;
+      const formattedDate = new Date(validTimestamp).toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric'
+      });
+
+      const total = data.total || 10;
+      const percentage = data.percentage !== undefined ? data.percentage : Math.round((data.score / total) * 100);
+
+      items.push({
+        subtopicCode: code,
+        title: meta?.title || `Subtopic ${code}`,
+        subject,
+        score: data.score,
+        total,
+        percentage,
+        passed: data.passed !== undefined ? data.passed : (percentage >= 80),
+        date: data.date || new Date().toISOString(),
+        timestamp: validTimestamp,
+        formattedDate,
+        displayLabel: code
+      });
+    });
+
+    // Sort chronologically ascending
+    items.sort((a, b) => a.timestamp - b.timestamp);
+
+    // Compute rolling 3-quiz moving average
+    return items.map((item, idx, arr) => {
+      const windowStart = Math.max(0, idx - 2);
+      const windowItems = arr.slice(windowStart, idx + 1);
+      const avg = Math.round(windowItems.reduce((acc, curr) => acc + curr.percentage, 0) / windowItems.length);
+      return {
+        ...item,
+        movingAvg: avg,
+        displayIndex: idx + 1
+      };
+    });
+  }, [activeProgress.subtopicQuizScores, trendsSubject, subtopicMetaMap]);
+
+  // Sample benchmark progression curve (available if 0 quizzes or when toggled)
+  const sampleBenchmarkData = useMemo(() => {
+    let sampleCodes: { code: string; pct: number; daysAgo: number }[] = [];
+    if (trendsSubject === 'biology') {
+      sampleCodes = [
+        { code: 'B1.1', pct: 50, daysAgo: 24 },
+        { code: 'B1.2', pct: 60, daysAgo: 21 },
+        { code: 'B2.1', pct: 60, daysAgo: 17 },
+        { code: 'B2.2', pct: 70, daysAgo: 14 },
+        { code: 'B3.1', pct: 70, daysAgo: 10 },
+        { code: 'B4.1', pct: 80, daysAgo: 7 },
+        { code: 'B5.1', pct: 90, daysAgo: 4 },
+        { code: 'B6.1', pct: 100, daysAgo: 1 }
+      ];
+    } else if (trendsSubject === 'chemistry') {
+      sampleCodes = [
+        { code: 'C1.1', pct: 50, daysAgo: 25 },
+        { code: 'C1.2', pct: 60, daysAgo: 22 },
+        { code: 'C2.1', pct: 60, daysAgo: 18 },
+        { code: 'C2.2', pct: 70, daysAgo: 15 },
+        { code: 'C3.1', pct: 70, daysAgo: 11 },
+        { code: 'C4.1', pct: 80, daysAgo: 7 },
+        { code: 'C5.1', pct: 80, daysAgo: 4 },
+        { code: 'C6.1', pct: 90, daysAgo: 1 }
+      ];
+    } else if (trendsSubject === 'physics') {
+      sampleCodes = [
+        { code: 'P1.1', pct: 50, daysAgo: 26 },
+        { code: 'P1.2', pct: 60, daysAgo: 21 },
+        { code: 'P2.1', pct: 60, daysAgo: 17 },
+        { code: 'P2.2', pct: 70, daysAgo: 13 },
+        { code: 'P3.1', pct: 80, daysAgo: 9 },
+        { code: 'P4.1', pct: 80, daysAgo: 6 },
+        { code: 'P5.1', pct: 90, daysAgo: 3 },
+        { code: 'P6.1', pct: 100, daysAgo: 1 }
+      ];
+    } else {
+      sampleCodes = [
+        { code: 'B1.1', pct: 50, daysAgo: 28 },
+        { code: 'C1.1', pct: 60, daysAgo: 24 },
+        { code: 'P1.1', pct: 60, daysAgo: 20 },
+        { code: 'B2.1', pct: 70, daysAgo: 16 },
+        { code: 'C2.1', pct: 70, daysAgo: 12 },
+        { code: 'P2.1', pct: 80, daysAgo: 8 },
+        { code: 'B3.1', pct: 90, daysAgo: 5 },
+        { code: 'C3.1', pct: 90, daysAgo: 2 },
+        { code: 'P3.1', pct: 100, daysAgo: 0 }
+      ];
+    }
+
+    return sampleCodes.map((s, idx, arr) => {
+      const date = new Date(Date.now() - s.daysAgo * 86400000);
+      const meta = subtopicMetaMap.get(s.code);
+      const windowStart = Math.max(0, idx - 2);
+      const windowItems = arr.slice(windowStart, idx + 1);
+      const avg = Math.round(windowItems.reduce((acc, curr) => acc + curr.pct, 0) / windowItems.length);
+
+      return {
+        subtopicCode: s.code,
+        title: meta?.title || `Subtopic ${s.code}`,
+        subject: (s.code.startsWith('B') ? 'biology' : s.code.startsWith('C') ? 'chemistry' : 'physics') as ScienceSubject,
+        score: Math.round(s.pct / 10),
+        total: 10,
+        percentage: s.pct,
+        passed: s.pct >= 80,
+        date: date.toISOString(),
+        timestamp: date.getTime(),
+        formattedDate: date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        displayLabel: s.code,
+        movingAvg: avg,
+        displayIndex: idx + 1,
+        isSample: true
+      };
+    });
+  }, [trendsSubject, subtopicMetaMap]);
+
+  // Active trend dataset (prefers real scores; if 0, falls back to sample when preview is toggled)
+  const currentTrendDataset = studentQuizTrendData.length > 0 
+    ? studentQuizTrendData 
+    : (showBenchmarkComparison ? sampleBenchmarkData : []);
+
+  // Performance stats computed for active subject
+  const trendStats = useMemo(() => {
+    if (currentTrendDataset.length === 0) {
+      return {
+        count: 0,
+        avg: 0,
+        latest: 0,
+        highest: 0,
+        masteryCount: 0,
+        masteryRate: 0,
+        delta: 0,
+        isImproving: true
+      };
+    }
+    const count = currentTrendDataset.length;
+    const percentages = currentTrendDataset.map(d => d.percentage);
+    const avg = Math.round(percentages.reduce((a, b) => a + b, 0) / count);
+    const latest = currentTrendDataset[count - 1].percentage;
+    const highest = Math.max(...percentages);
+    const masteryCount = currentTrendDataset.filter(d => d.percentage >= 80).length;
+    const masteryRate = Math.round((masteryCount / count) * 100);
+
+    let delta = 0;
+    if (count >= 2) {
+      const firstScore = currentTrendDataset[0].percentage;
+      delta = latest - firstScore;
+    }
+    const isImproving = delta >= 0;
+
+    return {
+      count,
+      avg,
+      latest,
+      highest,
+      masteryCount,
+      masteryRate,
+      delta,
+      isImproving
+    };
+  }, [currentTrendDataset]);
+
+  // Chart visual theme per subject
+  const subjectChartTheme = useMemo(() => {
+    switch (trendsSubject) {
+      case 'biology':
+        return {
+          stroke: '#10b981',
+          fillStart: '#10b981',
+          fillStop: '#047857',
+          movingAvgStroke: '#34d399',
+          name: 'Biology',
+          badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+        };
+      case 'chemistry':
+        return {
+          stroke: '#06b6d4',
+          fillStart: '#06b6d4',
+          fillStop: '#0e7490',
+          movingAvgStroke: '#38bdf8',
+          name: 'Chemistry',
+          badgeClass: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+        };
+      case 'physics':
+        return {
+          stroke: '#a855f7',
+          fillStart: '#a855f7',
+          fillStop: '#7e22ce',
+          movingAvgStroke: '#f59e0b',
+          name: 'Physics',
+          badgeClass: 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+        };
+      default:
+        return {
+          stroke: '#10b981',
+          fillStart: '#10b981',
+          fillStop: '#0f766e',
+          movingAvgStroke: '#38bdf8',
+          name: 'All Sciences',
+          badgeClass: 'bg-teal-500/20 text-teal-300 border-teal-500/40'
+        };
+    }
+  }, [trendsSubject]);
 
   const trafficLights = activeProgress.trafficLights || {};
   const quizScores = activeProgress.subtopicQuizScores || {};
@@ -820,168 +1095,703 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
         </div>
       </div>
 
-      {/* SUBJECT MASTERY BREAKDOWN TABS */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 space-y-6 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-4">
-          <div>
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-emerald-400" />
-              <span>Syllabus Subtopic Breakdown</span>
-            </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Review individual subtopic ratings. Click on any subtopic to view its lesson slides.
-            </p>
-          </div>
+      {/* View Mode Navigation Tabs: Trends | Curriculum Mastery | Confidence Matrix | All Views */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-2.5 rounded-2xl shadow-sm">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+          <button
+            onClick={() => setTrackerTab('trends')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shrink-0 ${
+              trackerTab === 'trends'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-950/40 ring-1 ring-emerald-400/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <TrendingUp className="w-4 h-4 text-emerald-300" />
+            <span>Performance Trends</span>
+            <span className="px-1.5 py-0.2 rounded text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-500/30 font-mono">
+              Recharts
+            </span>
+          </button>
 
-          {/* Subject Switcher Tabs */}
-          <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800 shrink-0">
-            {(['all', 'biology', 'chemistry', 'physics'] as const).map(cat => (
+          <button
+            onClick={() => setTrackerTab('curriculum')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shrink-0 ${
+              trackerTab === 'curriculum'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-950/40 ring-1 ring-emerald-400/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <BarChart3 className="w-4 h-4 text-sky-400" />
+            <span>Curriculum Mastery ({stats.total})</span>
+          </button>
+
+          <button
+            onClick={() => setTrackerTab('confidence')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shrink-0 ${
+              trackerTab === 'confidence'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-950/40 ring-1 ring-emerald-400/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Star className="w-4 h-4 text-amber-400" />
+            <span>Confidence Matrix</span>
+          </button>
+
+          <button
+            onClick={() => setTrackerTab('all')}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shrink-0 ${
+              trackerTab === 'all'
+                ? 'bg-slate-800 text-white border border-slate-700'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <span>All Views</span>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-3 text-xs text-slate-400 shrink-0 self-end sm:self-auto px-2">
+          {studentQuizTrendData.length === 0 && (
+            <button
+              onClick={() => setShowBenchmarkComparison(prev => !prev)}
+              className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                showBenchmarkComparison 
+                  ? 'bg-purple-500/20 border-purple-500/40 text-purple-300' 
+                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <span>{showBenchmarkComparison ? 'Hide Benchmark Curve' : 'Preview Benchmark Curve'}</span>
+            </button>
+          )}
+          <div className="flex items-center gap-1.5">
+            <Activity className="w-3.5 h-3.5 text-emerald-400" />
+            <span>{studentQuizTrendData.length} Real Quizzes</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ============================================================== */}
+      {/* 1. PERFORMANCE TRENDS VIEW (Recharts Quiz Progression)         */}
+      {/* ============================================================== */}
+      {(trackerTab === 'trends' || trackerTab === 'all') && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 space-y-6 shadow-sm">
+          {/* Header & Subject Filter Tabs */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-800 pb-5">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className={`text-[11px] uppercase font-bold px-2 py-0.5 rounded-full border ${subjectChartTheme.badgeClass}`}>
+                  {subjectChartTheme.name}
+                </span>
+                <span className="text-xs text-slate-400 font-mono">
+                  IGCSE 0653 Progression
+                </span>
+              </div>
+              <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2 mt-1">
+                <TrendingUp className="w-5 h-5 text-emerald-400" />
+                <span>Performance Trends & Score Progression</span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-1 max-w-xl">
+                Plotting quiz score trajectories across revision sessions. The dashed green line indicates the Cambridge 80% Green Mastery benchmark.
+              </p>
+            </div>
+
+            {/* Subject Selector Tabs */}
+            <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800 shrink-0 overflow-x-auto">
               <button
-                key={cat}
-                onClick={() => setActiveCategory(cat)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition cursor-pointer ${
-                  activeCategory === cat
+                onClick={() => setTrendsSubject('all')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer shrink-0 ${
+                  trendsSubject === 'all'
                     ? 'bg-emerald-600 text-white shadow-xs'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                {cat}
+                All Sciences
               </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Subtopic Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {displayedSubtopics.map(sub => {
-            const status = trafficLights[sub.subtopicCode];
-            const quizResult = quizScores[sub.subtopicCode];
-
-            let badgeColor = 'bg-slate-800 text-slate-400 border-slate-700';
-            let dotColor = 'bg-slate-600';
-            if (status === 'green') {
-              badgeColor = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
-              dotColor = 'bg-emerald-500';
-            } else if (status === 'orange') {
-              badgeColor = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
-              dotColor = 'bg-amber-500';
-            } else if (status === 'red') {
-              badgeColor = 'bg-rose-500/20 text-rose-300 border-rose-500/40';
-              dotColor = 'bg-rose-500';
-            }
-
-            return (
-              <div
-                key={sub.subtopicCode}
-                className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-slate-700 transition flex items-center justify-between gap-3"
+              <button
+                onClick={() => setTrendsSubject('biology')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                  trendsSubject === 'biology'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
               >
-                <div className="space-y-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">
-                      {sub.subtopicCode}
-                    </span>
-                    <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${badgeColor}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`}></span>
-                      <span>{status || 'Unranked'}</span>
-                    </span>
-                    {quizResult && (
-                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-mono">
-                        Quiz: {quizResult.score}/10 ({quizResult.percentage}%)
-                      </span>
-                    )}
-                    {completedLessons.includes(sub.subtopicCode) && (
-                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium flex items-center gap-1">
-                        <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
-                        <span>Deck Read</span>
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="text-sm font-semibold text-white truncate">{sub.title}</h3>
-                </div>
+                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                <span>Biology</span>
+              </button>
+              <button
+                onClick={() => setTrendsSubject('chemistry')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                  trendsSubject === 'chemistry'
+                    ? 'bg-cyan-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
+                <span>Chemistry</span>
+              </button>
+              <button
+                onClick={() => setTrendsSubject('physics')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                  trendsSubject === 'physics'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-purple-400"></span>
+                <span>Physics</span>
+              </button>
+            </div>
+          </div>
 
+          {/* 5 KPI Metric Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+            {/* 1. Average Score */}
+            <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col justify-between">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Average Score</span>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-2xl font-black font-mono text-white">
+                  {trendStats.count > 0 ? `${trendStats.avg}%` : '—'}
+                </span>
+                {trendStats.count > 0 && (
+                  <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${
+                    trendStats.avg >= 80 
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' 
+                      : trendStats.avg >= 50
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                      : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                  }`}>
+                    {trendStats.avg >= 80 ? 'Mastery' : trendStats.avg >= 50 ? 'Solid' : 'Focus'}
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1 truncate">Mean across {trendStats.count} attempts</p>
+            </div>
+
+            {/* 2. Latest Score */}
+            <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col justify-between">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Latest Score</span>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-2xl font-black font-mono text-white">
+                  {trendStats.count > 0 ? `${trendStats.latest}%` : '—'}
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {trendStats.count > 0 ? `(${Math.round(trendStats.latest / 10)}/10)` : ''}
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1 truncate">Most recent subtopic quiz</p>
+            </div>
+
+            {/* 3. Highest Score */}
+            <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col justify-between">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Highest Score</span>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-2xl font-black font-mono text-amber-400 flex items-center gap-1">
+                  <span>{trendStats.count > 0 ? `${trendStats.highest}%` : '—'}</span>
+                  {trendStats.highest === 100 && <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />}
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1 truncate">Peak knowledge check</p>
+            </div>
+
+            {/* 4. Green Mastery Certified */}
+            <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col justify-between">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">≥80% Green Passed</span>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-2xl font-black font-mono text-emerald-400">
+                  {trendStats.masteryCount}
+                </span>
+                <span className="text-xs text-slate-400 font-mono">/ {trendStats.count} ({trendStats.masteryRate}%)</span>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1 truncate">Certified green subtopics</p>
+            </div>
+
+            {/* 5. Score Progression Delta */}
+            <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col justify-between col-span-2 sm:col-span-1">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Progression Delta</span>
+              <div className="mt-2 flex items-center gap-1.5">
+                {trendStats.count >= 2 ? (
+                  <>
+                    {trendStats.isImproving ? (
+                      <TrendingUp className="w-5 h-5 text-emerald-400 shrink-0" />
+                    ) : (
+                      <TrendingDown className="w-5 h-5 text-rose-400 shrink-0" />
+                    )}
+                    <span className={`text-2xl font-black font-mono ${trendStats.isImproving ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {trendStats.delta >= 0 ? `+${trendStats.delta}%` : `${trendStats.delta}%`}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-2xl font-black font-mono text-slate-400">—</span>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1 truncate">Latest vs baseline score</p>
+            </div>
+          </div>
+
+          {/* Benchmark Notice Banner if viewing sample benchmark */}
+          {currentTrendDataset.some(d => d.isSample) && (
+            <div className="p-3.5 rounded-xl bg-purple-950/40 border border-purple-500/40 flex items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2 text-purple-200">
+                <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
+                <span>
+                  <strong>Sample Progression Benchmark Active:</strong> Demonstrating realistic 8-quiz score growth curve across {subjectChartTheme.name}. Take any quiz in the curriculum to plot your personal live data!
+                </span>
+              </div>
+              <button
+                onClick={() => setShowBenchmarkComparison(false)}
+                className="px-2.5 py-1 rounded-lg bg-purple-900/60 hover:bg-purple-800 text-purple-200 font-bold transition text-[11px] shrink-0 cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* Recharts Area / Line Chart Container */}
+          {currentTrendDataset.length === 0 ? (
+            <div className="p-10 rounded-2xl bg-slate-950/80 border border-slate-800 text-center space-y-4">
+              <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center mx-auto text-slate-400">
+                <Activity className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-white">No Quizzes Recorded Yet for {subjectChartTheme.name}</h3>
+                <p className="text-xs text-slate-400 max-w-md mx-auto">
+                  Take your first subtopic knowledge check in {subjectChartTheme.name} to start plotting your performance trajectory, rolling average, and mastery status!
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
                 <button
-                  onClick={() => onNavigateToTopic(sub.subtopicCode)}
-                  title="Open lesson slides and quiz for this subtopic"
-                  className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition shrink-0 flex items-center gap-1 text-xs font-medium cursor-pointer"
+                  onClick={() => setShowBenchmarkComparison(true)}
+                  className="px-4 py-2 rounded-xl bg-purple-600/30 hover:bg-purple-600/40 border border-purple-500/50 text-purple-200 font-bold text-xs transition flex items-center gap-2 cursor-pointer shadow-xs"
                 >
-                  <span className="hidden sm:inline">Slides</span>
-                  <ChevronRight className="w-4 h-4" />
+                  <Sparkles className="w-4 h-4 text-purple-300" />
+                  <span>Preview Sample Benchmark Curve</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const firstCode = trendsSubject === 'chemistry' ? 'C1.1' : trendsSubject === 'physics' ? 'P1.1' : 'B1.1';
+                    onNavigateToTopic(firstCode);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center gap-2 cursor-pointer shadow-xs"
+                >
+                  <BookOpen className="w-4 h-4" />
+                  <span>Start First Quiz ({trendsSubject === 'chemistry' ? 'C1.1' : trendsSubject === 'physics' ? 'P1.1' : 'B1.1'})</span>
                 </button>
               </div>
-            );
-          })}
-        </div>
-      </div>
+            </div>
+          ) : (
+            <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <History className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Chronological Score Trajectory ({currentTrendDataset.length} Points)</span>
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: subjectChartTheme.stroke }} />
+                    <span>Score (%)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-0.5 border-t border-dashed" style={{ borderColor: subjectChartTheme.movingAvgStroke, borderWidth: '2px' }} />
+                    <span>Rolling 3-Quiz Avg</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                    <span className="w-3 h-0.5 border-t border-dashed border-emerald-500" style={{ borderWidth: '2px' }} />
+                    <span>≥80% Green Target</span>
+                  </div>
+                </div>
+              </div>
 
-      {/* TOPIC CONFIDENCE MATRIX (Syllabus Units) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 space-y-6 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-800 pb-4">
-          <div>
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Star className="w-5 h-5 text-amber-400" />
-              <span>Syllabus Unit Confidence Ratings</span>
-            </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Star ratings automatically feed into the AI Revision Schedule and Recommendations.
-            </p>
+              {/* Responsive Container wrapping AreaChart */}
+              <div className="w-full h-[320px] pt-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart
+                    data={currentTrendDataset}
+                    margin={{ top: 15, right: 25, left: -10, bottom: 5 }}
+                  >
+                    <defs>
+                      <linearGradient id="trendScoreGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={subjectChartTheme.fillStart} stopOpacity={0.35} />
+                        <stop offset="95%" stopColor={subjectChartTheme.fillStop} stopOpacity={0.0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.35} vertical={false} />
+                    <XAxis 
+                      dataKey="displayLabel" 
+                      stroke="#64748b" 
+                      tick={{ fill: '#94a3b8', fontSize: 11 }}
+                      tickLine={{ stroke: '#475569' }}
+                    />
+                    <YAxis 
+                      domain={[0, 100]} 
+                      stroke="#64748b" 
+                      tick={{ fill: '#94a3b8', fontSize: 11 }}
+                      tickLine={{ stroke: '#475569' }}
+                      tickFormatter={(v) => `${v}%`}
+                      ticks={[0, 20, 40, 60, 80, 100]}
+                    />
+                    <Tooltip 
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const item = payload[0].payload;
+                          if (!item) return null;
+                          const isGreen = item.percentage >= 80;
+                          const isAmber = item.percentage >= 50 && item.percentage < 80;
+
+                          return (
+                            <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700 p-3.5 rounded-xl shadow-2xl text-xs space-y-2 z-50 min-w-[220px]">
+                              <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                                <span className="font-mono font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">
+                                  {item.subtopicCode}
+                                </span>
+                                <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                                  {item.subject}
+                                </span>
+                              </div>
+                              <div className="font-semibold text-white text-xs leading-snug">
+                                {item.title}
+                              </div>
+                              <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                                <Clock className="w-3.5 h-3.5 text-slate-500" />
+                                <span>{item.formattedDate}</span>
+                                {item.isSample && (
+                                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-mono">
+                                    Sample Benchmark
+                                  </span>
+                                )}
+                              </div>
+                              <div className="pt-1.5 border-t border-slate-800 flex items-center justify-between">
+                                <span className="text-slate-400">Score:</span>
+                                <span className="font-mono font-bold text-white text-sm">
+                                  {item.score}/{item.total} <span className={isGreen ? 'text-emerald-400' : isAmber ? 'text-amber-400' : 'text-rose-400'}>({item.percentage}%)</span>
+                                </span>
+                              </div>
+                              {item.movingAvg !== undefined && (
+                                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                                  <span>Rolling 3-Quiz Avg:</span>
+                                  <span className="font-mono font-bold text-sky-400">{item.movingAvg}%</span>
+                                </div>
+                              )}
+                              <div className="pt-1">
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                                  isGreen
+                                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                    : isAmber
+                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                    : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                                }`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${
+                                    isGreen ? 'bg-emerald-400' : isAmber ? 'bg-amber-400' : 'bg-rose-400'
+                                  }`} />
+                                  {isGreen ? 'Green Mastery (≥80%)' : isAmber ? 'Amber (50-70%)' : 'Red Priority (≤40%)'}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <ReferenceLine 
+                      y={80} 
+                      stroke="#10b981" 
+                      strokeDasharray="4 4" 
+                      strokeWidth={1.5}
+                      label={{ value: '80% Target', fill: '#10b981', fontSize: 10, position: 'insideTopRight' }}
+                    />
+                    <ReferenceLine 
+                      y={50} 
+                      stroke="#f59e0b" 
+                      strokeDasharray="3 3" 
+                      strokeWidth={1}
+                      label={{ value: '50% Amber', fill: '#f59e0b', fontSize: 9, position: 'insideBottomRight' }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="percentage"
+                      name="Score (%)"
+                      stroke={subjectChartTheme.stroke}
+                      strokeWidth={2.5}
+                      fillOpacity={1}
+                      fill="url(#trendScoreGradient)"
+                      activeDot={{ r: 6, fill: subjectChartTheme.stroke, stroke: '#ffffff', strokeWidth: 2 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="movingAvg"
+                      name="Rolling Average"
+                      stroke={subjectChartTheme.movingAvgStroke}
+                      strokeWidth={2}
+                      strokeDasharray="4 4"
+                      dot={false}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {/* Chronological Quiz Progression Log Table */}
+          {currentTrendDataset.length > 0 && (
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <History className="w-4 h-4 text-emerald-400" />
+                  <span>Detailed Quiz History & Subtopic Logs</span>
+                </h3>
+                <span className="text-xs text-slate-400">
+                  Showing {currentTrendDataset.length} chronologically logged attempts
+                </span>
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/60">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-900/90 text-slate-400 font-semibold border-b border-slate-800">
+                    <tr>
+                      <th className="py-2.5 px-3">#</th>
+                      <th className="py-2.5 px-3">Date</th>
+                      <th className="py-2.5 px-3">Subject</th>
+                      <th className="py-2.5 px-3">Subtopic</th>
+                      <th className="py-2.5 px-3">Score</th>
+                      <th className="py-2.5 px-3">Mastery Status</th>
+                      <th className="py-2.5 px-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {currentTrendDataset.map((item, idx) => {
+                      const isGreen = item.percentage >= 80;
+                      const isAmber = item.percentage >= 50 && item.percentage < 80;
+
+                      return (
+                        <tr key={`${item.subtopicCode}-${idx}`} className="hover:bg-slate-900/40 transition">
+                          <td className="py-2.5 px-3 font-mono text-slate-500 font-bold">
+                            {idx + 1}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-300 font-medium whitespace-nowrap">
+                            {item.formattedDate}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="capitalize text-[11px] font-semibold text-slate-300">
+                              {item.subject}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="flex items-center gap-2 max-w-md">
+                              <span className="font-mono text-[11px] font-bold px-1.5 py-0.2 rounded bg-slate-800 text-emerald-400 border border-slate-700 shrink-0">
+                                {item.subtopicCode}
+                              </span>
+                              <span className="text-white font-medium truncate">{item.title}</span>
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap font-mono font-bold">
+                            <span className="text-white">{item.score}/{item.total}</span>
+                            <span className={`ml-1.5 text-xs ${isGreen ? 'text-emerald-400' : isAmber ? 'text-amber-400' : 'text-rose-400'}`}>
+                              ({item.percentage}%)
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                              isGreen
+                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                                : isAmber
+                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                                : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${isGreen ? 'bg-emerald-400' : isAmber ? 'bg-amber-400' : 'bg-rose-400'}`} />
+                              <span>{isGreen ? 'Green' : isAmber ? 'Amber' : 'Red'}</span>
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                            <button
+                              onClick={() => onNavigateToTopic(item.subtopicCode)}
+                              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] transition inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>Review</span>
+                              <ChevronRight className="w-3.5 h-3.5 text-emerald-400" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* 2. SUBJECT MASTERY BREAKDOWN TABS (Curriculum Grid)            */}
+      {/* ============================================================== */}
+      {(trackerTab === 'curriculum' || trackerTab === 'all') && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 space-y-6 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-4">
+            <div>
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 text-emerald-400" />
+                <span>Syllabus Subtopic Breakdown</span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Review individual subtopic ratings. Click on any subtopic to view its lesson slides.
+              </p>
+            </div>
+
+            {/* Subject Switcher Tabs */}
+            <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800 shrink-0">
+              {(['all', 'biology', 'chemistry', 'physics'] as const).map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setActiveCategory(cat)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition cursor-pointer ${
+                    activeCategory === cat
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-          {filteredSyllabusItems.map(item => {
-            const currentRating = activeProgress.topicConfidence[item.code] || 3;
+          {/* Subtopic Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {displayedSubtopics.map(sub => {
+              const status = trafficLights[sub.subtopicCode];
+              const quizResult = quizScores[sub.subtopicCode];
 
-            return (
-              <div 
-                key={item.code}
-                className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-slate-700 transition flex flex-col justify-between gap-3"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1">
+              let badgeColor = 'bg-slate-800 text-slate-400 border-slate-700';
+              let dotColor = 'bg-slate-600';
+              if (status === 'green') {
+                badgeColor = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+                dotColor = 'bg-emerald-500';
+              } else if (status === 'orange') {
+                badgeColor = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+                dotColor = 'bg-amber-500';
+              } else if (status === 'red') {
+                badgeColor = 'bg-rose-500/20 text-rose-300 border-rose-500/40';
+                dotColor = 'bg-rose-500';
+              }
+
+              return (
+                <div
+                  key={sub.subtopicCode}
+                  className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-slate-700 transition flex items-center justify-between gap-3"
+                >
+                  <div className="space-y-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">
-                        {item.code}
+                        {sub.subtopicCode}
                       </span>
-                      <span className="text-xs capitalize text-slate-400 font-medium">
-                        {item.subject}
+                      <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${badgeColor}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`}></span>
+                        <span>{status || 'Unranked'}</span>
                       </span>
+                      {quizResult && (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-mono">
+                          Quiz: {quizResult.score}/10 ({quizResult.percentage}%)
+                        </span>
+                      )}
+                      {completedLessons.includes(sub.subtopicCode) && (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium flex items-center gap-1">
+                          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                          <span>Deck Read</span>
+                        </span>
+                      )}
                     </div>
-                    <h3 className="text-sm font-semibold text-white leading-snug">{item.title}</h3>
+                    <h3 className="text-sm font-semibold text-white truncate">{sub.title}</h3>
                   </div>
 
                   <button
-                    onClick={() => onNavigateToTopic(item.code)}
-                    title="Open lesson slides for this topic"
-                    className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                    onClick={() => onNavigateToTopic(sub.subtopicCode)}
+                    title="Open lesson slides and quiz for this subtopic"
+                    className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition shrink-0 flex items-center gap-1 text-xs font-medium cursor-pointer"
                   >
+                    <span className="hidden sm:inline">Slides</span>
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
-                <div className="flex items-center justify-between pt-2 border-t border-slate-800/60">
-                  <span className="text-[11px] text-slate-400">Confidence Level:</span>
-                  <div className="flex items-center gap-1">
-                    {[1, 2, 3, 4, 5].map(starVal => (
-                      <button
-                        key={starVal}
-                        disabled={isInstructor && !!selectedStudent}
-                        onClick={() => onUpdateConfidence(item.code, starVal)}
-                        className={`p-1 transition ${
-                          starVal <= currentRating
-                            ? 'text-amber-400 hover:text-amber-300'
-                            : 'text-slate-700 hover:text-slate-500'
-                        }`}
-                      >
-                        <Star className="w-4 h-4 fill-current" />
-                      </button>
-                    ))}
+      {/* ============================================================== */}
+      {/* 3. TOPIC CONFIDENCE MATRIX (Syllabus Units)                    */}
+      {/* ============================================================== */}
+      {(trackerTab === 'confidence' || trackerTab === 'all') && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 space-y-6 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-800 pb-4">
+            <div>
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Star className="w-5 h-5 text-amber-400" />
+                <span>Syllabus Unit Confidence Ratings</span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Star ratings automatically feed into the AI Revision Schedule and Recommendations.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+            {filteredSyllabusItems.map(item => {
+              const currentRating = activeProgress.topicConfidence[item.code] || 3;
+
+              return (
+                <div 
+                  key={item.code}
+                  className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-slate-700 transition flex flex-col justify-between gap-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">
+                          {item.code}
+                        </span>
+                        <span className="text-xs capitalize text-slate-400 font-medium">
+                          {item.subject}
+                        </span>
+                      </div>
+                      <h3 className="text-sm font-semibold text-white leading-snug">{item.title}</h3>
+                    </div>
+
+                    <button
+                      onClick={() => onNavigateToTopic(item.code)}
+                      title="Open lesson slides for this topic"
+                      className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-800/60">
+                    <span className="text-[11px] text-slate-400">Confidence Level:</span>
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3, 4, 5].map(starVal => (
+                        <button
+                          key={starVal}
+                          disabled={isInstructor && !!selectedStudent}
+                          onClick={() => onUpdateConfidence(item.code, starVal)}
+                          className={`p-1 transition ${
+                            starVal <= currentRating
+                              ? 'text-amber-400 hover:text-amber-300'
+                              : 'text-slate-700 hover:text-slate-500'
+                          }`}
+                        >
+                          <Star className="w-4 h-4 fill-current" />
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

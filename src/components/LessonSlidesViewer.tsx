@@ -65,6 +65,12 @@ import {
   getManualSlideOverrides, 
   saveManualSlideOverride 
 } from '../services/googleDriveService';
+import { 
+  subscribeToCurriculumSlides, 
+  saveSharedSlideOverride, 
+  saveSharedSyncedDriveSlides 
+} from '../services/firestoreService';
+import { formatGoogleSlidesUrl } from '../data/googleSlidesRegistry';
 import { signInWithGoogle, signInWithDriveScope, getCachedDriveToken, clearCachedDriveToken, auth } from '../services/firebaseAuth';
 import { claimModuleRevisionReward, checkModuleClaimed } from '../services/firebaseGameService';
 import { UserProfile } from '../types';
@@ -341,25 +347,68 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   const [manualInputUrl, setManualInputUrl] = useState<string>('');
   const [showManualInput, setShowManualInput] = useState<boolean>(false);
 
+  // Real-time Firestore sync of teacher's linked Google Drive slide decks across all students
+  useEffect(() => {
+    const unsub = subscribeToCurriculumSlides((data) => {
+      if (data.overrides && Object.keys(data.overrides).length > 0) {
+        setManualOverrides(prev => ({ ...prev, ...data.overrides }));
+      }
+      if (Array.isArray(data.syncedSlides) && data.syncedSlides.length > 0) {
+        setSyncedSlides(data.syncedSlides);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // If instructor has local cached slides, auto-publish them to Firestore so all students can view them
+  useEffect(() => {
+    if (isInstructor) {
+      const cached = getCachedDriveSlides();
+      const localOverrides = getManualSlideOverrides();
+      if (cached.length > 0) {
+        saveSharedSyncedDriveSlides(cached, user?.email).catch(() => {});
+      }
+      if (Object.keys(localOverrides).length > 0) {
+        Object.entries(localOverrides).forEach(([code, val]) => {
+          saveSharedSlideOverride(code, val, user?.email).catch(() => {});
+        });
+      }
+    }
+  }, [isInstructor, user?.email]);
+
   // Find exact unaltered drive slides for currentSubtopic across all Biology, Chemistry, and Physics topics
   const driveSlidesForCurrentSubtopic = useMemo(() => {
     if (!currentSubtopic) return [];
     const list: Array<{ id: string; name: string; embedUrl: string; directUrl: string; source: 'drive' | 'manual' }> = [];
+    const targetCode = currentSubtopic.subtopicCode.toUpperCase(); // e.g. "B9.2", "C2.3", "P1.5.1"
     
-    // 1. Check manual override for this subtopic code
-    if (manualOverrides[currentSubtopic.subtopicCode]) {
-      const o = manualOverrides[currentSubtopic.subtopicCode];
+    // 1. Check manual override for this subtopic code (case-insensitive check)
+    const override = manualOverrides[currentSubtopic.subtopicCode] || manualOverrides[targetCode];
+    if (override) {
       list.push({
-        id: o.presentationId,
-        name: o.title,
-        embedUrl: o.embedUrl,
-        directUrl: o.directUrl,
+        id: override.presentationId,
+        name: override.title || `${currentSubtopic.subtopicCode} Google Slides Presentation`,
+        embedUrl: override.embedUrl,
+        directUrl: override.directUrl,
         source: 'manual'
       });
     }
 
-    // 2. Check synced slides from Drive folder
-    const targetCode = currentSubtopic.subtopicCode.toUpperCase(); // e.g. "B9.2", "C2.3", "P1.5.1"
+    // 2. Check if subtopic data has a linked Google Slides presentation
+    if (currentSubtopic.googleSlidesEmbedUrl || currentSubtopic.googleSlidesUrl) {
+      const parsed = formatGoogleSlidesUrl(currentSubtopic.googleSlidesEmbedUrl || currentSubtopic.googleSlidesUrl || '');
+      if (parsed.isValid && !list.some(item => item.embedUrl === parsed.embedUrl)) {
+        list.push({
+          id: `syllabus-slide-${currentSubtopic.subtopicCode}`,
+          name: `${currentSubtopic.subtopicCode} - ${currentSubtopic.title} (Teacher Slide Deck)`,
+          embedUrl: parsed.embedUrl,
+          directUrl: parsed.directUrl,
+          source: 'manual'
+        });
+      }
+    }
+
+    // 3. Check synced slides from Drive folder
     const targetTopic = currentSubtopic.topicCode.toUpperCase();   // e.g. "B9"
 
     for (const slide of syncedSlides) {
@@ -470,7 +519,11 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
       }
       setDriveSyncMessage('Scanning lesson drive, detecting subtopic codes (e.g. P1.5.1, C9.5), and placing files into corresponding subfolders...');
       const result = await organizeDriveLessonsIntoSubfolders(token, TARGET_DRIVE_FOLDER_ID);
-      setSyncedSlides(result.presentations || []);
+      const organizedPresentations = result.presentations || [];
+      setSyncedSlides(organizedPresentations);
+      if (organizedPresentations.length > 0) {
+        await saveSharedSyncedDriveSlides(organizedPresentations, user?.email);
+      }
       setDriveSyncMessage(result.message);
     } catch (err: any) {
       if (err?.isInsufficientScope || err?.message?.includes('insufficient') || err?.message?.includes('403') || err?.message?.includes('401')) {
@@ -503,7 +556,10 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
       setDriveSyncMessage('Replacing all stored lessons and re-syncing from Drive...');
       const freshSlides = await replaceAllSyncedLessons(token, TARGET_DRIVE_FOLDER_ID);
       setSyncedSlides(freshSlides);
-      setDriveSyncMessage(`Replaced all lessons. Successfully re-synced ${freshSlides.length} Google Slides presentations!`);
+      if (freshSlides.length > 0) {
+        await saveSharedSyncedDriveSlides(freshSlides, user?.email);
+      }
+      setDriveSyncMessage(`Replaced all lessons. Successfully re-synced ${freshSlides.length} Google Slides presentations and published to all students!`);
     } catch (err: any) {
       if (err?.isInsufficientScope || err?.message?.includes('insufficient') || err?.message?.includes('403') || err?.message?.includes('401')) {
         console.warn('Google Drive permission notice:', err?.message);
@@ -537,7 +593,8 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
       if (fetchedSlides.length > 0) {
         localStorage.setItem(DRIVE_STORAGE_KEY, JSON.stringify(fetchedSlides));
         setSyncedSlides(fetchedSlides);
-        setDriveSyncMessage(`Successfully fetched ${fetchedSlides.length} slide decks from Drive folder!`);
+        await saveSharedSyncedDriveSlides(fetchedSlides, user?.email);
+        setDriveSyncMessage(`Successfully fetched & published ${fetchedSlides.length} slide decks from Drive folder to all students!`);
       } else {
         setDriveSyncMessage('Connected to folder 1kypXZXP3nY9pFxuSJOTZ1anODYxxfZ1a. (0 matching slide decks found yet)');
       }
@@ -553,15 +610,20 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     }
   };
 
-  const handleSaveManualSlide = (e: React.FormEvent) => {
+  const handleSaveManualSlide = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualInputUrl.trim() || !currentSubtopic) return;
-    const ok = saveManualSlideOverride(currentSubtopic.subtopicCode, manualInputUrl.trim());
+    const ok = saveManualSlideOverride(currentSubtopic.subtopicCode, manualInputUrl.trim(), `${currentSubtopic.subtopicCode} - ${currentSubtopic.title}`, user?.email);
     if (ok) {
-      setManualOverrides(getManualSlideOverrides());
+      const overrides = getManualSlideOverrides();
+      setManualOverrides(overrides);
+      const updated = overrides[currentSubtopic.subtopicCode] || overrides[currentSubtopic.subtopicCode.toUpperCase()];
+      if (updated) {
+        await saveSharedSlideOverride(currentSubtopic.subtopicCode, updated, user?.email);
+      }
       setManualInputUrl('');
       setShowManualInput(false);
-      setDriveSyncMessage(`Embedded presentation for ${currentSubtopic.subtopicCode}!`);
+      setDriveSyncMessage(`✅ Embedded & published presentation for [${currentSubtopic.subtopicCode}] to all students!`);
     } else {
       setDriveSyncMessage('Please enter a valid Google Slides link or presentation ID.');
     }

@@ -36,7 +36,9 @@ import {
   UserCheck,
   Calendar,
   X,
-  ArrowRightLeft
+  ArrowRightLeft,
+  Swords,
+  Edit3
 } from 'lucide-react';
 import { InstructorTasksManager } from './InstructorTasksManager';
 import { 
@@ -47,6 +49,12 @@ import {
   formatGoogleSlidesUrl, 
   GoogleSlideSubtopic 
 } from '../data/googleSlidesRegistry';
+import { 
+  subscribeToCurriculumSlides, 
+  saveSharedSlideOverride, 
+  batchSaveSharedSlideOverrides, 
+  saveSharedSyncedDriveSlides 
+} from '../services/firestoreService';
 import { 
   TARGET_DRIVE_FOLDER_ID, 
   TARGET_DRIVE_FOLDER_URL, 
@@ -102,6 +110,7 @@ interface InstructorDashboardProps {
   currentUser: UserProfile;
   onSwitchToStudentMode?: () => void;
   onNavigateToLessons?: () => void;
+  onNavigateToRoyale?: () => void;
   initialTab?: 'classes' | 'tasks' | 'cohort' | 'roster' | 'invites' | 'drive' | 'slides';
 }
 
@@ -109,6 +118,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   currentUser,
   onSwitchToStudentMode, 
   onNavigateToLessons,
+  onNavigateToRoyale,
   initialTab = 'classes'
 }) => {
   const [dashboardTab, setDashboardTab] = useState<'classes' | 'tasks' | 'cohort' | 'roster' | 'invites' | 'drive' | 'slides'>(() => {
@@ -568,7 +578,11 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
 
       setDriveSyncStatusMessage('Scanning lesson drive, detecting subtopic codes (e.g. P1.5.1, C9.5), and placing files into corresponding subfolders...');
       const result = await organizeDriveLessonsIntoSubfolders(token, TARGET_DRIVE_FOLDER_ID);
-      setSyncedDriveSlides(result.presentations || []);
+      const organizedPresentations = result.presentations || [];
+      setSyncedDriveSlides(organizedPresentations);
+      if (organizedPresentations.length > 0) {
+        await saveSharedSyncedDriveSlides(organizedPresentations, currentUser?.email);
+      }
       setDriveSyncStatusMessage(result.message);
     } catch (err: any) {
       if (err?.isInsufficientScope || err?.message?.includes('insufficient') || err?.message?.includes('403') || err?.message?.includes('401')) {
@@ -599,7 +613,10 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
       setDriveSyncStatusMessage('Replacing all stored lessons and re-syncing from Drive...');
       const freshSlides = await replaceAllSyncedLessons(token, TARGET_DRIVE_FOLDER_ID);
       setSyncedDriveSlides(freshSlides);
-      setDriveSyncStatusMessage(`Replaced all lessons. Successfully re-synced ${freshSlides.length} Google Slides presentations!`);
+      if (freshSlides.length > 0) {
+        await saveSharedSyncedDriveSlides(freshSlides, currentUser?.email);
+      }
+      setDriveSyncStatusMessage(`Replaced all lessons. Successfully re-synced ${freshSlides.length} Google Slides presentations and published to students!`);
     } catch (err: any) {
       if (err?.isInsufficientScope || err?.message?.includes('insufficient') || err?.message?.includes('403') || err?.message?.includes('401')) {
         console.warn('Google Drive permission notice:', err?.message);
@@ -624,6 +641,31 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
 
   const refreshSlidesList = () => {
     setSlidesSubtopics(getActiveGoogleSlideSubtopics());
+  };
+
+  // Real-time listener for shared curriculum slides
+  useEffect(() => {
+    const unsub = subscribeToCurriculumSlides(() => {
+      setSlidesSubtopics(getActiveGoogleSlideSubtopics());
+    });
+    return () => unsub();
+  }, []);
+
+  const handleSaveSlideOverride = async (code: string, url: string) => {
+    saveGoogleSlidesOverride(code, url);
+    const parsed = formatGoogleSlidesUrl(url);
+    if (parsed.isValid) {
+      await saveSharedSlideOverride(code, {
+        presentationId: parsed.presentationId || '',
+        title: `${code} Google Slides Presentation`,
+        embedUrl: parsed.embedUrl,
+        directUrl: parsed.directUrl,
+        subtopicCode: code.toUpperCase()
+      }, currentUser?.email);
+    }
+    refreshSlidesList();
+    setEditingTopicCode(null);
+    setEditingUrlValue('');
   };
 
   // Convert real enrolled class students into StudentRosterItem
@@ -753,6 +795,17 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          {onNavigateToRoyale && (
+            <button
+              onClick={onNavigateToRoyale}
+              className="text-xs px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black flex items-center gap-2 transition shadow-md shadow-amber-500/20 active:scale-95 cursor-pointer"
+              title="Open Admin Battle Control: Open/Close Student Lobby, start Royale match & manage quiz questions"
+            >
+              <Swords className="w-4 h-4 text-slate-950" />
+              <span>🎮 Royale Battle Control</span>
+            </button>
+          )}
+
           {onSwitchToStudentMode && (
             <button
               onClick={onSwitchToStudentMode}
@@ -2060,27 +2113,81 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800 bg-slate-900/60">
-                  {filteredSlides.map(slide => (
-                    <tr key={slide.id || slide.subtopicCode || `${slide.topicCode}-${slide.subtopicCode}`} className="hover:bg-slate-800/40">
-                      <td className="p-3 font-mono font-bold text-white">{slide.subtopicCode || slide.topicCode}</td>
-                      <td className="p-3 font-medium text-slate-200">{slide.title}</td>
-                      <td className="p-3 capitalize text-slate-400">{slide.subject}</td>
-                      <td className="p-3 font-mono text-[11px] text-slate-400 truncate max-w-xs">
-                        {slide.googleSlidesUrl}
-                      </td>
-                      <td className="p-3">
-                        <a
-                          href={slide.googleSlidesUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold"
-                        >
-                          <span>Preview</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredSlides.map(slide => {
+                    const slideCode = slide.subtopicCode || slide.topicCode;
+                    const isEditing = editingTopicCode === slideCode;
+                    return (
+                      <tr key={slide.id || slide.subtopicCode || `${slide.topicCode}-${slide.subtopicCode}`} className="hover:bg-slate-800/40">
+                        <td className="p-3 font-mono font-bold text-white">{slideCode}</td>
+                        <td className="p-3 font-medium text-slate-200">{slide.title}</td>
+                        <td className="p-3 capitalize text-slate-400">{slide.subject}</td>
+                        <td className="p-3">
+                          {isEditing ? (
+                            <div className="space-y-1">
+                              <input
+                                type="text"
+                                value={editingUrlValue}
+                                onChange={e => setEditingUrlValue(e.target.value)}
+                                placeholder="Paste Google Slides share link, embed URL, or doc ID..."
+                                className="w-full min-w-[260px] bg-slate-950 border border-emerald-500 rounded px-2.5 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-400 font-mono"
+                                autoFocus
+                              />
+                              <span className="text-[10px] text-slate-400 block">Saves to cloud & instantly publishes to all student accounts.</span>
+                            </div>
+                          ) : slide.googleSlidesUrl ? (
+                            <span className="font-mono text-[11px] text-slate-300 truncate block max-w-xs" title={slide.googleSlidesUrl}>
+                              {slide.googleSlidesUrl}
+                            </span>
+                          ) : (
+                            <span className="italic text-slate-500 text-xs">No presentation linked</span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          {isEditing ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleSaveSlideOverride(slideCode, editingUrlValue)}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold text-xs flex items-center gap-1 shadow"
+                              >
+                                <Check className="w-3 h-3" />
+                                <span>Save & Publish</span>
+                              </button>
+                              <button
+                                onClick={() => { setEditingTopicCode(null); setEditingUrlValue(''); }}
+                                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => {
+                                  setEditingTopicCode(slideCode);
+                                  setEditingUrlValue(slide.googleSlidesUrl || '');
+                                }}
+                                className="text-purple-400 hover:text-purple-300 flex items-center gap-1 font-semibold text-xs transition-colors"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>Edit URL</span>
+                              </button>
+                              {slide.googleSlidesUrl && (
+                                <a
+                                  href={slide.googleSlidesUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold text-xs"
+                                >
+                                  <span>Preview</span>
+                                  <ExternalLink className="w-3 h-3" />
+                                </a>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

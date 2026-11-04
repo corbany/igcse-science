@@ -315,17 +315,26 @@ export const Navbar: React.FC<NavbarProps> = ({
             ) : (
               <button
                 onClick={() => setCurrentTab('royale')}
-                title={isStudent ? 'Battle Royale is LIVE! Click to enter match' : 'Launch Revision Royale Tournament & Arena'}
-                className={`text-xs px-2.5 py-1.5 rounded-lg border font-black transition flex items-center gap-1.5 shadow-xs cursor-pointer ${
+                title={isStudent ? 'Battle Royale is LIVE! Click to enter match' : 'Open Admin Battle Control: Open/Close Student Lobby & Host Tournaments'}
+                className={`text-xs px-2.5 sm:px-3 py-1.5 rounded-lg border font-black transition flex items-center gap-1.5 shadow-xs cursor-pointer ${
                   currentTab === 'royale'
-                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-amber-500/25 ring-2 ring-amber-400/50'
+                    ? !isStudent
+                      ? 'bg-purple-600 text-white border-purple-400 shadow-purple-500/25 ring-2 ring-purple-400/50'
+                      : 'bg-amber-500 text-slate-950 border-amber-400 shadow-amber-500/25 ring-2 ring-amber-400/50'
                     : isStudent && battleState?.status === 'IN_PROGRESS'
                       ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-emerald-500/25 ring-2 ring-emerald-400/50 animate-pulse'
-                      : 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25'
+                      : !isStudent
+                        ? 'bg-gradient-to-r from-purple-900/60 to-indigo-900/60 border-purple-500/50 text-purple-200 hover:text-white hover:border-purple-400 ring-1 ring-purple-500/30'
+                        : 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25'
                 }`}
               >
-                <span className="text-sm">{isStudent && battleState?.status === 'IN_PROGRESS' ? '⚔️' : '🎮'}</span>
-                <span className="hidden sm:inline">{isStudent && battleState?.status === 'IN_PROGRESS' ? 'Royale (LIVE!)' : 'Royale'}</span>
+                <span className="text-sm">{isStudent && battleState?.status === 'IN_PROGRESS' ? '⚔️' : !isStudent ? '🎮' : '🎮'}</span>
+                <span className="hidden sm:inline">
+                  {!isStudent ? 'Battle Control' : isStudent && battleState?.status === 'IN_PROGRESS' ? 'Royale (LIVE!)' : 'Royale'}
+                </span>
+                <span className="sm:hidden">
+                  {!isStudent ? 'Battle' : 'Royale'}
+                </span>
               </button>
             )}
 

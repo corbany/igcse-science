@@ -2765,4 +2765,181 @@ export async function updatePastStudentQuizResultsWithNewTrafficLightParameters(
   return summary;
 }
 
+// ============================================================================
+// SHARED CURRICULUM SLIDES & GOOGLE DRIVE PRESENTATION SYNC
+// ============================================================================
+
+export interface SharedSlideDeckItem {
+  presentationId: string;
+  title: string;
+  embedUrl: string;
+  directUrl: string;
+  subtopicCode?: string;
+  updatedAt?: string;
+}
+
+export interface SharedCurriculumSlidesData {
+  overrides: Record<string, SharedSlideDeckItem>;
+  syncedSlides: any[];
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+const LOCAL_SHARED_SLIDES_KEY = 'igcse_0653_shared_curriculum_slides';
+
+/**
+ * Real-time subscription to teacher-linked Google Slides & synced Drive presentations.
+ * Allows all enrolled students and teachers to view the instructor's linked slide decks across devices.
+ */
+export function subscribeToCurriculumSlides(
+  callback: (data: SharedCurriculumSlidesData) => void
+): () => void {
+  // Read local cache immediately
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(LOCAL_SHARED_SLIDES_KEY) : null;
+    if (raw) {
+      callback(JSON.parse(raw));
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  try {
+    const docRef = doc(db, 'settings', 'curriculum_slides');
+    return onSnapshot(docRef, (snap) => {
+      if (snap.exists()) {
+        const d = snap.data() as SharedCurriculumSlidesData;
+        const normalized: SharedCurriculumSlidesData = {
+          overrides: d.overrides || {},
+          syncedSlides: Array.isArray(d.syncedSlides) ? d.syncedSlides : [],
+          updatedAt: d.updatedAt,
+          updatedBy: d.updatedBy
+        };
+        try {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(LOCAL_SHARED_SLIDES_KEY, JSON.stringify(normalized));
+          }
+        } catch (e) {}
+        callback(normalized);
+      }
+    }, (err) => {
+      console.warn('subscribeToCurriculumSlides error:', err);
+    });
+  } catch (e) {
+    console.warn('Error creating subscribeToCurriculumSlides listener:', e);
+    return () => {};
+  }
+}
+
+/**
+ * Save or update a single subtopic slide deck override in Firestore for all students.
+ */
+export async function saveSharedSlideOverride(
+  subtopicCode: string,
+  slideData: SharedSlideDeckItem,
+  instructorEmail?: string
+): Promise<void> {
+  const codeKey = subtopicCode.toUpperCase();
+  try {
+    const docRef = doc(db, 'settings', 'curriculum_slides');
+    const existingSnap = await getDoc(docRef);
+    const currentData = existingSnap.exists() ? (existingSnap.data() as SharedCurriculumSlidesData) : { overrides: {}, syncedSlides: [] };
+    const newOverrides = {
+      ...(currentData.overrides || {}),
+      [codeKey]: {
+        ...slideData,
+        subtopicCode: codeKey,
+        updatedAt: new Date().toISOString()
+      }
+    };
+    await setDoc(docRef, {
+      ...currentData,
+      overrides: newOverrides,
+      updatedAt: new Date().toISOString(),
+      updatedBy: instructorEmail || 'corbanb@gisboyshigh.net'
+    }, { merge: true });
+
+    // Also cache locally
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(LOCAL_SHARED_SLIDES_KEY, JSON.stringify({
+        ...currentData,
+        overrides: newOverrides
+      }));
+    }
+  } catch (err) {
+    console.warn('Failed to save shared slide override to Firestore:', err);
+  }
+}
+
+/**
+ * Batch save multiple subtopic slide overrides to Firestore for all students.
+ */
+export async function batchSaveSharedSlideOverrides(
+  mapping: Record<string, SharedSlideDeckItem>,
+  instructorEmail?: string
+): Promise<void> {
+  try {
+    const docRef = doc(db, 'settings', 'curriculum_slides');
+    const existingSnap = await getDoc(docRef);
+    const currentData = existingSnap.exists() ? (existingSnap.data() as SharedCurriculumSlidesData) : { overrides: {}, syncedSlides: [] };
+    const newOverrides = {
+      ...(currentData.overrides || {})
+    };
+    Object.entries(mapping).forEach(([key, val]) => {
+      newOverrides[key.toUpperCase()] = {
+        ...val,
+        subtopicCode: key.toUpperCase(),
+        updatedAt: new Date().toISOString()
+      };
+    });
+
+    await setDoc(docRef, {
+      ...currentData,
+      overrides: newOverrides,
+      updatedAt: new Date().toISOString(),
+      updatedBy: instructorEmail || 'corbanb@gisboyshigh.net'
+    }, { merge: true });
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(LOCAL_SHARED_SLIDES_KEY, JSON.stringify({
+        ...currentData,
+        overrides: newOverrides
+      }));
+    }
+  } catch (err) {
+    console.warn('Failed to batch save shared slide overrides:', err);
+  }
+}
+
+/**
+ * Save synced Google Drive slide decks to Firestore so all students can immediately view them.
+ */
+export async function saveSharedSyncedDriveSlides(
+  syncedSlides: any[],
+  instructorEmail?: string
+): Promise<void> {
+  try {
+    const docRef = doc(db, 'settings', 'curriculum_slides');
+    const existingSnap = await getDoc(docRef);
+    const currentData = existingSnap.exists() ? (existingSnap.data() as SharedCurriculumSlidesData) : { overrides: {}, syncedSlides: [] };
+
+    await setDoc(docRef, {
+      ...currentData,
+      syncedSlides,
+      updatedAt: new Date().toISOString(),
+      updatedBy: instructorEmail || 'corbanb@gisboyshigh.net'
+    }, { merge: true });
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(LOCAL_SHARED_SLIDES_KEY, JSON.stringify({
+        ...currentData,
+        syncedSlides
+      }));
+    }
+  } catch (err) {
+    console.warn('Failed to save shared synced drive slides:', err);
+  }
+}
+
+
 

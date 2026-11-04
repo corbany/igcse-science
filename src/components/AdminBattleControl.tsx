@@ -17,22 +17,31 @@ import {
   Eye,
   Award,
   Lock,
-  Unlock
+  Unlock,
+  LayoutDashboard,
+  Crown,
+  StopCircle,
+  Flag,
+  RefreshCw
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { 
   BattleEventConfig, 
   BattleEventState, 
   LobbyPlayer, 
+  ArenaPlayer,
   subscribeToBattleConfig, 
   subscribeToBattleState, 
   subscribeToLobby, 
+  subscribeToArenaPlayers,
   updateBattleConfig, 
   startBattleRoyale, 
   resetBattleEvent,
+  endBattleRoyale,
   dropMidGameSupplyCrate,
   SHOP_ITEMS,
-  setLobbyOpen 
+  setLobbyOpen,
+  resetAllStudentsGameProfiles
 } from '../services/firebaseGameService';
 
 interface AdminBattleControlProps {
@@ -55,8 +64,13 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
   const [config, setConfig] = useState<BattleEventConfig | null>(null);
   const [battleState, setBattleState] = useState<BattleEventState | null>(null);
   const [lobbyPlayers, setLobbyPlayers] = useState<LobbyPlayer[]>([]);
+  const [arenaPlayers, setArenaPlayers] = useState<ArenaPlayer[]>([]);
   const [isStarting, setIsStarting] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [isResettingStudents, setIsResettingStudents] = useState(false);
+  const [isEnding, setIsEnding] = useState(false);
+  const [showEndModal, setShowEndModal] = useState(false);
+  const [selectedWinnerUid, setSelectedWinnerUid] = useState<string>('auto');
   const [feedback, setFeedback] = useState<string | null>(null);
 
   // Edit schedule state
@@ -93,10 +107,15 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
       setLobbyPlayers(pl);
     });
 
+    const unsubArena = subscribeToArenaPlayers((players) => {
+      setArenaPlayers(players);
+    });
+
     return () => {
       unsubConfig();
       unsubState();
       unsubLobby();
+      unsubArena();
     };
   }, []);
 
@@ -144,6 +163,42 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
     }
   };
 
+  const handleEndMatch = async () => {
+    setIsEnding(true);
+    setFeedback('Terminating match and calculating final placements...');
+    try {
+      let chosenWinner: { uid: string; name: string; avatar: string } | null = null;
+      if (selectedWinnerUid !== 'none') {
+        if (selectedWinnerUid === 'auto') {
+          // Top alive player
+          const alive = arenaPlayers.filter(p => p.isAlive);
+          const top = alive.length > 0
+            ? [...alive].sort((a, b) => (b.kills * 100 + b.hp) - (a.kills * 100 + a.hp))[0]
+            : [...arenaPlayers].sort((a, b) => (b.kills * 100 + b.hp) - (a.kills * 100 + a.hp))[0];
+          if (top) {
+            chosenWinner = { uid: top.uid, name: top.name, avatar: top.avatar };
+          }
+        } else {
+          const found = arenaPlayers.find(p => p.uid === selectedWinnerUid);
+          if (found) {
+            chosenWinner = { uid: found.uid, name: found.name, avatar: found.avatar };
+          }
+        }
+      }
+      await endBattleRoyale(chosenWinner);
+      setShowEndModal(false);
+      setFeedback(chosenWinner 
+        ? `🏆 Match ended by teacher! ${chosenWinner.name} crowned champion with Victory Royale.`
+        : '🏁 Match ended by teacher without a declared winner (Draw / Practice Over).'
+      );
+      setTimeout(() => setFeedback(null), 5000);
+    } catch (e: any) {
+      setFeedback(`Error ending match: ${e.message}`);
+    } finally {
+      setIsEnding(false);
+    }
+  };
+
   const handleReset = async () => {
     if (!window.confirm('Reset arena and return status to LOBBY? This clears all existing structures and player HP.')) {
       return;
@@ -157,6 +212,26 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
       setFeedback(`Error resetting arena: ${e.message}`);
     } finally {
       setIsResetting(false);
+    }
+  };
+
+  const handleResetAllStudents = async () => {
+    if (!window.confirm('⚠️ WARNING: This will reset ALL student accounts to 100 Gold and the default common starter loadout (Cultist Skin, Bunsen Burner weapon, Element Shield). Instructor accounts are protected. Are you sure you want to proceed?')) {
+      return;
+    }
+    setIsResettingStudents(true);
+    try {
+      const res = await resetAllStudentsGameProfiles(user?.email);
+      if (res.success) {
+        setFeedback(`✅ Successfully reset ${res.count} students back to common starting loadout & 100 gold!`);
+      } else {
+        setFeedback(`❌ Error resetting students: ${res.message}`);
+      }
+      setTimeout(() => setFeedback(null), 5000);
+    } catch (e: any) {
+      setFeedback(`Error resetting students: ${e.message}`);
+    } finally {
+      setIsResettingStudents(false);
     }
   };
 
@@ -187,6 +262,7 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
   const readyCount = lobbyPlayers.filter(p => p.isReady).length;
   const isMatchLive = battleState?.status === 'IN_PROGRESS';
   const isLobbyOpen = Boolean(battleState?.isLobbyOpen);
+  const alivePlayers = arenaPlayers.filter(p => p.isAlive);
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12">
@@ -219,7 +295,7 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
             {onEnterArena && (
               <button
                 onClick={onEnterArena}
@@ -227,6 +303,16 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
               >
                 <Eye className="w-4 h-4 text-emerald-400" />
                 <span>Spectate / Play Arena</span>
+              </button>
+            )}
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="px-3.5 py-2 rounded-xl bg-purple-900/40 hover:bg-purple-900/60 text-purple-200 border border-purple-500/40 text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                title="Return to Instructor Teaching Hub & Classes"
+              >
+                <LayoutDashboard className="w-4 h-4 text-purple-400" />
+                <span>Teaching Hub</span>
               </button>
             )}
           </div>
@@ -353,29 +439,57 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
           </p>
         </div>
 
-        {/* Big Launch Trigger */}
-        <div className="bg-gradient-to-br from-emerald-950/60 to-slate-900 border border-emerald-500/40 rounded-2xl p-5 flex flex-col justify-between shadow-xl space-y-3">
+        {/* Match Launch or End Trigger Card */}
+        <div className={`border rounded-2xl p-5 flex flex-col justify-between shadow-xl space-y-3 ${
+          isMatchLive
+            ? 'bg-gradient-to-br from-rose-950/70 via-slate-900 to-slate-900 border-rose-500/50 shadow-rose-950/20'
+            : 'bg-gradient-to-br from-emerald-950/60 to-slate-900 border-emerald-500/40'
+        }`}>
           <div>
-            <span className="text-[10px] uppercase font-black tracking-wider text-emerald-400 block">
-              Match Launch Trigger
-            </span>
+            <div className="flex items-center justify-between">
+              <span className={`text-[10px] uppercase font-black tracking-wider block ${
+                isMatchLive ? 'text-rose-400' : 'text-emerald-400'
+              }`}>
+                {isMatchLive ? 'Active Match Controller' : 'Match Launch Trigger'}
+              </span>
+              {isMatchLive && (
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
+                  {alivePlayers.length} Alive
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-300 mt-1">
-              Launches the match instantly and pushes all students from LOBBY into the 2D arena.
+              {isMatchLive
+                ? 'Match is currently LIVE! Terminate battle at any moment to declare a champion and award Victory Royale.'
+                : 'Launches the match instantly and pushes all students from LOBBY into the 2D arena.'}
             </p>
           </div>
 
-          <button
-            onClick={handleStartBattle}
-            disabled={isStarting}
-            className={`w-full py-3 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-xl active:scale-95 cursor-pointer ${
-              isStarting
-                ? 'bg-emerald-800 text-slate-300 cursor-not-allowed'
-                : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 shadow-emerald-500/30'
-            }`}
-          >
-            <Swords className="w-5 h-5 text-slate-950" />
-            <span>{isStarting ? 'Launching Arena...' : 'START BATTLE ROYALE'}</span>
-          </button>
+          {isMatchLive ? (
+            <div className="space-y-2 pt-1">
+              <button
+                onClick={() => setShowEndModal(true)}
+                disabled={isEnding}
+                className="w-full py-3 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-xl active:scale-95 cursor-pointer bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white shadow-rose-600/30"
+              >
+                <StopCircle className="w-5 h-5 text-white" />
+                <span>{isEnding ? 'Ending Match...' : 'END MATCH NOW'}</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleStartBattle}
+              disabled={isStarting}
+              className={`w-full py-3 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-xl active:scale-95 cursor-pointer ${
+                isStarting
+                  ? 'bg-emerald-800 text-slate-300 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 shadow-emerald-500/30'
+              }`}
+            >
+              <Swords className="w-5 h-5 text-slate-950" />
+              <span>{isStarting ? 'Launching Arena...' : 'START BATTLE ROYALE'}</span>
+            </button>
+          )}
         </div>
 
       </div>
@@ -478,6 +592,36 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
                   Restores status to LOBBY, clears structures, and resets HP.
                 </p>
               </button>
+
+              <button
+                onClick={handleResetAllStudents}
+                disabled={isResettingStudents}
+                className="p-3 rounded-xl bg-amber-950/25 hover:bg-amber-950/45 border border-amber-500/40 text-left space-y-1 transition cursor-pointer sm:col-span-2"
+              >
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
+                  <RefreshCw className={`w-4 h-4 text-amber-400 ${isResettingStudents ? 'animate-spin' : ''}`} />
+                  <span>{isResettingStudents ? 'Resetting Student Loadouts...' : 'Reset All Students (100 Gold & Common Loadout)'}</span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Resets all student accounts back to 100 Gold, starter Cultist skin, Bunsen Burner, and standard starter loadout. Instructors are protected.
+                </p>
+              </button>
+
+              {isMatchLive && (
+                <button
+                  onClick={() => setShowEndModal(true)}
+                  disabled={isEnding}
+                  className="p-3 rounded-xl bg-gradient-to-r from-rose-950/40 to-red-950/40 hover:from-rose-950/60 hover:to-red-950/60 border border-rose-500/50 text-left space-y-1 transition cursor-pointer sm:col-span-2"
+                >
+                  <div className="flex items-center gap-2 text-xs font-black text-rose-300">
+                    <StopCircle className="w-4 h-4 text-rose-400" />
+                    <span>End Active Match (Crown Champion & Close)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Immediately terminates the current battle, declares a champion with Victory Royale XP, and returns students to match results.
+                  </p>
+                </button>
+              )}
             </div>
           </div>
 
@@ -527,6 +671,149 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
           </div>
         )}
       </div>
+
+      {/* END MATCH CONFIRMATION & CHAMPION SELECTION MODAL */}
+      {showEndModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border-2 border-rose-500/60 rounded-3xl p-6 sm:p-7 max-w-lg w-full shadow-2xl space-y-5 animate-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center">
+                  <StopCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white">End Active Battle Royale</h3>
+                  <p className="text-[11px] text-slate-400">Teacher Match Termination & Victory Crown</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowEndModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Terminating the match will end the current session for all connected students and display the Victory Royale screen. Choose which student is crowned champion:
+            </p>
+
+            {/* Winner Selection Options */}
+            <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+              {/* Option 1: Auto-Crown top surviving player */}
+              <label className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition ${
+                selectedWinnerUid === 'auto'
+                  ? 'bg-rose-500/15 border-rose-500 text-white ring-1 ring-rose-500'
+                  : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
+              }`}>
+                <div className="flex items-center gap-2.5">
+                  <input
+                    type="radio"
+                    name="winnerSelection"
+                    checked={selectedWinnerUid === 'auto'}
+                    onChange={() => setSelectedWinnerUid('auto')}
+                    className="accent-rose-500"
+                  />
+                  <div>
+                    <div className="text-xs font-black flex items-center gap-1.5">
+                      <Crown className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Auto-Crown Top Survivor</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      Awards Victory Royale to highest HP / most eliminations
+                    </div>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-amber-300 font-bold">
+                  Recommended
+                </span>
+              </label>
+
+              {/* Option 2: Select specific player */}
+              {arenaPlayers.length > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block px-1">
+                    Or Crown Specific Student:
+                  </span>
+                  {arenaPlayers.map(p => (
+                    <label
+                      key={p.uid}
+                      className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition text-xs ${
+                        selectedWinnerUid === p.uid
+                          ? 'bg-amber-500/15 border-amber-500 text-white ring-1 ring-amber-500'
+                          : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <input
+                          type="radio"
+                          name="winnerSelection"
+                          checked={selectedWinnerUid === p.uid}
+                          onChange={() => setSelectedWinnerUid(p.uid)}
+                          className="accent-amber-500"
+                        />
+                        <span className="font-bold truncate">{p.name}</span>
+                        <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${p.isAlive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-500'}`}>
+                          {p.isAlive ? `HP: ${p.hp}` : 'Eliminated'}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                        {p.kills} elims
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {/* Option 3: End without winner */}
+              <label className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition ${
+                selectedWinnerUid === 'none'
+                  ? 'bg-slate-800 border-slate-600 text-white'
+                  : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}>
+                <div className="flex items-center gap-2.5">
+                  <input
+                    type="radio"
+                    name="winnerSelection"
+                    checked={selectedWinnerUid === 'none'}
+                    onChange={() => setSelectedWinnerUid('none')}
+                    className="accent-slate-400"
+                  />
+                  <div>
+                    <div className="text-xs font-semibold text-slate-200">
+                      End Match Without Winner (Draw / Practice Session)
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      Terminates match without awarding Victory Royale crown
+                    </div>
+                  </div>
+                </div>
+                <Flag className="w-4 h-4 text-slate-500" />
+              </label>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowEndModal(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleEndMatch}
+                disabled={isEnding}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs font-black transition shadow-lg shadow-rose-600/30 flex items-center gap-2 cursor-pointer"
+              >
+                <StopCircle className="w-4 h-4" />
+                <span>{isEnding ? 'Terminating Match...' : 'Confirm & End Match'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

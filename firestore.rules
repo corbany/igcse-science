@@ -24,6 +24,14 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Shared Google Drive curriculum slides & subtopic presentations
+    match /settings/{docId} {
+      allow read, write: if true;
+    }
+    match /curriculum_slides/{docId} {
+      allow read, write: if true;
+    }
+
     // User profiles & subcollections (including completedModules anti-farming records)
     match /users/{userId} {
       allow read, write: if true;

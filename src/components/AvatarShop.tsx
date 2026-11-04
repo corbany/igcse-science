@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sparkles, 
@@ -33,7 +33,7 @@ import {
   BattleEventState
 } from '../services/firebaseGameService';
 import { db } from '../services/firebaseAuth';
-import { doc, setDoc, updateDoc, increment, arrayUnion } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, increment, arrayUnion, runTransaction } from 'firebase/firestore';
 
 // ============================================================================
 // SKIN CARDS REGISTRY & POKÉMON CARD CATALOG (18 FANTASY DUNGEON SKINS)
@@ -48,6 +48,10 @@ import {
 
 export type SkinCard = FantasySkinDefinition;
 export const ALL_SKIN_CARDS: SkinCard[] = ALL_FANTASY_SKINS;
+
+export type BoosterReward = 
+  | { type: 'skin'; item: SkinCard }
+  | { type: 'weapon'; item: ShopItem };
 
 // ============================================================================
 // BOOSTER PACK CONFIGURATIONS & DROP PROBABILITIES (0.5% MYTHIC DROP RATE)
@@ -77,11 +81,11 @@ export const BOOSTER_PACKS: BoosterPackConfig[] = [
   {
     id: 'pack_1_catacombs',
     name: 'Pack 1: Dungeon Catacombs',
-    subtitle: 'Cultist, Skeleton Warrior & Goblin',
+    subtitle: 'Tier I Dungeon Champions & Science Weapons',
     price: 90,
     badge: 'Pack 1',
     packNumber: 1,
-    description: 'Delve into the damp underground crypts to encounter Common dungeon denizens and Rare explorers.',
+    description: 'Delve into the damp underground crypts for Common and Rare dungeon characters and laboratory scientific weapons.',
     foilColor: 'from-stone-800 via-neutral-900 to-slate-950',
     packBorder: 'border-stone-500/70',
     accentGlow: 'shadow-stone-500/30',
@@ -90,11 +94,11 @@ export const BOOSTER_PACKS: BoosterPackConfig[] = [
   {
     id: 'pack_2_citadel',
     name: 'Pack 2: Arcane Citadel',
-    subtitle: 'Archer, Rogue, Necromancer & Discoverer',
+    subtitle: 'Tier II Arcane Spellcasters & Science Weapons',
     price: 120,
     badge: 'Pack 2',
     packNumber: 2,
-    description: 'Storm the arcane towers of the high citadel for Rare skirmishers, Epic spellcasters, and dark warlocks.',
+    description: 'Storm the arcane towers of the high citadel for Rare skirmishers, Epic spellcasters, and high-energy weapons.',
     foilColor: 'from-indigo-700 via-purple-900 to-slate-950',
     packBorder: 'border-indigo-400/70',
     accentGlow: 'shadow-indigo-500/30',
@@ -103,11 +107,11 @@ export const BOOSTER_PACKS: BoosterPackConfig[] = [
   {
     id: 'pack_3_legends',
     name: 'Pack 3: Legends & Knights',
-    subtitle: 'Knight Hero, Dragon Slayer & Berserker',
+    subtitle: 'Tier III Armored Legends & Advanced Arsenals',
     price: 150,
     badge: 'Pack 3',
     packNumber: 3,
-    description: 'Summon legendary armored heroes and dragon hunters forged in epic mythical combat.',
+    description: 'Summon legendary armored heroes and top-tier scientific weapons forged in epic battle royale combat.',
     foilColor: 'from-amber-600 via-yellow-700 to-slate-950',
     packBorder: 'border-amber-400/70',
     accentGlow: 'shadow-amber-500/30',
@@ -116,10 +120,10 @@ export const BOOSTER_PACKS: BoosterPackConfig[] = [
   {
     id: 'super_gold_pack',
     name: 'Super Gold Dungeon Pack',
-    subtitle: 'All 19 Fantasy Dungeon Champions',
+    subtitle: 'All 19 Fantasy Champions & 10 Science Weapons',
     price: 250,
     badge: 'High-Tier Booster',
-    description: 'Premium golden foil booster containing all 19 fantasy dungeon characters with boosted Epic & Legendary odds!',
+    description: 'Premium golden foil booster containing all 19 fantasy characters and all 10 science weapons with boosted Epic & Legendary odds!',
     foilColor: 'from-amber-400 via-yellow-600 to-slate-950',
     packBorder: 'border-yellow-300',
     accentGlow: 'shadow-yellow-500/50',
@@ -201,6 +205,23 @@ class PackSoundFX {
       osc.stop(t + idx * 0.1 + 0.45);
     });
   }
+
+  playEquip() {
+    this.initCtx();
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(440, t);
+    osc.frequency.exponentialRampToValueAtTime(880, t + 0.15);
+    gain.gain.setValueAtTime(0.2, t);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+    osc.start(t);
+    osc.stop(t + 0.15);
+  }
 }
 
 const packSfx = new PackSoundFX();
@@ -241,7 +262,7 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
   // Pack Opening Animation Ceremony State
   const [openingPack, setOpeningPack] = useState<BoosterPackConfig | null>(null);
   const [animationPhase, setAnimationPhase] = useState<'shaking' | 'tearing' | 'reveal' | null>(null);
-  const [pulledCard, setPulledCard] = useState<SkinCard | null>(null);
+  const [pulledReward, setPulledReward] = useState<BoosterReward | null>(null);
   const [isDuplicate, setIsDuplicate] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -265,7 +286,8 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
   }, [user?.id]);
 
   const isInstructor = user?.role === 'instructor' || gameProfile?.role === 'instructor';
-  const currentGold = isInstructor ? 999999 : (gameProfile?.gold ?? 100);
+  const rawGold = gameProfile?.gold;
+  const currentGold = isInstructor ? 999999 : (typeof rawGold === 'number' && !isNaN(rawGold) ? Math.max(0, rawGold) : 100);
   const unlockedSkins: string[] = isInstructor 
     ? ALL_SKIN_CARDS.map(c => c.id) 
     : (gameProfile?.unlockedSkins ?? ['cultist']);
@@ -273,8 +295,16 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
   const equippedWeaponId = gameProfile?.equippedWeapon || 'bunsen_burner';
   const inventory = gameProfile?.inventory || ['cultist', 'bunsen_burner'];
 
-  // Helper: Weighted Probability RNG Drop Selection
-  const selectRandomSkin = (pack: BoosterPackConfig): SkinCard => {
+  const ALL_WEAPON_ITEMS: ShopItem[] = useMemo(() => {
+    return SHOP_ITEMS.filter(i => i.category === 'weapon');
+  }, []);
+
+  // Helper: Weighted Probability RNG Drop Selection (Both Fantasy Skins and Scientific Weapons)
+  const selectRandomReward = (
+    pack: BoosterPackConfig,
+    unlocked: string[],
+    inv: string[]
+  ): BoosterReward => {
     const roll = Math.random() * 100;
     let chosenRarity: ItemRarity = 'common';
 
@@ -290,17 +320,38 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
       chosenRarity = 'common';
     }
 
-    const matchingCards = ALL_SKIN_CARDS.filter(c => c.rarity === chosenRarity);
-    if (matchingCards.length === 0) return ALL_SKIN_CARDS[0];
-    return matchingCards[Math.floor(Math.random() * matchingCards.length)];
+    const matchingSkins = ALL_SKIN_CARDS.filter(c => c.rarity === chosenRarity);
+    const matchingWeapons = ALL_WEAPON_ITEMS.filter(w => w.rarity === chosenRarity);
+
+    // Identify unowned items to increase excitement of opening packs
+    const unownedSkins = matchingSkins.filter(s => !unlocked.includes(s.id));
+    const unownedWeapons = matchingWeapons.filter(w => !inv.includes(w.id));
+    const hasUnowned = unownedSkins.length > 0 || unownedWeapons.length > 0;
+    const favorUnowned = hasUnowned && Math.random() < 0.70;
+
+    const candidateSkins = (favorUnowned && unownedSkins.length > 0) ? unownedSkins : matchingSkins;
+    const candidateWeapons = (favorUnowned && unownedWeapons.length > 0) ? unownedWeapons : matchingWeapons;
+
+    const chooseWeapon = candidateWeapons.length > 0 && (candidateSkins.length === 0 || Math.random() < 0.50);
+
+    if (chooseWeapon) {
+      const weapon = candidateWeapons[Math.floor(Math.random() * candidateWeapons.length)];
+      return { type: 'weapon', item: weapon };
+    } else if (candidateSkins.length > 0) {
+      const skin = candidateSkins[Math.floor(Math.random() * candidateSkins.length)];
+      return { type: 'skin', item: skin };
+    } else {
+      return { type: 'skin', item: ALL_SKIN_CARDS[0] };
+    }
   };
 
   // Trigger Pack Opening Ceremony
   const handleOpenPack = (pack: BoosterPackConfig) => {
     if (!user?.id || isProcessing) return;
 
-    if (!isInstructor && currentGold < pack.price) {
-      setFeedback(`❌ Insufficient Gold! You need ${pack.price - currentGold} more Gold. Revise Cambridge slide decks to earn more!`);
+    // Strict validation: Students CANNOT open packs if gold is insufficient or negative
+    if (!isInstructor && (currentGold < pack.price || currentGold <= 0)) {
+      setFeedback(`❌ Insufficient Gold! You need ${pack.price - Math.max(0, currentGold)} more Gold. Revise Cambridge slide decks to earn more!`);
       return;
     }
 
@@ -309,35 +360,78 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
     ceremonyTimers.current.timeouts.forEach(t => clearTimeout(t));
     ceremonyTimers.current.timeouts = [];
 
+    // Optimistically lock and deduct gold immediately in local state to prevent any rapid multi-click exploits
     setIsProcessing(true);
     setOpeningPack(pack);
     setFeedback(null);
     setAnimationPhase('shaking');
 
-    // 1. Pick card and check duplicate
-    const droppedCard = selectRandomSkin(pack);
-    const duplicate = unlockedSkins.includes(droppedCard.id);
-    setPulledCard(droppedCard);
+    if (!isInstructor) {
+      setGameProfile(prev => prev ? { ...prev, gold: Math.max(0, currentGold - pack.price) } : null);
+    }
+
+    // 1. Pick card (skin or weapon) and check duplicate
+    const droppedReward = selectRandomReward(pack, unlockedSkins, inventory);
+    const duplicate = droppedReward.type === 'skin'
+      ? unlockedSkins.includes(droppedReward.item.id)
+      : (inventory.includes(droppedReward.item.id) || droppedReward.item.id === 'bunsen_burner');
+
+    setPulledReward(droppedReward);
     setIsDuplicate(duplicate);
 
-    // 2. Deduct Gold & Update Firestore asynchronously (NEVER block client animations!)
+    // 2. Deduct Gold & Update Firestore via transaction ensuring gold NEVER drops below 0
     try {
       const userDocRef = doc(db, 'users', user.id);
-      const updatePayload = duplicate
-        ? {
-            ...(isInstructor ? { gold: 999999 } : { gold: increment(-pack.price) }),
-            wood: increment(50),
-            metal: increment(20)
+      if (!isInstructor) {
+        runTransaction(db, async (transaction) => {
+          const userSnap = await transaction.get(userDocRef);
+          if (!userSnap.exists()) return;
+          const serverGold = Math.max(0, Number(userSnap.data()?.gold ?? 0));
+          if (serverGold < pack.price) {
+            throw new Error('Insufficient gold');
           }
-        : {
-            ...(isInstructor ? { gold: 999999 } : { gold: increment(-pack.price) }),
-            unlockedSkins: arrayUnion(droppedCard.id),
-            inventory: arrayUnion(droppedCard.id)
-          };
-
-      setDoc(userDocRef, updatePayload, { merge: true }).catch((err) => {
-        console.warn('Background pack update to Firestore:', err);
-      });
+          const finalGold = Math.max(0, serverGold - pack.price);
+          const updatePayload = duplicate
+            ? {
+                gold: finalGold,
+                wood: increment(50),
+                metal: increment(20)
+              }
+            : droppedReward.type === 'skin'
+              ? {
+                  gold: finalGold,
+                  unlockedSkins: arrayUnion(droppedReward.item.id),
+                  inventory: arrayUnion(droppedReward.item.id)
+                }
+              : {
+                  gold: finalGold,
+                  inventory: arrayUnion(droppedReward.item.id)
+                };
+          transaction.set(userDocRef, updatePayload, { merge: true });
+        }).catch((err) => {
+          console.warn('Background pack transaction update error:', err);
+        });
+      } else {
+        const updatePayload = duplicate
+          ? {
+              gold: 999999,
+              wood: increment(50),
+              metal: increment(20)
+            }
+          : droppedReward.type === 'skin'
+            ? {
+                gold: 999999,
+                unlockedSkins: arrayUnion(droppedReward.item.id),
+                inventory: arrayUnion(droppedReward.item.id)
+              }
+            : {
+                gold: 999999,
+                inventory: arrayUnion(droppedReward.item.id)
+              };
+        setDoc(userDocRef, updatePayload, { merge: true }).catch((err) => {
+          console.warn('Background pack update to Firestore:', err);
+        });
+      }
     } catch (err) {
       console.warn('Error queuing pack update:', err);
     }
@@ -369,7 +463,7 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
       clearInterval(shakeInterval);
       setAnimationPhase('reveal');
       try {
-        packSfx.playReveal(droppedCard.rarity);
+        packSfx.playReveal(droppedReward.item.rarity);
       } catch (e) {}
       setIsProcessing(false);
     }, 2100);
@@ -391,7 +485,7 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
     ceremonyTimers.current.timeouts = [];
     setOpeningPack(null);
     setAnimationPhase(null);
-    setPulledCard(null);
+    setPulledReward(null);
     setIsProcessing(false);
   };
 
@@ -402,9 +496,9 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
     ceremonyTimers.current.timeouts = [];
     setAnimationPhase('reveal');
     setIsProcessing(false);
-    if (pulledCard) {
+    if (pulledReward) {
       try {
-        packSfx.playReveal(pulledCard.rarity);
+        packSfx.playReveal(pulledReward.item.rarity);
       } catch (e) {}
     }
   };
@@ -423,6 +517,37 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
     } catch (err) {
       console.error('Error equipping skin:', err);
       setFeedback('Failed to equip skin. Please try again.');
+    }
+  };
+
+  // Equip Weapon directly from Ceremony or Arsenal
+  const handleEquipWeapon = async (weaponId: string) => {
+    if (!user?.id) return;
+    try {
+      packSfx.playEquip();
+    } catch (e) {}
+    try {
+      await equipItem(user.id, 'weapon', weaponId);
+      const weaponObj = ALL_WEAPON_ITEMS.find(w => w.id === weaponId);
+      setFeedback(`⚡ Equipped ${weaponObj?.name || 'Weapon'} successfully!`);
+    } catch (err) {
+      console.error('Error equipping weapon:', err);
+      setFeedback('Failed to equip weapon. Please try again.');
+    }
+  };
+
+  const getWeaponCardStyle = (rarity: ItemRarity) => {
+    switch (rarity) {
+      case 'mythic':
+        return { bg: 'from-rose-950 via-purple-950 to-slate-950', border: 'border-rose-400' };
+      case 'legendary':
+        return { bg: 'from-amber-950 via-orange-950 to-slate-950', border: 'border-amber-400' };
+      case 'epic':
+        return { bg: 'from-purple-950 via-indigo-950 to-slate-950', border: 'border-purple-400' };
+      case 'rare':
+        return { bg: 'from-cyan-950 via-sky-950 to-slate-950', border: 'border-cyan-400' };
+      default:
+        return { bg: 'from-slate-900 via-slate-950 to-slate-950', border: 'border-slate-700' };
     }
   };
 
@@ -575,7 +700,7 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {BOOSTER_PACKS.map((pack) => {
-              const canAfford = currentGold >= pack.price;
+              const canAfford = currentGold >= pack.price && currentGold > 0;
 
               return (
                 <div
@@ -819,11 +944,11 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
                   </motion.div>
                 );
               } else {
-                // UNOWNED SILHOUETTED MYSTERY CARD ("???")
+                // UNOWNED REDACTED MYSTERY CARD (ZERO IMAGE OR SILHOUETTE PREVIEW)
                 return (
                   <div
                     key={card.id}
-                    className="relative rounded-3xl p-4 bg-slate-950/90 border-2 border-dashed border-slate-800 flex flex-col justify-between text-center opacity-75 hover:opacity-100 transition-opacity"
+                    className="relative rounded-3xl p-4 bg-slate-950/90 border-2 border-dashed border-slate-800 flex flex-col justify-between text-center"
                   >
                     <div>
                       {/* Top clue */}
@@ -835,45 +960,36 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
                         <span className="text-slate-600 font-bold">{card.cardNumber}</span>
                       </div>
 
-                      {/* Mystery Silhouetted Frame */}
-                      <div className="my-3 rounded-2xl bg-slate-900/60 border border-slate-800 p-3 flex flex-col items-center justify-center h-32 relative overflow-hidden">
-                        <img 
-                          src={card.portraitPath || card.spritePath || `/assets/characters/${card.id}.png`} 
-                          alt="Locked Skin" 
-                          className="w-24 h-24 object-contain pixelated brightness-0 opacity-20 blur-[0.5px]" 
-                          style={{ imageRendering: 'pixelated' }}
-                          onError={(e) => {
-                            const fallback = card.spritePath || `/assets/characters/${card.id}.png`;
-                            if (e.currentTarget.src !== fallback && !e.currentTarget.src.endsWith(fallback)) {
-                              e.currentTarget.src = fallback;
-                            }
-                          }}
-                        />
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                          <Lock className="w-8 h-8 text-slate-500 drop-shadow" />
+                      {/* Redacted Vault Frame - NO image tag or silhouette whatsoever */}
+                      <div className="my-3 rounded-2xl bg-slate-900/80 border border-slate-800/80 p-3 flex flex-col items-center justify-center h-32 relative overflow-hidden group">
+                        <div className="w-14 h-14 rounded-2xl bg-slate-950/90 border border-slate-700/60 flex items-center justify-center shadow-inner group-hover:scale-105 transition-transform">
+                          <Lock className="w-7 h-7 text-amber-500/80" />
                         </div>
-                      </div>
-
-                      {/* Mystery info */}
-                      <div className="space-y-1">
-                        <h4 className="text-sm font-black text-slate-400">???</h4>
-                        <span className="text-[10px] text-slate-500 font-bold block uppercase tracking-wider">
-                          Locked Dungeon Champion
+                        <span className="text-[10px] font-mono font-bold text-slate-500 mt-2 tracking-widest uppercase">
+                          ENCRYPTED VAULT
                         </span>
                       </div>
 
-                      <p className="text-[10px] text-slate-500 mt-3 p-2 rounded-xl bg-slate-900/50 border border-slate-800">
-                        Obtainable from Dungeon Booster Packs.
+                      {/* Redacted Mystery Info */}
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-black text-slate-400">???</h4>
+                        <span className="text-[10px] text-slate-500 font-bold block uppercase tracking-wider">
+                          Classified Champion
+                        </span>
+                      </div>
+
+                      <p className="text-[10px] text-slate-500 mt-3 p-2 rounded-xl bg-slate-900/50 border border-slate-800/80 leading-relaxed">
+                        Classified card. Unlock by opening Booster Packs in the Shop!
                       </p>
                     </div>
 
                     <div className="mt-4 pt-3 border-t border-slate-800/80">
                       <button
                         onClick={() => setActiveTab('shop')}
-                        className="w-full py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                        className="w-full py-2 rounded-xl bg-slate-900 hover:bg-slate-850 text-amber-400 text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer"
                       >
-                        <span>Open Packs</span>
-                        <ArrowUpRight className="w-3.5 h-3.5" />
+                        <Package className="w-3.5 h-3.5" />
+                        <span>Open Booster Packs</span>
                       </button>
                     </div>
 
@@ -952,6 +1068,88 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
                 'bg-slate-800 text-slate-300 border-slate-700';
 
               const alt = weapon.stats?.altFire;
+
+              if (!isOwned) {
+                // REDACTED LOCKED WEAPON - ZERO PREVIEW OF STATS, ALT-FIRE, OR ARTWORK
+                return (
+                  <div
+                    key={weapon.id}
+                    className="bg-slate-950/90 border-2 border-dashed border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl flex flex-col justify-between relative overflow-hidden"
+                  >
+                    <div>
+                      {/* Top Header */}
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 shadow-inner shrink-0">
+                            <Lock className="w-6 h-6 text-amber-500/80" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${badgeColor}`}>
+                                {weapon.rarity}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-mono">
+                                • [Encrypted Blueprint]
+                              </span>
+                            </div>
+                            <h3 className="text-base font-black text-slate-400 mt-0.5">??? Classified Weapon</h3>
+                          </div>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-slate-500 leading-relaxed mb-4">
+                        Top-secret Cambridge science weapon prototype. Specifications, telemetry, and blueprints are classified until unlocked in Booster Packs!
+                      </p>
+
+                      {/* Redacted Primary Stats Grid */}
+                      <div className="grid grid-cols-3 gap-2 p-2.5 rounded-2xl bg-slate-900/60 border border-slate-800/80 text-center mb-4">
+                        <div>
+                          <span className="text-[9px] text-slate-500 uppercase font-black block">Damage</span>
+                          <span className="text-xs font-mono font-black text-slate-600">??? HP</span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-slate-500 uppercase font-black block">Fire Rate</span>
+                          <span className="text-xs font-mono font-black text-slate-600">???</span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-slate-500 uppercase font-black block">Range</span>
+                          <span className="text-xs font-mono font-black text-slate-600">???</span>
+                        </div>
+                      </div>
+
+                      {/* Redacted Alt-Fire Box */}
+                      <div className="p-3 rounded-2xl bg-slate-900/50 border border-slate-800/80">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+                            <Lock className="w-3.5 h-3.5 text-slate-600" />
+                            <span>ALT-FIRE: [CLASSIFIED]</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-600">
+                            Cooldown: ???
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 leading-snug">
+                          Alternate fire capability schematics will be decrypted when you pull this weapon from a booster pack.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Bottom Action Footer */}
+                    <div className="mt-5 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-3">
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        Source: Booster Packs
+                      </span>
+                      <button
+                        onClick={() => setActiveTab('shop')}
+                        className="px-5 py-2 rounded-2xl bg-slate-900 hover:bg-slate-850 text-amber-400 border border-amber-500/30 text-xs font-black transition active:scale-95 cursor-pointer shadow-md flex items-center gap-1.5"
+                      >
+                        <Package className="w-3.5 h-3.5" />
+                        <span>Get in Booster Packs</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
 
               return (
                 <div
@@ -1167,7 +1365,7 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
               )}
 
               {/* STAGE 3: SHINY TRADING CARD REVEAL & 3D FLIP */}
-              {animationPhase === 'reveal' && pulledCard && (
+              {animationPhase === 'reveal' && pulledReward && (
                 <motion.div
                   initial={{ rotateY: 180, scale: 0.4, opacity: 0 }}
                   animate={{ rotateY: 0, scale: 1, opacity: 1 }}
@@ -1181,7 +1379,7 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
                       animate={{ y: 0, opacity: 1 }}
                       className="px-4 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-black uppercase tracking-wider flex items-center gap-1.5"
                     >
-                      <span>🔁 Duplicate Card Recycled (+50🪵 & +20⚙️)</span>
+                      <span>🔁 Duplicate Item Recycled (+50🪵 & +20⚙️)</span>
                     </motion.div>
                   ) : (
                     <motion.div
@@ -1190,84 +1388,175 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
                       className="px-4 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-lg shadow-emerald-500/20"
                     >
                       <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>✨ Brand New Skin Unlocked!</span>
+                      <span>{pulledReward.type === 'skin' ? '✨ Brand New Skin Unlocked!' : '⚡ Brand New Science Weapon Unlocked!'}</span>
                     </motion.div>
                   )}
 
-                  {/* REVEALED POKÉMON CARD */}
-                  <div
-                    className={`relative w-72 sm:w-80 rounded-3xl p-5 bg-gradient-to-b ${pulledCard.cardColor} border-3 ${pulledCard.borderClass} shadow-2xl flex flex-col justify-between text-left overflow-hidden`}
-                  >
-                    {/* Holo prismatic shine overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent pointer-events-none" />
-
-                    <div>
-                      {/* Card Header */}
-                      <div className="flex items-center justify-between text-[11px] font-mono border-b border-white/10 pb-2">
-                        <span className="px-2 py-0.5 rounded-full bg-white/10 text-white font-black uppercase">
-                          {pulledCard.subject || pulledCard.title || 'FANTASY'}
-                        </span>
-                        <span className={`px-2 py-0.5 rounded-md uppercase ${getRarityBadgeStyle(pulledCard.rarity)}`}>
-                          {pulledCard.rarity}
-                        </span>
-                        <span className="text-white/60 font-bold">{pulledCard.cardNumber}</span>
-                      </div>
-
-                      {/* Character Artwork Frame */}
-                      <div className="relative my-4 rounded-2xl bg-slate-950/80 border border-white/20 p-4 flex items-center justify-center overflow-hidden shadow-inner h-40">
-                        <img 
-                          src={pulledCard.portraitPath || pulledCard.spritePath || `/assets/characters/${pulledCard.id}.png`} 
-                          alt={pulledCard.name} 
-                          className="w-28 h-28 object-contain pixelated drop-shadow-[0_12px_24px_rgba(0,0,0,0.8)] animate-in zoom-in-75 duration-300" 
-                          style={{ imageRendering: 'pixelated' }}
-                          onError={(e) => {
-                            const fallback = pulledCard.spritePath || `/assets/characters/${pulledCard.id}.png`;
-                            if (e.currentTarget.src !== fallback && !e.currentTarget.src.endsWith(fallback)) {
-                              e.currentTarget.src = fallback;
-                            }
-                          }}
-                        />
-                      </div>
-
-                      {/* Character Title */}
-                      <div className="text-center space-y-0.5">
-                        <h3 className="text-lg font-black text-white tracking-tight">{pulledCard.name}</h3>
-                        <span className="text-xs font-bold text-amber-400 block">{pulledCard.title}</span>
-                      </div>
-
-                      {/* Lore */}
-                      <p className="text-xs text-slate-300 mt-3 leading-relaxed bg-slate-950/60 p-2.5 rounded-xl border border-white/5">
-                        {pulledCard.lore}
-                      </p>
-
-                      {/* Ability */}
-                      <div className="mt-3 p-2.5 rounded-xl bg-slate-950/80 border border-amber-500/20 text-xs font-bold text-emerald-300 flex items-center gap-2">
-                        <Zap className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span>{pulledCard.ability}</span>
-                      </div>
-                    </div>
-
-                    {/* Equip Button if New */}
-                    <div className="mt-4 pt-3 border-t border-white/10">
-                      <button
-                        onClick={() => handleEquipSkin(pulledCard.id)}
-                        className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/25"
+                  {/* REVEALED CARD: FANTASY SKIN */}
+                  {pulledReward.type === 'skin' && (() => {
+                    const card = pulledReward.item;
+                    return (
+                      <div
+                        className={`relative w-72 sm:w-80 rounded-3xl p-5 bg-gradient-to-b ${card.cardColor} border-3 ${card.borderClass} shadow-2xl flex flex-col justify-between text-left overflow-hidden`}
                       >
-                        <Check className="w-4 h-4" />
-                        <span>Equip This Skin Now</span>
-                      </button>
-                    </div>
-                  </div>
+                        {/* Holo prismatic shine overlay */}
+                        <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent pointer-events-none" />
+
+                        <div>
+                          {/* Card Header */}
+                          <div className="flex items-center justify-between text-[11px] font-mono border-b border-white/10 pb-2">
+                            <span className="px-2 py-0.5 rounded-full bg-white/10 text-white font-black uppercase">
+                              {card.subject || card.title || 'FANTASY'}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-md uppercase ${getRarityBadgeStyle(card.rarity)}`}>
+                              {card.rarity}
+                            </span>
+                            <span className="text-white/60 font-bold">{card.cardNumber}</span>
+                          </div>
+
+                          {/* Character Artwork Frame */}
+                          <div className="relative my-4 rounded-2xl bg-slate-950/80 border border-white/20 p-4 flex items-center justify-center overflow-hidden shadow-inner h-40">
+                            <img 
+                              src={card.portraitPath || card.spritePath || `/assets/characters/${card.id}.png`} 
+                              alt={card.name} 
+                              className="w-28 h-28 object-contain pixelated drop-shadow-[0_12px_24px_rgba(0,0,0,0.8)] animate-in zoom-in-75 duration-300" 
+                              style={{ imageRendering: 'pixelated' }}
+                              onError={(e) => {
+                                const fallback = card.spritePath || `/assets/characters/${card.id}.png`;
+                                if (e.currentTarget.src !== fallback && !e.currentTarget.src.endsWith(fallback)) {
+                                  e.currentTarget.src = fallback;
+                                }
+                              }}
+                            />
+                          </div>
+
+                          {/* Character Title */}
+                          <div className="text-center space-y-0.5">
+                            <h3 className="text-lg font-black text-white tracking-tight">{card.name}</h3>
+                            <span className="text-xs font-bold text-amber-400 block">{card.title}</span>
+                          </div>
+
+                          {/* Lore */}
+                          <p className="text-xs text-slate-300 mt-3 leading-relaxed bg-slate-950/60 p-2.5 rounded-xl border border-white/5">
+                            {card.lore}
+                          </p>
+
+                          {/* Ability */}
+                          <div className="mt-3 p-2.5 rounded-xl bg-slate-950/80 border border-amber-500/20 text-xs font-bold text-emerald-300 flex items-center gap-2">
+                            <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+                            <span>{card.ability}</span>
+                          </div>
+                        </div>
+
+                        {/* Equip Button */}
+                        <div className="mt-4 pt-3 border-t border-white/10">
+                          <button
+                            onClick={() => handleEquipSkin(card.id)}
+                            className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/25"
+                          >
+                            <Check className="w-4 h-4" />
+                            <span>Equip This Skin Now</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* REVEALED CARD: SCIENTIFIC WEAPON */}
+                  {pulledReward.type === 'weapon' && (() => {
+                    const weapon = pulledReward.item;
+                    const style = getWeaponCardStyle(weapon.rarity);
+                    return (
+                      <div
+                        className={`relative w-72 sm:w-80 rounded-3xl p-5 bg-gradient-to-b ${style.bg} border-3 ${style.border} shadow-2xl flex flex-col justify-between text-left overflow-hidden`}
+                      >
+                        {/* Holo prismatic shine overlay */}
+                        <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/15 to-transparent pointer-events-none" />
+
+                        <div>
+                          {/* Card Header */}
+                          <div className="flex items-center justify-between text-[11px] font-mono border-b border-white/10 pb-2">
+                            <span className="px-2 py-0.5 rounded-full bg-white/10 text-white font-black uppercase tracking-wider">
+                              CAMBRIDGE ARSENAL
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-md uppercase ${getRarityBadgeStyle(weapon.rarity)}`}>
+                              {weapon.rarity}
+                            </span>
+                            <span className="text-white/60 font-bold">{weapon.stats?.specialEffect || 'SCIENCE'}</span>
+                          </div>
+
+                          {/* Weapon Artwork Frame */}
+                          <div className="relative my-4 rounded-2xl bg-slate-950/80 border border-white/20 p-4 flex flex-col items-center justify-center overflow-hidden shadow-inner h-36">
+                            <div className="text-5xl filter drop-shadow-[0_8px_16px_rgba(0,0,0,0.8)] animate-bounce duration-1000">
+                              {weapon.icon}
+                            </div>
+                            <span className="text-[10px] font-mono font-bold text-cyan-300 mt-2 px-2.5 py-0.5 rounded-full bg-cyan-950/70 border border-cyan-500/40">
+                              Beam: {weapon.stats?.specialEffect}
+                            </span>
+                          </div>
+
+                          {/* Weapon Title */}
+                          <div className="text-center space-y-0.5">
+                            <h3 className="text-lg font-black text-white tracking-tight">{weapon.name}</h3>
+                            <span className="text-xs font-bold text-amber-400 block capitalize">{weapon.rarity} Science Weapon</span>
+                          </div>
+
+                          {/* Description */}
+                          <p className="text-xs text-slate-300 mt-2.5 leading-relaxed bg-slate-950/60 p-2.5 rounded-xl border border-white/5">
+                            {weapon.description}
+                          </p>
+
+                          {/* Primary Stats */}
+                          <div className="grid grid-cols-3 gap-1.5 p-2 rounded-xl bg-slate-950/80 border border-white/10 text-center mt-2.5">
+                            <div>
+                              <span className="text-[8px] text-slate-400 uppercase font-black block">Damage</span>
+                              <span className="text-xs font-black text-rose-400">{weapon.stats?.damage} HP</span>
+                            </div>
+                            <div>
+                              <span className="text-[8px] text-slate-400 uppercase font-black block">Fire Rate</span>
+                              <span className="text-xs font-black text-amber-300">{weapon.stats?.cooldownSeconds}s</span>
+                            </div>
+                            <div>
+                              <span className="text-[8px] text-slate-400 uppercase font-black block">Range</span>
+                              <span className="text-xs font-black text-cyan-300">{weapon.stats?.range}m</span>
+                            </div>
+                          </div>
+
+                          {/* Alt-fire if present */}
+                          {weapon.stats?.altFire && (
+                            <div className="mt-2.5 p-2 rounded-xl bg-slate-950/90 border border-cyan-500/30 text-[10px] font-bold text-cyan-300 flex items-center justify-between">
+                              <span className="flex items-center gap-1 truncate max-w-[170px]" title={weapon.stats.altFire.altName}>
+                                <Zap className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                                <span className="truncate">ALT: {weapon.stats.altFire.altName}</span>
+                              </span>
+                              <span className="text-amber-400 font-mono shrink-0">{weapon.stats.altFire.altCooldownSeconds}s CD</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Equip Button */}
+                        <div className="mt-4 pt-3 border-t border-white/10">
+                          <button
+                            onClick={() => handleEquipWeapon(weapon.id)}
+                            className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider transition active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/25"
+                          >
+                            <Zap className="w-4 h-4" />
+                            <span>Equip This Weapon Now</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Action Buttons */}
                   <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-2 w-full max-w-sm">
                     <button
                       onClick={() => handleOpenPack(openingPack)}
-                      disabled={currentGold < openingPack.price}
+                      disabled={isProcessing || currentGold < openingPack.price || currentGold <= 0}
                       className={`w-full sm:flex-1 py-3 rounded-2xl font-black text-xs uppercase tracking-wider transition active:scale-95 cursor-pointer shadow-lg ${
-                        currentGold >= openingPack.price
+                        currentGold >= openingPack.price && currentGold > 0 && !isProcessing
                           ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
-                          : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                          : 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-60'
                       }`}
                     >
                       Open Another ({openingPack.price} 🪙)
@@ -1275,12 +1564,13 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
 
                     <button
                       onClick={() => {
+                        const targetTab = pulledReward.type === 'weapon' ? 'armory' : 'collection';
                         handleDismissCeremony();
-                        setActiveTab('collection');
+                        setActiveTab(targetTab);
                       }}
                       className="w-full sm:flex-1 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-black text-xs uppercase tracking-wider transition active:scale-95 cursor-pointer border border-slate-700"
                     >
-                      Collection
+                      {pulledReward.type === 'weapon' ? 'View in Arsenal' : 'Collection'}
                     </button>
 
                     <button

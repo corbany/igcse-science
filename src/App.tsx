@@ -21,6 +21,7 @@ import { AvatarShop } from './components/AvatarShop';
 import { GameLobby } from './components/GameLobby';
 import { AdminBattleControl } from './components/AdminBattleControl';
 import { BattleRoyaleArena } from './components/BattleRoyaleArena';
+import { StudentTaskProgressBar } from './components/StudentTaskProgressBar';
 import { subscribeToBattleState, BattleEventState } from './services/firebaseGameService';
 import { ScienceSubject, UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, TaskWithSubmission } from './types';
 import { logCompletedActivity } from './services/activityService';
@@ -687,25 +688,13 @@ export default function App() {
         </div>
       )}
 
-      {/* Student Pending Tasks Alert Banner */}
-      {isEffectiveStudent && pendingTasksCount > 0 && currentTab !== 'assignments' && (
-        <div className="bg-amber-950/40 border-b border-amber-500/40 px-4 sm:px-6 lg:px-8 py-2.5 animate-in fade-in">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
-            <div className="flex items-center gap-2.5 text-amber-300 font-semibold">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse shrink-0"></span>
-              <span>
-                Task Notice: You have <strong>{pendingTasksCount}</strong> assignment{pendingTasksCount === 1 ? '' : 's'} set by your teacher!
-              </span>
-            </div>
-            <button
-              onClick={() => setCurrentTab('assignments')}
-              className="px-3.5 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition text-xs shadow-xs flex items-center gap-1.5 self-start sm:self-auto"
-            >
-              <span>Open Assignments Tab</span>
-              <span>&rarr;</span>
-            </button>
-          </div>
-        </div>
+      {/* STUDENT TASK PROGRESSION BAR (LOCKED TO TOP OF SCREEN) */}
+      {isEffectiveStudent && (
+        <StudentTaskProgressBar
+          tasks={studentTasks}
+          onNavigateToTasks={() => setCurrentTab('assignments')}
+          enrolledClassCount={enrolledClassIds.length}
+        />
       )}
 
       {/* MODULE 1: USER PROFILE & LOADOUT BANNER */}
@@ -931,6 +920,7 @@ export default function App() {
                 setCurrentTab('lessons');
               }}
               onNavigateToLessons={() => setCurrentTab('lessons')}
+              onNavigateToRoyale={() => setCurrentTab('royale')}
             />
           ) : (
             <div className="p-8 text-center bg-slate-900 border border-rose-500/40 rounded-3xl space-y-3">
@@ -976,6 +966,7 @@ export default function App() {
               <AdminBattleControl
                 currentUser={user}
                 onJoinSpectate={() => setBattleArenaActive(true)}
+                onClose={() => setCurrentTab('instructor')}
               />
             )
           ) : battleState?.status === 'IN_PROGRESS' ? (

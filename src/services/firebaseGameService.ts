@@ -935,7 +935,7 @@ export const subscribeToGameProfile = (
           level: isInstructor ? 99 : level,
           xp,
           role: data.role,
-          gold: isInstructor ? 999999 : Number(data.gold ?? DEFAULT_GAME_PROFILE.gold),
+          gold: isInstructor ? 999999 : Math.max(0, Number(data.gold ?? DEFAULT_GAME_PROFILE.gold)),
           wood: isInstructor ? 9999 : Number(data.wood ?? DEFAULT_GAME_PROFILE.wood),
           brick: isInstructor ? 9999 : Number(data.brick ?? DEFAULT_GAME_PROFILE.brick),
           metal: isInstructor ? 9999 : Number(data.metal ?? DEFAULT_GAME_PROFILE.metal),
@@ -1039,6 +1039,67 @@ export const buyShopItem = async (
   await updateDoc(userDocRef, updateData);
 
   return { success: true, message: `Successfully purchased ${item.name}!` };
+};
+
+/**
+ * Teacher host action: Reset all students' gold, skins, and weapons back to the first common type.
+ * Ensures instructors are preserved and all students start clean with 100 gold, Cultist skin, and Bunsen Burner.
+ */
+export const resetAllStudentsGameProfiles = async (
+  instructorEmail?: string
+): Promise<{ success: boolean; count: number; message: string }> => {
+  try {
+    const usersSnap = await getDocs(collection(db, 'users'));
+    const batch = writeBatch(db);
+    let count = 0;
+
+    usersSnap.forEach((userDoc) => {
+      const data = userDoc.data();
+      // Skip instructors
+      if (
+        data.role === 'instructor' || 
+        userDoc.id === 'corbanb_instructor' || 
+        data.email === 'corbanb@gisboyshigh.net' || 
+        data.email === 'sarahb@gisboyshigh.net' ||
+        (instructorEmail && data.email === instructorEmail)
+      ) {
+        return;
+      }
+
+      const userRef = doc(db, 'users', userDoc.id);
+      batch.update(userRef, {
+        gold: 100,
+        wood: 25,
+        brick: 15,
+        metal: 10,
+        avatar: 'cultist',
+        equippedSkin: 'cultist',
+        unlockedSkins: ['cultist'],
+        equippedWeapon: 'bunsen_burner',
+        equippedPower: 'element_shield',
+        inventory: ['cultist', 'bunsen_burner', 'element_shield'],
+        monthlyCrown: false
+      });
+      count++;
+    });
+
+    if (count > 0) {
+      await batch.commit();
+    }
+
+    return {
+      success: true,
+      count,
+      message: `Successfully reset ${count} students' loadouts back to common starter skins ('cultist'), weapons ('bunsen_burner'), and 100 gold!`
+    };
+  } catch (err: any) {
+    console.error('Failed to reset student game profiles:', err);
+    return {
+      success: false,
+      count: 0,
+      message: `Failed to reset student profiles: ${err?.message || 'Firestore error'}`
+    };
+  }
 };
 
 // ============================================================================
@@ -1561,6 +1622,70 @@ export const declareBattleWinner = async (winner: { uid: string; name: string; a
   }
 };
 
+/**
+ * Teacher host action: End the current active match immediately
+ */
+export const endBattleRoyale = async (
+  customWinner?: { uid: string; name: string; avatar: string } | null,
+  reason?: string
+): Promise<void> => {
+  let winner = customWinner || null;
+
+  // If no custom winner specified, attempt to determine top surviving student
+  if (!winner) {
+    try {
+      const localPlayers = getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []);
+      const alivePlayers = localPlayers.filter(p => p.isAlive);
+      const sorted = [...alivePlayers].sort((a, b) => (b.kills * 100 + b.hp) - (a.kills * 100 + a.hp));
+      if (sorted.length > 0) {
+        winner = {
+          uid: sorted[0].uid,
+          name: sorted[0].name,
+          avatar: sorted[0].avatar
+        };
+      } else if (localPlayers.length > 0) {
+        const top = [...localPlayers].sort((a, b) => (b.kills * 100 + b.hp) - (a.kills * 100 + a.hp))[0];
+        winner = {
+          uid: top.uid,
+          name: top.name,
+          avatar: top.avatar
+        };
+      }
+    } catch {}
+  }
+
+  const endedState: Partial<BattleEventState> = {
+    status: 'ENDED',
+    isLobbyOpen: false,
+    currentWinner: winner
+  };
+
+  const prevState = getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE);
+  const updatedState = { ...prevState, ...endedState };
+  setLocalGameItem(LOCAL_BATTLE_STATE_KEY, updatedState);
+
+  if (canPerformFirestoreWrite()) {
+    try {
+      const stateDoc = doc(db, 'battleEvent', 'state');
+      await setDoc(stateDoc, endedState, { merge: true });
+    } catch (e) {
+      console.warn('Error setting match ended state in Firestore:', e);
+    }
+  }
+
+  // If winner has a UID, award crown and bonus XP/gold
+  if (winner && winner.uid) {
+    try {
+      const userDoc = doc(db, 'users', winner.uid);
+      await setDoc(userDoc, {
+        monthlyCrown: true,
+        xp: increment(200),
+        gold: increment(100)
+      }, { merge: true });
+    } catch {}
+  }
+};
+
 // ============================================================================
 // MODULE 5: 2D BATTLE ROYALE ARENA SYNCING & MECHANICS
 // ============================================================================
@@ -1662,7 +1787,8 @@ export const updatePlayerPosition = async (
 export const damageArenaPlayer = async (
   targetUid: string,
   damageAmount: number,
-  attackerUid?: string
+  attackerUid?: string,
+  isStormDamage: boolean = false
 ): Promise<{ killed: boolean }> => {
   if (!targetUid) return { killed: false };
 
@@ -1672,21 +1798,28 @@ export const damageArenaPlayer = async (
   let localKilled = false;
   if (targetLocal && targetLocal.isAlive) {
     let actualDamage = damageAmount;
-    if (targetLocal.metalShieldActiveUntil && targetLocal.metalShieldActiveUntil > Date.now()) {
+    if (!isStormDamage && targetLocal.metalShieldActiveUntil && targetLocal.metalShieldActiveUntil > Date.now()) {
       actualDamage = Math.round(actualDamage * 0.5);
     }
     let newShield = targetLocal.shield;
     let newHp = targetLocal.hp;
-    if (newShield > 0) {
-      if (newShield >= actualDamage) {
-        newShield -= actualDamage;
-        actualDamage = 0;
-      } else {
-        actualDamage -= newShield;
-        newShield = 0;
+
+    if (isStormDamage) {
+      // Storm damage bypasses protective shields and directly decreases HP (8 HP per second)
+      newHp = Math.max(0, newHp - actualDamage);
+    } else {
+      if (newShield > 0) {
+        if (newShield >= actualDamage) {
+          newShield -= actualDamage;
+          actualDamage = 0;
+        } else {
+          actualDamage -= newShield;
+          newShield = 0;
+        }
       }
+      newHp = Math.max(0, newHp - actualDamage);
     }
-    newHp = Math.max(0, newHp - actualDamage);
+
     localKilled = newHp <= 0;
     targetLocal.shield = newShield;
     targetLocal.hp = newHp;
@@ -1705,24 +1838,27 @@ export const damageArenaPlayer = async (
     if (!current.isAlive) return { killed: false };
 
     let actualDamage = damageAmount;
-    if (current.metalShieldActiveUntil && current.metalShieldActiveUntil > Date.now()) {
+    if (!isStormDamage && current.metalShieldActiveUntil && current.metalShieldActiveUntil > Date.now()) {
       actualDamage = Math.round(actualDamage * 0.5);
     }
 
     let newShield = current.shield;
     let newHp = current.hp;
 
-    if (newShield > 0) {
-      if (newShield >= actualDamage) {
-        newShield -= actualDamage;
-        actualDamage = 0;
-      } else {
-        actualDamage -= newShield;
-        newShield = 0;
+    if (isStormDamage) {
+      newHp = Math.max(0, newHp - actualDamage);
+    } else {
+      if (newShield > 0) {
+        if (newShield >= actualDamage) {
+          newShield -= actualDamage;
+          actualDamage = 0;
+        } else {
+          actualDamage -= newShield;
+          newShield = 0;
+        }
       }
+      newHp = Math.max(0, newHp - actualDamage);
     }
-
-    newHp = Math.max(0, newHp - actualDamage);
     const isKilled = newHp <= 0;
 
     await setDoc(targetDoc, {
@@ -1731,8 +1867,8 @@ export const damageArenaPlayer = async (
       isAlive: !isKilled
     }, { merge: true });
 
-    // Credit kill to attacker
-    if (isKilled && attackerUid && attackerUid !== targetUid) {
+    // Credit kill to attacker (if not environmental storm damage)
+    if (isKilled && attackerUid && attackerUid !== targetUid && !isStormDamage) {
       const attackerDoc = doc(db, 'battleEvent', 'players', 'items', attackerUid);
       await setDoc(attackerDoc, {
         kills: increment(1)
