@@ -5131,40 +5131,33 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     >
       
       {/* =========================================================================
-          TOP STATUS BAR & STATS
+          TOP STATUS BAR & STATS (CLEAN PASTEL CONTAINER & DARK CHARCOAL TEXT)
           ========================================================================= */}
-      <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-2.5 sm:p-3 shadow-xl backdrop-blur-md flex flex-wrap items-center justify-between gap-2.5">
+      <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs flex flex-wrap items-center justify-between gap-3 text-slate-800">
         
         {/* Left: Health, Shield & Character Info */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-slate-950/70 px-2.5 py-1.5 rounded-xl border border-slate-800">
+          <div className="flex items-center gap-2 bg-[#FDFBF7] px-3 py-1.5 rounded-lg border border-slate-300">
             <span className="text-xl">{equippedSkin.icon}</span>
             <div className="hidden sm:block">
-              <span className="text-xs font-black text-white block leading-tight">{user.name}</span>
-              <span className="text-[10px] font-bold block">
-                {user.role === 'instructor' ? (
-                  <span className="text-amber-300 flex items-center gap-1 font-black">
-                    <span>Instructor</span>
-                    <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.2 rounded border border-amber-400/40">∞ GOLD</span>
-                  </span>
-                ) : (
-                  <span className="text-emerald-400">{equippedSkin.name}</span>
-                )}
+              <span className="text-sm font-bold text-slate-800 block leading-tight">{user.name}</span>
+              <span className="text-xs font-semibold text-slate-600 block">
+                {user.role === 'instructor' ? 'Instructor Mode' : equippedSkin.name}
               </span>
             </div>
           </div>
 
           {/* Health Bar */}
           <div className="space-y-0.5">
-            <div className="flex items-center justify-between text-[11px] font-black">
-              <span className="text-rose-400 flex items-center gap-1">
-                <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500 animate-pulse" />
-                <span>HP {localHp}/100</span>
+            <div className="flex items-center justify-between text-xs font-bold text-slate-800">
+              <span className="flex items-center gap-1 text-rose-700">
+                <Heart className="w-3.5 h-3.5 fill-rose-600 text-rose-600" />
+                <span>Health: {localHp}/100</span>
               </span>
             </div>
-            <div className="w-24 sm:w-32 h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+            <div className="w-24 sm:w-32 h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-300">
               <div 
-                className="h-full bg-gradient-to-r from-rose-600 via-rose-500 to-red-400 transition-all duration-150"
+                className="h-full bg-rose-600 transition-all duration-150"
                 style={{ width: `${Math.max(0, localHp)}%` }}
               />
             </div>
@@ -5172,15 +5165,15 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
           {/* Shield Bar */}
           <div className="space-y-0.5">
-            <div className="flex items-center justify-between text-[11px] font-black">
-              <span className="text-cyan-400 flex items-center gap-1">
-                <Shield className="w-3.5 h-3.5 fill-cyan-500 text-cyan-500" />
-                <span>SHIELD {localShield}/100</span>
+            <div className="flex items-center justify-between text-xs font-bold text-slate-800">
+              <span className="flex items-center gap-1 text-sky-700">
+                <Shield className="w-3.5 h-3.5 fill-sky-600 text-sky-600" />
+                <span>Shield: {localShield}/100</span>
               </span>
             </div>
-            <div className="w-24 sm:w-32 h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+            <div className="w-24 sm:w-32 h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-300">
               <div 
-                className="h-full bg-gradient-to-r from-cyan-600 via-cyan-500 to-blue-400 transition-all duration-150"
+                className="h-full bg-sky-600 transition-all duration-150"
                 style={{ width: `${Math.max(0, localShield)}%` }}
               />
             </div>
@@ -5188,26 +5181,26 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         </div>
 
         {/* Center: Match Timer, Alive Counter, Kills & Storm Alert */}
-        <div className="flex items-center gap-2.5 bg-slate-950/80 px-3.5 py-1.5 rounded-xl border border-slate-800 font-mono text-xs">
+        <div className="flex items-center gap-3 bg-[#EBF3F5] px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-semibold text-slate-800">
           <div className="text-center">
-            <span className="text-[9px] text-slate-400 uppercase font-black block">Time</span>
-            <span className="text-sm sm:text-base font-black text-cyan-400">{timeFormatted}</span>
+            <span className="text-[10px] text-slate-600 font-bold block">Time</span>
+            <span className="text-sm font-bold text-slate-800">{timeFormatted}</span>
           </div>
-          <div className="h-5 w-px bg-slate-800" />
+          <div className="h-4 w-px bg-slate-300" />
           <div className="text-center">
-            <span className="text-[9px] text-slate-400 uppercase font-black block">Alive</span>
-            <span className="text-sm sm:text-base font-black text-emerald-400">{aliveCount}</span>
+            <span className="text-[10px] text-slate-600 font-bold block">Alive</span>
+            <span className="text-sm font-bold text-slate-800">{aliveCount}</span>
           </div>
-          <div className="h-5 w-px bg-slate-800" />
+          <div className="h-4 w-px bg-slate-300" />
           <div className="text-center">
-            <span className="text-[9px] text-slate-400 uppercase font-black block">Kills</span>
-            <span className="text-sm sm:text-base font-black text-rose-400">{kills}</span>
+            <span className="text-[10px] text-slate-600 font-bold block">Kills</span>
+            <span className="text-sm font-bold text-slate-800">{kills}</span>
           </div>
-          <div className="h-5 w-px bg-slate-800" />
+          <div className="h-4 w-px bg-slate-300" />
           <div className="text-center">
-            <span className="text-[9px] text-slate-400 uppercase font-black block">Storm</span>
-            <span className={`text-xs font-black ${distToStormSafe > 0 ? 'text-rose-500 animate-pulse' : 'text-purple-400'}`}>
-              {distToStormSafe > 0 ? `-${distToStormSafe}m` : 'SAFE'}
+            <span className="text-[10px] text-slate-600 font-bold block">Storm</span>
+            <span className={`text-xs font-bold ${distToStormSafe > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+              {distToStormSafe > 0 ? `-${distToStormSafe}m` : 'Safe zone'}
             </span>
           </div>
         </div>
@@ -5217,85 +5210,54 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           {/* SFX Toggle */}
           <button
             onClick={() => setSoundMuted(prev => !prev)}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition cursor-pointer"
-            title={soundMuted ? 'Unmute SFX' : 'Mute SFX'}
+            className="p-2 rounded-lg bg-[#FDFBF7] hover:bg-slate-100 text-slate-800 border border-slate-300 transition cursor-pointer"
+            title={soundMuted ? 'Unmute sound effects' : 'Mute sound effects'}
           >
-            {soundMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
+            {soundMuted ? <VolumeX className="w-4 h-4 text-rose-600" /> : <Volume2 className="w-4 h-4 text-emerald-700" />}
           </button>
 
           {/* Background Music Toggle */}
           <button
             onClick={() => setMusicMuted(prev => !prev)}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition cursor-pointer"
-            title={musicMuted ? 'Unmute 16-Bit Music' : 'Mute 16-Bit Music'}
+            className="p-2 rounded-lg bg-[#FDFBF7] hover:bg-slate-100 text-slate-800 border border-slate-300 transition cursor-pointer"
+            title={musicMuted ? 'Unmute music' : 'Mute music'}
           >
-            <Music className={`w-4 h-4 ${musicMuted ? 'text-slate-500' : 'text-fuchsia-400'}`} />
+            <Music className={`w-4 h-4 ${musicMuted ? 'text-slate-400' : 'text-slate-800'}`} />
           </button>
-
-          {/* 16-Bit Track Cycler Pill */}
-          <button
-            onClick={() => {
-              if (musicMuted) setMusicMuted(false);
-              const name = soundEngine.cycleTrack();
-              setMusicTrackName(name);
-            }}
-            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-fuchsia-950/60 hover:bg-fuchsia-900/70 text-fuchsia-200 border border-fuchsia-500/40 text-[11px] font-black transition cursor-pointer shadow-[0_0_12px_rgba(217,70,239,0.2)]"
-            title="Click to cycle 16-Bit Chiptune battle tracks"
-          >
-            <span className="animate-pulse">🎮</span>
-            <span>16-BIT: {musicTrackName}</span>
-          </button>
-
-          {/* Instructor Skin Drawer Quick-Morph Button */}
-          {isInstructor && (
-            <button
-              onClick={() => setShowInstructorSkinDrawer(prev => !prev)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-black transition cursor-pointer shadow-md ${
-                showInstructorSkinDrawer
-                  ? 'bg-amber-500/30 border-amber-400 text-amber-200 ring-2 ring-amber-400'
-                  : 'bg-amber-950/60 hover:bg-amber-900/70 text-amber-300 border-amber-500/40'
-              }`}
-              title="Instructor Instant Character Morph (All 20 Science Characters Unlocked)"
-            >
-              <span>👔</span>
-              <span className="hidden md:inline">Morph (20/20)</span>
-            </button>
-          )}
 
           {/* Full Screen Toggle Button */}
           <button
             onClick={toggleFullscreen}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition cursor-pointer"
-            title={isFullscreen ? 'Exit Full Screen' : 'Full Screen Mode'}
+            className="p-2 rounded-lg bg-[#FDFBF7] hover:bg-slate-100 text-slate-800 border border-slate-300 transition cursor-pointer"
+            title={isFullscreen ? 'Exit full screen' : 'Full screen'}
           >
-            {isFullscreen ? <Minimize2 className="w-4 h-4 text-amber-400" /> : <Maximize2 className="w-4 h-4 text-amber-400" />}
+            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
 
           {/* Minimap Toggle */}
           <button
             onClick={() => setMinimapExpanded(prev => !prev)}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition cursor-pointer"
-            title="Toggle Minimap [M]"
+            className="p-2 rounded-lg bg-[#FDFBF7] hover:bg-slate-100 text-slate-800 border border-slate-300 transition cursor-pointer"
+            title="Toggle minimap"
           >
-            <Compass className="w-4 h-4 text-cyan-400" />
+            <Compass className="w-4 h-4 text-slate-800" />
           </button>
 
           {/* Instructor End Match Host Control */}
           {isInstructor && (
             <button
               onClick={handleInstructorEndMatch}
-              className="px-3 py-1.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white font-black text-xs transition cursor-pointer flex items-center gap-1 shadow-md shadow-rose-600/30"
-              title="Terminate match now and award Victory Royale"
+              className="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs transition cursor-pointer"
+              title="End tournament match"
             >
-              <span>🛑</span>
-              <span className="hidden sm:inline">End Match</span>
+              End Match
             </button>
           )}
 
           {/* Leave Battle */}
           <button
             onClick={handleExit}
-            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-bold transition cursor-pointer"
+            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition cursor-pointer"
           >
             Leave
           </button>
@@ -5776,24 +5738,24 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
         {/* Elimination Overlay */}
         {!isAlive && (
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center p-6 text-center animate-in fade-in z-30">
-            <div className="space-y-4 max-w-sm bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-2xl">
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center p-6 text-center animate-in fade-in z-30">
+            <div className="space-y-4 max-w-sm bg-white border border-slate-300 p-6 rounded-2xl shadow-lg text-slate-800">
               <span className="text-4xl block">💀</span>
-              <h3 className="text-2xl font-black text-rose-500 uppercase tracking-tight">You Were Eliminated</h3>
-              <p className="text-xs text-slate-400">
+              <h3 className="text-2xl font-bold text-slate-900 tracking-tight">You Were Eliminated</h3>
+              <p className="text-sm text-slate-600 leading-relaxed">
                 You finished with <strong>{kills} eliminations</strong> across the 5000m arena! Revise more Cambridge slide decks to gather extra building materials and gold!
               </p>
               <div className="flex items-center justify-center gap-3 pt-2">
                 <button
                   onClick={handleExit}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-black text-xs font-bold transition cursor-pointer shadow-xs"
                 >
                   Return to Study
                 </button>
                 {onOpenShop && (
                   <button
                     onClick={onOpenShop}
-                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition cursor-pointer"
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition cursor-pointer shadow-xs border border-black"
                   >
                     Open Booster Packs
                   </button>
@@ -5805,51 +5767,51 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
         {/* Victory Royale Celebration Modal */}
         {winnerCelebration && (
-          <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-6 text-center animate-in zoom-in-95 duration-200 z-40">
-            <div className="space-y-5 max-w-md bg-gradient-to-b from-amber-950/60 to-slate-900 border-2 border-amber-500 p-8 rounded-3xl shadow-2xl relative overflow-hidden">
-              <div className="text-5xl animate-bounce">👑</div>
-              <h2 className="text-3xl font-black text-amber-400 tracking-tight uppercase">
-                #1 VICTORY ROYALE!
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center p-6 text-center z-40">
+            <div className="space-y-4 max-w-md bg-white border border-slate-300 p-8 rounded-2xl shadow-lg relative text-slate-800">
+              <div className="text-5xl">👑</div>
+              <h2 className="text-2xl font-bold text-slate-900 tracking-tight">
+                Victory Royale!
               </h2>
-              <div className="p-3 rounded-2xl bg-slate-950/80 border border-amber-500/30">
-                <span className="text-xs text-slate-400 block uppercase font-bold">Champion</span>
-                <span className="text-xl font-black text-white">{winnerCelebration.name}</span>
-                <span className="text-xs text-amber-400 font-bold block mt-1">+200 XP & Monthly Victory Crown Awarded</span>
+              <div className="p-4 rounded-xl bg-[#FDFBF7] border border-slate-300">
+                <span className="text-xs text-slate-600 block font-bold uppercase tracking-wider">Champion</span>
+                <span className="text-xl font-bold text-slate-900">{winnerCelebration.name}</span>
+                <span className="text-xs text-amber-800 font-bold block mt-1">+200 XP and Monthly Victory Crown Awarded</span>
               </div>
               <button
                 onClick={handleExit}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-sm uppercase tracking-wider transition shadow-lg cursor-pointer"
+                className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition shadow-xs cursor-pointer border border-black"
               >
-                Claim Victory & Return
+                Claim Victory and Return
               </button>
             </div>
           </div>
         )}
 
-        {/* Science Supply Drop Rapid Question Challenge */}
+        {/* Science Supply Drop Rapid Question Challenge (Dyslexia-friendly pastel modal) */}
         {activeCrateModal && (
-          <div className="absolute inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-40">
-            <div className="bg-slate-900 border-2 border-cyan-500 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-4 animate-in zoom-in-95">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center p-4 z-40">
+            <div className="bg-white border border-slate-300 rounded-xl p-6 max-w-lg w-full shadow-md space-y-4 text-slate-800">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
                 <div className="flex items-center gap-2">
-                  <Package className="w-5 h-5 text-cyan-400 animate-bounce" />
-                  <span className="font-black text-sm text-white">Science Supply Drop Rapid Challenge</span>
+                  <Package className="w-5 h-5 text-slate-800" />
+                  <span className="font-bold text-base text-slate-800">Science Supply Challenge</span>
                 </div>
-                <div className="px-2.5 py-1 rounded-full bg-cyan-500 text-slate-950 font-mono font-black text-xs animate-pulse">
-                  {crateQuestionTimer}s
+                <div className="px-3 py-1 rounded-lg bg-[#EBF3F5] border border-slate-300 text-slate-800 font-bold text-xs">
+                  {crateQuestionTimer}s remaining
                 </div>
               </div>
 
-              <p className="text-xs sm:text-sm font-bold text-white leading-relaxed">
+              <p className="text-base font-bold text-slate-800 leading-relaxed">
                 {activeCrateModal.question.question}
               </p>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              <div className="grid grid-cols-1 gap-2 pt-1">
                 {activeCrateModal.question.options.map((opt, oIdx) => (
                   <button
                     key={oIdx}
                     onClick={() => handleAnswerCrateQuestion(oIdx)}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-cyan-600 hover:text-white border border-slate-700 text-xs font-semibold text-slate-200 text-left transition cursor-pointer"
+                    className="p-3 rounded-lg bg-[#FDFBF7] hover:bg-[#EBF3F5] text-slate-800 border-2 border-black text-sm font-semibold text-left transition cursor-pointer"
                   >
                     {opt}
                   </button>
@@ -5857,7 +5819,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               </div>
 
               {crateFeedback && (
-                <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-300 text-xs font-bold text-center">
+                <div className="p-3 rounded-lg bg-[#EBF3F5] border border-slate-300 text-slate-800 text-sm font-bold text-center">
                   {crateFeedback}
                 </div>
               )}
@@ -5867,26 +5829,26 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
         {/* TOURNAMENT ACCESS LOCKDOWN FOR STUDENTS BETWEEN SET ROYALE TOURNAMENTS */}
         {!isInstructor && battleState?.status !== 'IN_PROGRESS' && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-md animate-in fade-in">
-            <div className="bg-slate-900 border border-amber-500/40 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl text-center space-y-5">
-              <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-3xl mx-auto shadow-lg shadow-amber-500/20">
-                <Lock className="w-8 h-8 text-amber-400" />
+          <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+            <div className="bg-white border border-slate-300 rounded-xl p-8 max-w-md w-full shadow-md text-center space-y-4 text-slate-800">
+              <div className="w-14 h-14 rounded-xl bg-[#EBF3F5] border border-slate-300 flex items-center justify-center text-2xl mx-auto">
+                <Lock className="w-7 h-7 text-slate-700" />
               </div>
-              <div className="space-y-2">
-                <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                  Arena Closed Between Tournaments
+              <div className="space-y-1">
+                <span className="text-xs font-bold px-2.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-300 inline-block">
+                  Lobby Waiting Room
                 </span>
-                <h3 className="text-xl font-black text-white">Royale Tournament is Not Active</h3>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Students cannot enter the Battle Royale arena on their own between scheduled tournaments. Please wait in the lobby until your instructor launches the next live match.
+                <h3 className="text-xl font-bold text-slate-800">Tournament Inactive</h3>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  Students join the arena when your instructor begins the live match. Please wait in the lobby or return to study lessons.
                 </p>
               </div>
               <div className="pt-2">
                 <button
                   onClick={handleExit}
-                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-xs uppercase tracking-wider transition active:scale-95 shadow-lg shadow-emerald-600/25 cursor-pointer"
+                  className="w-full py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm transition cursor-pointer"
                 >
-                  Return to Study Hub & Lessons
+                  Return to Lessons
                 </button>
               </div>
             </div>
@@ -5895,18 +5857,17 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
       </div>
 
-      {/* Control Legend & Biome Info */}
-      <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-2.5 text-xs text-slate-400 flex flex-wrap items-center justify-between gap-2">
+      {/* Control Legend & Instructions */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3 text-xs text-slate-700 flex flex-wrap items-center justify-between gap-3 shadow-xs">
         <div className="flex items-center gap-4 flex-wrap">
-          <span>🎮 <strong>WASD / Arrows:</strong> Move (5000m World)</span>
-          <span>🎯 <strong>Mouse + Click:</strong> Aim & Fire</span>
-          <span>🪵 <strong>1, 2, 3:</strong> Build 3D Defenses</span>
-          <span>⚡ <strong>E:</strong> Ability</span>
-          <span>🍌 <strong>Loot:</strong> Walk over Bananas to heal HP!</span>
-          <span>🧭 <strong>M:</strong> Toggle Radar</span>
+          <span><strong>WASD / Arrows:</strong> Move character</span>
+          <span><strong>Mouse click:</strong> Aim and fire</span>
+          <span><strong>1, 2, 3:</strong> Build defenses</span>
+          <span><strong>E:</strong> Science ability</span>
+          <span><strong>M:</strong> Toggle radar map</span>
         </div>
-        <span className="text-[11px] text-fuchsia-400 font-semibold">
-          ⚡ Stay inside the Eye of the Storm! The transparent violet shroud outside deals continuous storm damage.
+        <span className="text-xs text-slate-600 font-semibold">
+          Stay inside the white circle safe zone to avoid storm damage.
         </span>
       </div>
 

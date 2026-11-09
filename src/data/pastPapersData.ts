@@ -18,8 +18,13 @@ import { specimen2025Paper2 } from './examPapers/specimen2025Paper2';
 import { octNov2025Paper42 } from './examPapers/octNov2025Paper42';
 import { modelGutPracticalPack } from './examPapers/modelGutPracticalPack';
 import { saveMyExamsReproductionPaper } from './examPapers/saveMyExamsReproduction';
+import { march2026Paper12Core } from './examPapers/march2026Paper12Core';
+import { march2026Paper22Extended } from './examPapers/march2026Paper22Extended';
 
 export const pastExamPapers: PastExamPaper[] = [
+  march2026Paper12Core,
+  march2026Paper22Extended,
+  specimen2025Paper2,
   // =========================================================================
   // 1. 0653/61 May/June 2026 - Paper 6 Alternative to Practical (40 Marks)
   // =========================================================================
@@ -961,7 +966,6 @@ export const pastExamPapers: PastExamPaper[] = [
   },
   specimen2025Paper4,
   specimen2025Paper6,
-  specimen2025Paper2,
   octNov2025Paper42,
   modelGutPracticalPack,
   saveMyExamsReproductionPaper

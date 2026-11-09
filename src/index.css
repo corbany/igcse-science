@@ -2,25 +2,304 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ==========================================================================
+   DYSLEXIA-FRIENDLY ACCESSIBLE TYPOGRAPHY ENGINE & PASTEL DESIGN SYSTEM
+   ========================================================================== */
+
 :root {
-  color-scheme: dark;
+  --font-dyslexia: 'Atkinson Hyperlegible', Verdana, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --bg-app-pastel: #FDFBF7; /* Soft Warm Cream */
+  --bg-textbox-pastel: #FDFBF7; /* Glare-free pastel textbox background */
+  --bg-textbox-focus: #EBF3F5; /* Pale Soft Blue on focus */
+  --bg-card-pastel: #FFFFFF; /* Soft low-contrast card container */
+  --border-card-pastel: #E2E8F0; /* Clean light hairline border */
+  --border-textbox: #000000; /* Crisp black border for every textbox */
+  --text-primary: #1E293B; /* Dark Charcoal (6:1 sharp contrast without glare) */
+  --text-muted: #475569; /* Balanced slate for secondary context */
+  --font-size-body: 16px;
+  --line-height-body: 1.55;
+  --letter-spacing-body: 0.12em;
 }
 
-html.dark {
-  color-scheme: dark;
-  background-color: #020617;
-  color: #f8fafc;
+html, body {
+  background-color: var(--bg-app-pastel);
+  color: var(--text-primary);
+  font-family: var(--font-dyslexia);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+  letter-spacing: var(--letter-spacing-body);
+  text-align: left;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-html:not(.dark) {
-  color-scheme: light;
-  background-color: #f8fafc;
-  color: #0f172a;
+/* Strictly left-aligned with ragged right edge (avoid justify and long centered text) */
+p, li, blockquote, dd, dt, label, span, div {
+  text-align: left;
 }
 
+/* Headings in Dark Charcoal with comfortable line height and spacing */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text-primary);
+  font-family: var(--font-dyslexia);
+  line-height: 1.4;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  text-align: left;
+}
+
+/* No italics or underlining: convert to bold for key terms per accessibility rules */
+em, i, cite {
+  font-style: normal;
+  font-weight: 700;
+}
+
+u {
+  text-decoration: none;
+  font-weight: 700;
+}
+
+/* Avoid ALL-CAPS text blocks; preserve sentence case readability */
+button, input, select, textarea, h1, h2, h3, h4, h5, h6, .uppercase {
+  text-transform: none !important;
+}
+
+/* Border each textbox in black with soothing glare-free pastel background */
+input[type="text"],
+input[type="search"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="date"],
+textarea,
+select {
+  background-color: var(--bg-textbox-pastel) !important;
+  color: var(--text-primary) !important;
+  border: 1.5px solid var(--border-textbox) !important;
+  border-radius: 8px !important;
+  font-family: var(--font-dyslexia) !important;
+  font-size: 16px !important;
+  line-height: 1.55 !important;
+  letter-spacing: 0.08em !important;
+  padding: 0.5rem 0.75rem !important;
+  box-shadow: none !important;
+}
+
+input[type="text"]:focus,
+input[type="search"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="date"]:focus,
+textarea:focus,
+select:focus {
+  background-color: var(--bg-textbox-focus) !important;
+  outline: 2px solid #1E293B !important;
+  outline-offset: 1px;
+}
+
+/* Soft, low-contrast pastel card containers */
+.pastel-card {
+  background-color: var(--bg-card-pastel);
+  border: 1px solid var(--border-card-pastel);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04);
+}
+
+/* ==========================================================================
+   DARK MODE ENGINE (When dark mode button is activated)
+   - Switch all backgrounds and textbox backgrounds to black (#000000)
+   - Switch all text to contrasting light colour (#F8FAFC / #FFFFFF)
+   - Preserve existing pastel colour scheme in light mode
+   ========================================================================== */
+
+html.dark,
+html.dark body {
+  background-color: #000000 !important;
+  color: #F8FAFC !important;
+}
+
+.dark {
+  --bg-app-pastel: #000000;
+  --bg-textbox-pastel: #000000;
+  --bg-textbox-focus: #121214;
+  --bg-card-pastel: #000000;
+  --border-card-pastel: #27272A;
+  --border-textbox: #52525B;
+  --text-primary: #F8FAFC;
+  --text-muted: #CBD5E1;
+}
+
+/* Switch all backgrounds to pure black in dark mode */
+.dark,
+.dark body,
+.dark main,
+.dark header,
+.dark nav,
+.dark footer,
+.dark section,
+.dark article,
+.dark aside,
+.dark .bg-white,
+.dark .bg-\[\#FDFBF7\],
+.dark .bg-\[\#EBF3F5\],
+.dark .bg-slate-50,
+.dark .bg-slate-100,
+.dark .bg-slate-200,
+.dark .bg-slate-800,
+.dark .bg-slate-900,
+.dark .bg-slate-950,
+.dark .bg-zinc-900,
+.dark .pastel-card {
+  background-color: #000000 !important;
+}
+
+/* Switch cards and container borders in dark mode */
+.dark .border-slate-200,
+.dark .border-slate-300,
+.dark .border-slate-400,
+.dark .border-\[\#E2E8F0\],
+.dark .border-\[\#CBD5E1\],
+.dark .border-black {
+  border-color: #27272A !important;
+}
+
+/* Switch all textbox backgrounds to pure black with contrasting text and borders */
+.dark input[type="text"],
+.dark input[type="search"],
+.dark input[type="email"],
+.dark input[type="password"],
+.dark input[type="number"],
+.dark input[type="date"],
+.dark input[type="datetime-local"],
+.dark textarea,
+.dark select {
+  background-color: #000000 !important;
+  color: #F8FAFC !important;
+  border-color: #52525B !important;
+}
+
+.dark input[type="text"]:focus,
+.dark input[type="search"]:focus,
+.dark input[type="email"]:focus,
+.dark input[type="password"]:focus,
+.dark input[type="number"]:focus,
+.dark input[type="date"]:focus,
+.dark input[type="datetime-local"]:focus,
+.dark textarea:focus,
+.dark select:focus {
+  background-color: #0A0A0B !important;
+  outline: 2px solid #E2E8F0 !important;
+  border-color: #CBD5E1 !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #94A3B8 !important;
+}
+
+/* Switch all text in dark mode to contrasting light colors */
+.dark h1,
+.dark h2,
+.dark h3,
+.dark h4,
+.dark h5,
+.dark h6 {
+  color: #FFFFFF !important;
+}
+
+.dark p,
+.dark li,
+.dark label,
+.dark dt,
+.dark dd,
+.dark strong,
+.dark b,
+.dark th,
+.dark td {
+  color: #F1F5F9 !important;
+}
+
+/* Map dark text utility classes to contrasting light text in dark mode */
+.dark .text-slate-900,
+.dark .text-slate-800,
+.dark .text-slate-700,
+.dark .text-slate-600,
+.dark .text-black,
+.dark .text-gray-900,
+.dark .text-gray-800,
+.dark .text-gray-700 {
+  color: #F8FAFC !important;
+}
+
+.dark .text-slate-500,
+.dark .text-slate-400,
+.dark .text-gray-500,
+.dark .text-gray-400 {
+  color: #CBD5E1 !important;
+}
+
+/* Contrast adjustment for badges & notification chips in dark mode */
+.dark .bg-emerald-50,
+.dark .bg-emerald-100 {
+  background-color: rgba(6, 78, 59, 0.4) !important;
+  color: #6EE7B7 !important;
+  border-color: rgba(16, 185, 129, 0.4) !important;
+}
+
+.dark .bg-amber-50,
+.dark .bg-amber-100 {
+  background-color: rgba(120, 53, 15, 0.4) !important;
+  color: #FCD34D !important;
+  border-color: rgba(245, 158, 11, 0.4) !important;
+}
+
+.dark .bg-rose-50,
+.dark .bg-rose-100 {
+  background-color: rgba(136, 19, 55, 0.4) !important;
+  color: #FDA4AF !important;
+  border-color: rgba(244, 63, 94, 0.4) !important;
+}
+
+.dark .bg-purple-50,
+.dark .bg-purple-100 {
+  background-color: rgba(88, 28, 135, 0.4) !important;
+  color: #D8B4FE !important;
+  border-color: rgba(168, 85, 247, 0.4) !important;
+}
+
+.dark .bg-teal-50,
+.dark .bg-teal-100 {
+  background-color: rgba(19, 78, 74, 0.4) !important;
+  color: #5EEAD4 !important;
+  border-color: rgba(20, 184, 166, 0.4) !important;
+}
+
+/* Modals and popups in dark mode */
+.dark .fixed > div:not([class*="bg-black"]) {
+  background-color: #000000 !important;
+  border-color: #3F3F46 !important;
+}
+
+/* Purge all futuristic neon glows and dark mode neon gradients */
+.neon-glow,
+[class*="shadow-emerald-"],
+[class*="shadow-purple-"],
+[class*="shadow-cyan-"],
+[class*="shadow-amber-"],
+[class*="shadow-fuchsia-"] {
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !important;
+}
+
+* {
+  text-shadow: none !important;
+}
+
+/* Pixelated canvas rendering helper */
 .pixelated {
   image-rendering: pixelated;
   image-rendering: -moz-crisp-edges;
   image-rendering: crisp-edges;
 }
-

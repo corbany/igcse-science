@@ -2,6 +2,8 @@ export type ScienceSubject = 'biology' | 'chemistry' | 'physics';
 
 export type ExamTier = 'Core' | 'Extended';
 
+export type PastelTheme = 'pastel-cream' | 'pastel-sage' | 'pastel-sky' | 'calm-dark';
+
 export type UserRole = 'student' | 'instructor';
 
 export type BadgeCategory = 'streak' | 'topic_module' | 'quiz' | 'milestone';
@@ -179,6 +181,7 @@ export interface QuizQuestion {
   correctIndex: number;
   explanation: string;
   syllabusRef: string;
+  tier?: 'Core' | 'Extended';
 }
 
 export type TrafficLightStatus = 'red' | 'orange' | 'green';

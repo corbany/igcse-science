@@ -183,22 +183,19 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
     : 85;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
+    <div className="space-y-6 animate-in fade-in duration-200 text-slate-800 max-w-6xl mx-auto pb-12">
       {/* 1. HERO PROFILE HEADER */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 border border-slate-800 p-6 sm:p-8 shadow-xl">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute bottom-0 left-1/3 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
-
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+      <div className="rounded-3xl bg-white border border-[#E2E8F0] p-6 sm:p-8 shadow-xs">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           {/* Avatar and Identity */}
           <div className="flex items-start sm:items-center gap-4 sm:gap-6">
             <div className="relative">
-              <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-indigo-500 p-1 shadow-lg shadow-emerald-500/20 flex items-center justify-center">
-                <div className="w-full h-full bg-slate-950 rounded-xl flex items-center justify-center text-white font-black text-2xl sm:text-3xl">
+              <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-amber-100 border-2 border-black flex items-center justify-center shrink-0">
+                <div className="text-slate-900 font-black text-2xl sm:text-3xl">
                   {user.name ? user.name.charAt(0).toUpperCase() : 'S'}
                 </div>
               </div>
-              <div className="absolute -bottom-2 -right-1 px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider shadow-md flex items-center gap-0.5">
+              <div className="absolute -bottom-2 -right-1 px-2 py-0.5 rounded-full bg-amber-300 text-slate-950 text-[10px] font-bold uppercase tracking-wider border border-amber-400 shadow-xs flex items-center gap-0.5">
                 <Star className="w-3 h-3 fill-slate-950" />
                 <span>Lvl {levelInfo.level}</span>
               </div>
@@ -206,64 +203,64 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
 
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
                   {user.name}
                 </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#EBF3F5] text-teal-800 border border-teal-300">
                   {levelInfo.title}
                 </span>
-                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-300">
                   {user.tier} Tier
                 </span>
               </div>
-              <p className="text-xs text-slate-400 font-mono">
+              <p className="text-xs text-slate-500 font-mono">
                 {user.email}
               </p>
-              <div className="pt-1 flex flex-wrap items-center gap-4 text-xs text-slate-300">
-                <span className="flex items-center gap-1.5 text-amber-400 font-bold">
-                  <Flame className="w-4 h-4 fill-amber-400" />
+              <div className="pt-1 flex flex-wrap items-center gap-4 text-xs text-slate-600 font-medium">
+                <span className="flex items-center gap-1.5 text-amber-700 font-bold">
+                  <Flame className="w-4 h-4 fill-amber-600 text-amber-600" />
                   <span>{streakInfo.currentStreak} Day Study Streak</span>
                 </span>
-                <span className="text-slate-600">•</span>
-                <span className="text-slate-300">
-                  Target Grade: <strong className="text-white font-bold">{user.targetGrade || 'A*'}</strong>
+                <span className="text-slate-300">•</span>
+                <span className="text-slate-700">
+                  Target Grade: <strong className="text-slate-900 font-bold">{user.targetGrade || 'A*'}</strong>
                 </span>
-                <span className="text-slate-600">•</span>
-                <span className="text-slate-300">
-                  Exam Series: <strong className="text-white font-bold">May/June 2026</strong>
+                <span className="text-slate-300">•</span>
+                <span className="text-slate-700">
+                  Exam Series: <strong className="text-slate-900 font-bold">May/June 2026</strong>
                 </span>
               </div>
             </div>
           </div>
 
           {/* Quick Level & XP Card */}
-          <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 min-w-[240px] flex flex-col justify-between shadow-inner">
+          <div className="bg-[#FDFBF7] border border-slate-200 rounded-2xl p-4 min-w-[240px] flex flex-col justify-between shadow-xs">
             <div className="flex items-center justify-between text-xs mb-2">
-              <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Rank Progress</span>
-              <span className="font-mono font-bold text-amber-400">{totalXP} Total XP</span>
+              <span className="text-slate-500 font-bold uppercase tracking-wider text-[10px]">Rank Progress</span>
+              <span className="font-mono font-bold text-amber-800">{totalXP} Total XP</span>
             </div>
             <div>
               <div className="flex justify-between text-xs font-bold mb-1">
-                <span className="text-white">Level {levelInfo.level}</span>
-                <span className="text-slate-400 text-[11px]">{levelInfo.progressPercent}% to Lvl {levelInfo.level + 1}</span>
+                <span className="text-slate-900">Level {levelInfo.level}</span>
+                <span className="text-slate-500 text-[11px] font-medium">{levelInfo.progressPercent}% to Lvl {levelInfo.level + 1}</span>
               </div>
-              <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
+              <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
                 <div 
-                  className="bg-gradient-to-r from-amber-400 to-emerald-400 h-full rounded-full transition-all duration-500"
+                  className="bg-emerald-600 h-full rounded-full transition-all duration-500"
                   style={{ width: `${levelInfo.progressPercent}%` }}
                 />
               </div>
-              <p className="text-[10px] text-slate-400 mt-1.5 text-right font-mono">
+              <p className="text-[10px] text-slate-500 mt-1.5 text-right font-mono font-medium">
                 {levelInfo.nextLevelXP - totalXP} XP to Level {levelInfo.level + 1}
               </p>
             </div>
             {onNavigateToLeaderboard && (
               <button
                 onClick={onNavigateToLeaderboard}
-                className="mt-3 w-full py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-md shadow-purple-900/30"
+                className="mt-3 w-full py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-900 font-bold text-xs transition flex items-center justify-center gap-1.5 border-2 border-black shadow-xs cursor-pointer active:scale-95"
               >
-                <Trophy className="w-3.5 h-3.5 text-amber-300" />
-                <span>View Class & Cohort Rankings</span>
+                <Trophy className="w-3.5 h-3.5 text-amber-600" />
+                <span>View Class Leaderboard & Rankings</span>
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             )}
@@ -271,86 +268,86 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
         </div>
 
         {/* 2. STATS ROW */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-slate-800/80">
-          <div className="bg-slate-950/50 rounded-2xl p-3.5 border border-slate-800/60">
-            <div className="flex items-center gap-2 text-amber-400 mb-1">
-              <Flame className="w-4 h-4" />
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Current Streak</span>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-slate-200">
+          <div className="bg-[#FDFBF7] rounded-2xl p-3.5 border border-slate-200 shadow-xs">
+            <div className="flex items-center gap-2 text-amber-700 mb-1">
+              <Flame className="w-4 h-4 fill-amber-600" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Current Streak</span>
             </div>
-            <div className="text-xl font-black text-white">{streakInfo.currentStreak} <span className="text-xs font-normal text-slate-400">Days</span></div>
-            <p className="text-[10px] text-slate-500 mt-0.5">Best record: {streakInfo.longestStreak} days</p>
+            <div className="text-xl font-black text-slate-900">{streakInfo.currentStreak} <span className="text-xs font-normal text-slate-500">Days</span></div>
+            <p className="text-[10px] text-slate-500 mt-0.5 font-medium">Best record: {streakInfo.longestStreak} days</p>
           </div>
 
-          <div className="bg-slate-950/50 rounded-2xl p-3.5 border border-slate-800/60">
-            <div className="flex items-center gap-2 text-emerald-400 mb-1">
+          <div className="bg-[#FDFBF7] rounded-2xl p-3.5 border border-slate-200 shadow-xs">
+            <div className="flex items-center gap-2 text-emerald-700 mb-1">
               <Award className="w-4 h-4" />
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Virtual Medals</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Virtual Medals</span>
             </div>
-            <div className="text-xl font-black text-white">{unlockedBadges.length} <span className="text-xs font-normal text-slate-400">/ {allBadges.length}</span></div>
-            <p className="text-[10px] text-emerald-400 mt-0.5 font-medium">{Math.round((unlockedBadges.length / allBadges.length) * 100)}% unlocked</p>
-            <div className="mt-2 pt-2 border-t border-slate-800/60">
+            <div className="text-xl font-black text-slate-900">{unlockedBadges.length} <span className="text-xs font-normal text-slate-500">/ {allBadges.length}</span></div>
+            <p className="text-[10px] text-emerald-800 mt-0.5 font-bold">{Math.round((unlockedBadges.length / allBadges.length) * 100)}% unlocked</p>
+            <div className="mt-2 pt-2 border-t border-slate-200">
               <StudentMedalStrip badges={unlockedBadges} compact={true} showCategoryBreakdown={false} />
             </div>
           </div>
 
-          <div className="bg-slate-950/50 rounded-2xl p-3.5 border border-slate-800/60">
-            <div className="flex items-center gap-2 text-indigo-400 mb-1">
+          <div className="bg-[#FDFBF7] rounded-2xl p-3.5 border border-slate-200 shadow-xs">
+            <div className="flex items-center gap-2 text-teal-700 mb-1">
               <BookOpen className="w-4 h-4" />
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Decks Mastered</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Decks Mastered</span>
             </div>
-            <div className="text-xl font-black text-white">
-              {progress.completedLessons?.length || 0} <span className="text-xs font-normal text-slate-400">/ 106</span>
+            <div className="text-xl font-black text-slate-900">
+              {progress.completedLessons?.length || 0} <span className="text-xs font-normal text-slate-500">/ 106</span>
             </div>
-            <p className="text-[10px] text-slate-500 mt-0.5">Full 0653 syllabus</p>
+            <p className="text-[10px] text-slate-500 mt-0.5 font-medium">Full 0653 syllabus</p>
           </div>
 
-          <div className="bg-slate-950/50 rounded-2xl p-3.5 border border-slate-800/60">
-            <div className="flex items-center gap-2 text-purple-400 mb-1">
+          <div className="bg-[#FDFBF7] rounded-2xl p-3.5 border border-slate-200 shadow-xs">
+            <div className="flex items-center gap-2 text-purple-700 mb-1">
               <TrendingUp className="w-4 h-4" />
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Quiz Accuracy</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Quiz Accuracy</span>
             </div>
-            <div className="text-xl font-black text-white">{avgAccuracy}%</div>
-            <p className="text-[10px] text-purple-300 mt-0.5 font-medium">Across all tested topics</p>
+            <div className="text-xl font-black text-slate-900">{avgAccuracy}%</div>
+            <p className="text-[10px] text-purple-800 mt-0.5 font-bold">Across all tested topics</p>
           </div>
         </div>
       </div>
 
-      {/* 3. RECENT ACTIVITY (Last 5 completed tasks or quizzes with respective timestamps) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-5 shadow-lg">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+      {/* 3. RECENT ACTIVITY */}
+      <div className="bg-white border border-[#E2E8F0] rounded-3xl p-6 sm:p-8 space-y-5 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 shadow-inner">
+            <div className="w-10 h-10 rounded-2xl bg-[#EBF3F5] border border-teal-200 flex items-center justify-center text-teal-700 shrink-0">
               <History className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-xl font-black text-white tracking-tight">Recent Activity</h2>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono">
+                <h2 className="text-xl font-bold text-slate-900 tracking-tight">Recent Activity</h2>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 font-mono">
                   Last 5 Completed
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-600 mt-0.5 font-medium">
                 The last 5 tasks or quizzes you completed with verified completion timestamps, scores, and mastery statuses.
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-emerald-400 shadow-xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#FDFBF7] border border-slate-300 text-[11px] font-mono font-bold text-emerald-800 shadow-xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
               <span>Live Synced Activity</span>
             </div>
           </div>
         </div>
 
         {recentActivities.length === 0 ? (
-          <div className="text-center py-10 px-4 bg-slate-950/50 rounded-2xl border border-slate-800/80 space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 mx-auto">
+          <div className="text-center py-10 px-4 bg-[#FDFBF7] rounded-2xl border border-slate-200 space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-white border border-slate-300 flex items-center justify-center text-slate-400 mx-auto">
               <Clock className="w-6 h-6" />
             </div>
             <div className="space-y-1">
-              <h3 className="text-sm font-bold text-white">No Completed Activities Recorded Yet</h3>
-              <p className="text-xs text-slate-400 max-w-md mx-auto">
+              <h3 className="text-sm font-bold text-slate-900">No Completed Activities Recorded Yet</h3>
+              <p className="text-xs text-slate-600 max-w-md mx-auto font-medium">
                 Once you complete your assigned class homework, review lesson slides, or take 10-question practice quizzes, your 5 most recent completions will appear here with exact timestamps.
               </p>
             </div>
@@ -358,7 +355,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
               {onNavigateToQuizzes && (
                 <button
                   onClick={() => onNavigateToQuizzes()}
-                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-xs"
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
                 >
                   <Award className="w-3.5 h-3.5" />
                   <span>Take a Practice Quiz</span>
@@ -367,9 +364,9 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
               {onNavigateToLessons && (
                 <button
                   onClick={() => onNavigateToLessons()}
-                  className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition flex items-center gap-1.5 border border-slate-700"
+                  className="px-3.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-900 font-bold text-xs transition flex items-center gap-1.5 border-2 border-black cursor-pointer shadow-xs active:scale-95"
                 >
-                  <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                  <BookOpen className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Browse Lesson Slides</span>
                 </button>
               )}
@@ -385,20 +382,20 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
               return (
                 <div
                   key={act.id || idx}
-                  className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 hover:border-slate-700 transition flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs group"
+                  className="p-4 rounded-2xl bg-[#FDFBF7] border border-slate-200 hover:border-slate-300 transition flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs group"
                 >
                   {/* Left: Indicator, Title, Topic & Subject Tags */}
                   <div className="flex items-start sm:items-center gap-3.5 min-w-0">
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 text-[11px] font-mono font-bold text-slate-400 flex items-center justify-center">
+                      <span className="w-6 h-6 rounded-lg bg-white border border-slate-300 text-[11px] font-mono font-bold text-slate-700 flex items-center justify-center">
                         #{idx + 1}
                       </span>
                       <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
                         isTask 
-                          ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                           : isSubtopicQuiz
-                            ? 'bg-sky-500/15 text-sky-400 border-sky-500/30'
-                            : 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+                            ? 'bg-sky-50 text-sky-800 border-sky-300'
+                            : 'bg-purple-50 text-purple-800 border-purple-300'
                       }`}>
                         {isTask && <ClipboardCheck className="w-4 h-4" />}
                         {isSubtopicQuiz && <Award className="w-4 h-4" />}
@@ -410,10 +407,10 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
                       <div className="flex flex-wrap items-center gap-2">
                         <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border ${
                           isTask 
-                            ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25'
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                             : isSubtopicQuiz
-                              ? 'bg-sky-500/10 text-sky-300 border-sky-500/25'
-                              : 'bg-purple-500/10 text-purple-300 border-purple-500/25'
+                              ? 'bg-sky-50 text-sky-800 border-sky-300'
+                              : 'bg-purple-50 text-purple-800 border-purple-300'
                         }`}>
                           {isTask ? 'Class Task' : isSubtopicQuiz ? '10-Q Knowledge Check' : 'Subject Practice Quiz'}
                         </span>
@@ -421,22 +418,22 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
                         {act.code && (
                           <span className={`px-2 py-0.2 rounded-md font-mono text-[11px] font-bold border ${
                             act.subject === 'biology' 
-                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                               : act.subject === 'chemistry'
-                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                                : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
+                                ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                : 'bg-sky-50 text-sky-800 border-sky-300'
                           }`}>
                             {act.code}
                           </span>
                         )}
 
-                        <span className="text-[11px] text-slate-500 hidden sm:inline">•</span>
-                        <span className="text-[11px] text-slate-400 truncate hidden sm:inline">
+                        <span className="text-[11px] text-slate-400 hidden sm:inline">•</span>
+                        <span className="text-[11px] text-slate-600 truncate hidden sm:inline font-medium">
                           {act.subtitle || 'Completed Activity'}
                         </span>
                       </div>
 
-                      <h4 className="text-sm font-bold text-white tracking-tight truncate group-hover:text-emerald-300 transition">
+                      <h4 className="text-sm font-bold text-slate-900 tracking-tight truncate group-hover:text-emerald-700 transition">
                         {act.title}
                       </h4>
                     </div>
@@ -448,10 +445,10 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
                     {act.score !== undefined && (
                       <div className={`px-2.5 py-1 rounded-xl border text-xs font-mono font-bold flex items-center gap-1.5 ${
                         (act.percentage !== undefined ? act.percentage >= 80 : act.score >= 8)
-                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                           : (act.percentage !== undefined ? act.percentage >= 50 : act.score >= 5)
-                            ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
-                            : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                            ? 'bg-amber-50 text-amber-800 border-amber-300'
+                            : 'bg-rose-50 text-rose-800 border-rose-300'
                       }`}>
                         <Award className="w-3.5 h-3.5" />
                         <span>
@@ -465,33 +462,33 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
                     {act.trafficLight && (
                       <div 
                         className={`w-3.5 h-3.5 rounded-full shadow-xs ${
-                          act.trafficLight === 'green' ? 'bg-emerald-400 shadow-emerald-500/40' :
-                          act.trafficLight === 'orange' ? 'bg-amber-400 shadow-amber-500/40' : 'bg-rose-500 shadow-rose-500/40'
+                          act.trafficLight === 'green' ? 'bg-emerald-500' :
+                          act.trafficLight === 'orange' ? 'bg-amber-500' : 'bg-rose-500'
                         }`}
                         title={`Traffic light status: ${act.trafficLight}`}
                       />
                     )}
 
                     {/* Auto-Verified Complete Badge */}
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                       <span className="hidden sm:inline">Completed</span>
                     </span>
                   </div>
 
                   {/* Right: Respective Timestamps & Navigation Link */}
-                  <div className="flex items-center justify-between md:justify-end gap-3 pt-2 md:pt-0 border-t md:border-t-0 border-slate-800/80 shrink-0">
+                  <div className="flex items-center justify-between md:justify-end gap-3 pt-2 md:pt-0 border-t md:border-t-0 border-slate-200 shrink-0">
                     <div 
                       className="text-left md:text-right space-y-0.5 cursor-help"
                       title={`Completed on: ${getActivityExactTooltip(act.completedAt)}`}
                     >
-                      <div className="flex items-center md:justify-end gap-1.5 text-xs font-mono font-bold text-slate-200">
-                        <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <div className="flex items-center md:justify-end gap-1.5 text-xs font-mono font-bold text-slate-800">
+                        <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                         <span>{formatActivityTimestamp(act.completedAt)}</span>
                       </div>
                       <div className="flex items-center md:justify-end gap-1.5 text-[10px]">
-                        <span className="text-slate-400">Timestamp:</span>
-                        <span className="px-2 py-0.2 rounded-full font-semibold bg-slate-800 text-emerald-300 border border-slate-700">
+                        <span className="text-slate-500">Timestamp:</span>
+                        <span className="px-2 py-0.2 rounded-full font-bold bg-white text-slate-700 border border-slate-300">
                           {getActivityRelativeTime(act.completedAt)}
                         </span>
                       </div>
@@ -501,11 +498,11 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
                     {act.code && onNavigateToLessons && (
                       <button
                         onClick={() => onNavigateToLessons(act.code)}
-                        className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition flex items-center gap-1 border border-slate-700 shrink-0"
+                        className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-900 border-2 border-black text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow-xs active:scale-95"
                         title={`Review ${act.code} lesson slides`}
                       >
                         <span>Review</span>
-                        <ArrowRight className="w-3 h-3 text-emerald-400" />
+                        <ArrowRight className="w-3 h-3 text-emerald-600" />
                       </button>
                     )}
                   </div>
@@ -518,7 +515,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
 
       {/* 4. FEATURED MEDAL SPOTLIGHT */}
       {featuredBadge && (
-        <div className="bg-gradient-to-r from-amber-950/30 via-slate-900 to-indigo-950/30 border border-amber-500/30 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-5 shadow-lg">
+        <div className="bg-[#FDFBF7] border border-amber-300 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-5 shadow-xs text-slate-800">
           <div className="flex items-center gap-4">
             <div className="shrink-0">
               <VirtualMedalBadge
@@ -530,37 +527,37 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 flex items-center gap-1">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-300 text-slate-950 flex items-center gap-1 shadow-xs border border-amber-400">
                   <Star className="w-3 h-3 fill-slate-950" />
                   <span>Featured Medal</span>
                 </span>
-                <span className="text-xs font-mono text-amber-400 font-bold">+{featuredBadge.xpReward} XP</span>
+                <span className="text-xs font-mono text-amber-800 font-bold">+{featuredBadge.xpReward} XP</span>
               </div>
-              <h3 className="text-lg font-bold text-white mt-1">{featuredBadge.title}</h3>
-              <p className="text-xs text-slate-300 max-w-lg mt-0.5">{featuredBadge.description}</p>
+              <h3 className="text-lg font-bold text-slate-900 mt-1">{featuredBadge.title}</h3>
+              <p className="text-xs text-slate-600 max-w-lg mt-0.5 font-medium">{featuredBadge.description}</p>
               {featuredBadge.unlockedAt && (
-                <p className="text-[11px] text-slate-400 mt-1 font-mono">
+                <p className="text-[11px] text-slate-500 mt-1 font-mono font-medium">
                   Earned on {new Date(featuredBadge.unlockedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
                 </p>
               )}
             </div>
           </div>
 
-          <div className="text-xs text-slate-400 text-center sm:text-right shrink-0">
-            <p className="text-[11px] text-slate-400">Displayed on class leaderboard</p>
-            <p className="text-[10px] text-slate-500">Click any medal below to change featured medal</p>
+          <div className="text-xs text-slate-500 text-center sm:text-right shrink-0 font-medium">
+            <p className="text-[11px] text-slate-600">Displayed on class leaderboard</p>
+            <p className="text-[10px] text-slate-400">Click any medal below to change featured medal</p>
           </div>
         </div>
       )}
 
       {/* 4. DYNAMIC EARNED VIRTUAL MEDALS BY ACHIEVEMENT */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-5 shadow-lg">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+      <div className="bg-white border border-[#E2E8F0] rounded-3xl p-6 sm:p-8 space-y-5 shadow-xs text-slate-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
           <div className="flex items-center gap-2.5">
-            <Award className="w-6 h-6 text-amber-400" />
+            <Award className="w-6 h-6 text-amber-600" />
             <div>
-              <h2 className="text-xl font-black text-white tracking-tight">Earned Virtual Badges & Medals</h2>
-              <p className="text-xs text-slate-400">
+              <h2 className="text-xl font-bold text-slate-900 tracking-tight">Earned Virtual Badges & Medals</h2>
+              <p className="text-xs text-slate-600 font-medium">
                 Dynamically tracked achievements for revision streaks, topic module completions, and quiz performance.
               </p>
             </div>
@@ -600,33 +597,33 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
       </div>
 
       {/* 5. MEDAL TROPHY CABINET & FILTER CONTROLS */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
+      <div className="bg-white border border-[#E2E8F0] rounded-3xl p-6 sm:p-8 space-y-6 shadow-xs text-slate-800">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2.5">
-              <Trophy className="w-6 h-6 text-amber-400" />
-              <h2 className="text-xl font-black text-white tracking-tight">Virtual Medals Showcase</h2>
+              <Trophy className="w-6 h-6 text-amber-600" />
+              <h2 className="text-xl font-bold text-slate-900 tracking-tight">Virtual Medals Showcase</h2>
             </div>
-            <p className="text-xs text-slate-400 mt-1">
+            <p className="text-xs text-slate-600 mt-1 font-medium">
               Virtual medals awarded for study streaks, completing entire topic modules, and scoring highly on Cambridge quizzes.
             </p>
           </div>
 
           {/* Search bar */}
           <div className="relative w-full md:w-64">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchBadgeQuery}
               onChange={e => setSearchBadgeQuery(e.target.value)}
               placeholder="Search medals..."
-              className="w-full pl-9 pr-3 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-full pl-9 pr-3 py-2 bg-[#FDFBF7] border-2 border-black rounded-xl text-xs font-bold text-slate-900 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
         </div>
 
         {/* Filter Tabs */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
           {/* Category Tabs */}
           <div className="flex flex-wrap items-center gap-1.5">
             {[
@@ -639,10 +636,10 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
               <button
                 key={tab.id}
                 onClick={() => setSelectedCategory(tab.id as any)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
                   selectedCategory === tab.id
                     ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800'
+                    : 'bg-[#FDFBF7] hover:bg-slate-100 text-slate-700 border border-slate-300'
                 }`}
               >
                 {tab.label}
@@ -652,12 +649,12 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
 
           {/* Status & Subject Filters */}
           <div className="flex items-center gap-2">
-            {/* Subject Filter (for topic modules) */}
+            {/* Subject Filter */}
             {selectedCategory === 'topic_module' && (
               <select
                 value={selectedSubject}
                 onChange={e => setSelectedSubject(e.target.value as any)}
-                className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300 font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                className="bg-[#FDFBF7] border-2 border-black rounded-xl px-2.5 py-1.5 text-xs text-slate-900 font-bold focus:outline-none cursor-pointer"
               >
                 <option value="all">All Subjects</option>
                 <option value="biology">Biology (B1-B16)</option>
@@ -670,7 +667,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
             <select
               value={filterStatus}
               onChange={e => setFilterStatus(e.target.value as any)}
-              className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300 font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className="bg-[#FDFBF7] border-2 border-black rounded-xl px-2.5 py-1.5 text-xs text-slate-900 font-bold focus:outline-none cursor-pointer"
             >
               <option value="all">All Status ({allBadges.length})</option>
               <option value="unlocked">Earned Medals ({unlockedBadges.length})</option>
@@ -681,10 +678,10 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
 
         {/* Medals Grid */}
         {filteredBadges.length === 0 ? (
-          <div className="text-center py-12 bg-slate-950/40 rounded-2xl border border-slate-800/60 p-6 space-y-2">
-            <Award className="w-10 h-10 text-slate-600 mx-auto" />
-            <h4 className="text-sm font-bold text-white">No medals match your filter</h4>
-            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+          <div className="text-center py-12 bg-[#FDFBF7] rounded-2xl border border-slate-200 p-6 space-y-2">
+            <Award className="w-10 h-10 text-slate-400 mx-auto" />
+            <h4 className="text-sm font-bold text-slate-900">No medals match your filter</h4>
+            <p className="text-xs text-slate-600 max-w-sm mx-auto font-medium">
               Try adjusting your category, subject, or search term to see other medals in your showcase.
             </p>
           </div>
@@ -706,11 +703,11 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
 
       {/* 5. MEDAL DETAIL POPUP MODAL */}
       {selectedBadgeForModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl relative animate-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border-2 border-black rounded-3xl max-w-md w-full p-6 text-center space-y-4 shadow-xl relative animate-in zoom-in-95 duration-150 text-slate-800">
             <button
               onClick={() => setSelectedBadgeForModal(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white text-lg font-bold p-1"
+              className="absolute top-4 right-4 text-slate-500 hover:text-slate-800 text-lg font-bold p-1 cursor-pointer"
             >
               ✕
             </button>
@@ -725,46 +722,46 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
             </div>
 
             <div className="space-y-1">
-              <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+              <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
                 selectedBadgeForModal.rarity === 'diamond' 
-                  ? 'bg-cyan-950 text-cyan-300 border-cyan-500/40' 
+                  ? 'bg-teal-50 text-teal-800 border-teal-300' 
                   : selectedBadgeForModal.rarity === 'gold' 
-                  ? 'bg-amber-950 text-amber-300 border-amber-500/40' 
+                  ? 'bg-amber-50 text-amber-800 border-amber-300' 
                   : selectedBadgeForModal.rarity === 'silver'
-                  ? 'bg-slate-800 text-slate-200 border-slate-500/40'
-                  : 'bg-amber-950 text-amber-400 border-amber-800'
+                  ? 'bg-slate-100 text-slate-800 border-slate-300'
+                  : 'bg-amber-100 text-amber-900 border-amber-400'
               }`}>
                 {selectedBadgeForModal.rarity} Medal
               </span>
-              <h3 className="text-xl font-bold text-white pt-1">{selectedBadgeForModal.title}</h3>
-              <p className="text-xs text-slate-300 max-w-xs mx-auto leading-relaxed">
+              <h3 className="text-xl font-bold text-slate-900 pt-1">{selectedBadgeForModal.title}</h3>
+              <p className="text-xs text-slate-600 max-w-xs mx-auto leading-relaxed font-medium">
                 {selectedBadgeForModal.description}
               </p>
             </div>
 
-            <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3 text-xs space-y-2 text-left">
+            <div className="bg-[#FDFBF7] border border-slate-200 rounded-2xl p-3 text-xs space-y-2 text-left">
               <div className="flex justify-between items-center">
-                <span className="text-slate-400">XP Reward:</span>
-                <span className="font-mono font-bold text-amber-400">+{selectedBadgeForModal.xpReward} XP</span>
+                <span className="text-slate-500 font-medium">XP Reward:</span>
+                <span className="font-mono font-bold text-amber-800">+{selectedBadgeForModal.xpReward} XP</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-400">Status:</span>
+                <span className="text-slate-500 font-medium">Status:</span>
                 {selectedBadgeForModal.unlockedAt ? (
-                  <span className="text-emerald-400 font-bold flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span className="text-emerald-800 font-bold flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                     <span>Unlocked on {new Date(selectedBadgeForModal.unlockedAt).toLocaleDateString()}</span>
                   </span>
                 ) : (
-                  <span className="text-amber-400 font-medium">
+                  <span className="text-amber-800 font-bold">
                     {selectedBadgeForModal.progress?.label || 'In progress'}
                   </span>
                 )}
               </div>
               {!selectedBadgeForModal.unlockedAt && selectedBadgeForModal.progress && (
                 <div className="pt-1">
-                  <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                  <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
                     <div 
-                      className="bg-emerald-500 h-full rounded-full"
+                      className="bg-emerald-600 h-full rounded-full"
                       style={{ 
                         width: `${Math.min(100, Math.round((selectedBadgeForModal.progress.current / (selectedBadgeForModal.progress.max || 1)) * 100))}%` 
                       }}
@@ -781,7 +778,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
                     handleSetFeaturedBadge(selectedBadgeForModal.id);
                     setSelectedBadgeForModal(null);
                   }}
-                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-md shadow-amber-900/30"
+                  className="w-full py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-xs border border-amber-500 cursor-pointer active:scale-95"
                 >
                   <Star className="w-4 h-4 fill-slate-950" />
                   <span>Set as Featured Medal</span>
@@ -793,7 +790,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
                       onNavigateToLessons(selectedBadgeForModal.topicCode);
                       setSelectedBadgeForModal(null);
                     }}
-                    className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center justify-center gap-1.5"
+                    className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
                   >
                     <BookOpen className="w-4 h-4" />
                     <span>Study Module {selectedBadgeForModal.topicCode} Slides</span>
@@ -802,7 +799,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
               )}
               <button
                 onClick={() => setSelectedBadgeForModal(null)}
-                className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs"
+                className="w-full py-2 rounded-xl bg-white hover:bg-slate-50 border-2 border-black text-slate-800 font-bold text-xs transition cursor-pointer shadow-xs active:scale-95"
               >
                 Close
               </button>

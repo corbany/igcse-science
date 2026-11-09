@@ -19,12 +19,19 @@ import {
   Table as TableIcon,
   Eye,
   AlertCircle,
-  GraduationCap
+  GraduationCap,
+  Download,
+  FolderOpen
 } from 'lucide-react';
 import { PastExamPaper, ExamQuestionItem, ScienceSubject, ExamAnswerAnalysis } from '../types';
 import { pastExamPapers } from '../data/pastPapersData';
 import { ExamPaperFigureScreenshot } from './ExamPaperFigureScreenshot';
-import { getCachedDrivePdfs, DriveSyncedPdfItem, TARGET_DRIVE_FOLDER_URL } from '../services/googleDriveService';
+import { getCachedDrivePdfs, DriveSyncedPdfItem } from '../services/googleDriveService';
+import { 
+  PAST_PAPERS_DRIVE_FOLDER_URL, 
+  DRIVE_PAST_PAPERS_CATALOG, 
+  DriveExamPaperItem 
+} from '../data/drivePastPapersRegistry';
 
 interface PastExamsVaultProps {
   isInstructor?: boolean;
@@ -55,7 +62,7 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
   const [isAnalyzing, setIsAnalyzing] = useState<Record<string, boolean>>({});
   const [analysisErrors, setAnalysisErrors] = useState<Record<string, string>>({});
 
-  // Candidate Details for authentic paper feel
+  // Candidate Details
   const [candidateName, setCandidateName] = useState('Alex Taylor');
   const [candidateNumber, setCandidateNumber] = useState('0042');
   const [centreNumber, setCentreNumber] = useState('GB0653');
@@ -66,37 +73,58 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
   // Full paper summary modal
   const [showScoreModal, setShowScoreModal] = useState(false);
 
+  // Google Drive 50+ papers vault modal
+  const [showDriveVaultModal, setShowDriveVaultModal] = useState(false);
+  const [driveSearch, setDriveSearch] = useState('');
+  const [driveTierFilter, setDriveTierFilter] = useState<'all' | 'Core' | 'Extended' | 'Alternative to Practical'>('all');
+  const [driveKindFilter, setDriveKindFilter] = useState<'all' | 'Question Paper' | 'Mark Scheme'>('all');
+
+  const filteredDriveCatalog = useMemo(() => {
+    return DRIVE_PAST_PAPERS_CATALOG.filter(item => {
+      if (driveTierFilter !== 'all' && item.tier !== driveTierFilter) return false;
+      if (driveKindFilter !== 'all' && item.kind !== driveKindFilter) return false;
+      if (driveSearch.trim()) {
+        const q = driveSearch.toLowerCase();
+        return item.name.toLowerCase().includes(q) || 
+               item.code.toLowerCase().includes(q) || 
+               item.series.toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [driveSearch, driveTierFilter, driveKindFilter]);
+
   // Active exam paper
   const activePaper = useMemo(() => {
     return pastExamPapers.find(p => p.id === selectedPaperId) || pastExamPapers[0];
   }, [selectedPaperId]);
 
-  // Persist answers
-  useEffect(() => {
-    try {
-      localStorage.setItem(`${STORAGE_PREFIX}global`, JSON.stringify(userAnswers));
-    } catch (e) {
-      console.error('Failed to save answers', e);
-    }
-  }, [userAnswers]);
-
+  // Filter questions by subject
   const filteredQuestions = useMemo(() => {
     if (!activePaper) return [];
     if (selectedSubjectFilter === 'all') return activePaper.questions;
     return activePaper.questions.filter(q => q.subject === selectedSubjectFilter);
   }, [activePaper, selectedSubjectFilter]);
 
+  // Persist answers
+  useEffect(() => {
+    try {
+      localStorage.setItem(`${STORAGE_PREFIX}global`, JSON.stringify(userAnswers));
+    } catch (e) {
+      console.warn('Could not save answers to localStorage', e);
+    }
+  }, [userAnswers]);
+
+  const handleSelectOption = (questionId: string, optKey: string) => {
+    setUserAnswers(prev => ({
+      ...prev,
+      [questionId]: optKey
+    }));
+  };
+
   const handleTextAnswerChange = (questionId: string, text: string) => {
     setUserAnswers(prev => ({
       ...prev,
       [questionId]: text
-    }));
-  };
-
-  const handleSelectOption = (questionId: string, optionKey: string) => {
-    setUserAnswers(prev => ({
-      ...prev,
-      [questionId]: optionKey
     }));
   };
 
@@ -107,58 +135,55 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
     }));
   };
 
-  // Trigger AI Analysis against the official Cambridge Mark Scheme
-  const handleAnalyzeAnswer = async (question: ExamQuestionItem) => {
-    const studentAnswer = userAnswers[question.id];
-    if (!studentAnswer || !studentAnswer.trim()) {
-      alert('Please write an answer before requesting an AI Mark Scheme analysis.');
-      return;
-    }
+  const handleClearAnswers = () => {
+    if (!confirm('Are you sure you want to clear your drafted answers for this paper?')) return;
+    setUserAnswers({});
+    setRevealedSolutions({});
+    setAnalyses({});
+  };
 
-    setIsAnalyzing(prev => ({ ...prev, [question.id]: true }));
-    setAnalysisErrors(prev => ({ ...prev, [question.id]: '' }));
+  // AI Examiner Evaluation API call
+  const handleAnalyzeAnswer = async (q: ExamQuestionItem) => {
+    const studentAnswer = userAnswers[q.id];
+    if (!studentAnswer || !studentAnswer.trim()) return;
+
+    setIsAnalyzing(prev => ({ ...prev, [q.id]: true }));
+    setAnalysisErrors(prev => ({ ...prev, [q.id]: '' }));
 
     try {
-      const response = await fetch('/api/exam-analysis', {
+      const response = await fetch('/api/evaluate-answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          questionId: question.id,
-          fullLabel: question.fullLabel || `${question.number}`,
-          questionText: question.questionText,
-          marks: question.marks,
-          correctAnswer: question.correctAnswer,
-          markSchemeBreakdown: question.markSchemeBreakdown || [],
-          guidanceNotes: question.guidanceNotes || [],
-          examinerComment: question.examinerComment || '',
-          studentAnswer: studentAnswer.trim(),
-          paperCode: activePaper.code
+          questionText: q.questionText,
+          correctAnswer: q.correctAnswer,
+          maxMarks: q.marks,
+          markSchemeBreakdown: q.markSchemeBreakdown || [],
+          guidanceNotes: q.guidanceNotes || [],
+          candidateAnswer: studentAnswer,
+          subject: q.subject,
+          syllabusCode: q.syllabusCode
         })
       });
 
       if (!response.ok) {
-        throw new Error('Failed to evaluate answer. Please try again.');
+        throw new Error(`Evaluation request failed: ${response.statusText}`);
       }
 
-      const data = await response.json();
-      if (data.analysis) {
-        setAnalyses(prev => ({
-          ...prev,
-          [question.id]: data.analysis
-        }));
-      }
+      const result: ExamAnswerAnalysis = await response.json();
+      setAnalyses(prev => ({ ...prev, [q.id]: result }));
     } catch (err: any) {
-      console.error('Error analyzing answer:', err);
+      console.error('Answer evaluation failed:', err);
       setAnalysisErrors(prev => ({
         ...prev,
-        [question.id]: err.message || 'Error occurred while contacting Cambridge AI examiner.'
+        [q.id]: err.message || 'Unable to evaluate answer right now. Please try again.'
       }));
     } finally {
-      setIsAnalyzing(prev => ({ ...prev, [question.id]: false }));
+      setIsAnalyzing(prev => ({ ...prev, [q.id]: false }));
     }
   };
 
-  // Calculate paper totals and grades
+  // Calculate paper statistics
   const paperStats = useMemo(() => {
     if (!activePaper) return { totalEarned: 0, totalPossible: 0, percentage: 0, grade: 'U' };
 
@@ -167,8 +192,10 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
 
     activePaper.questions.forEach(q => {
       totalPossible += q.marks;
+      const userAns = userAnswers[q.id];
+
       if (q.questionType === 'mcq') {
-        if (userAnswers[q.id] === q.correctAnswer) {
+        if (userAns && userAns.toUpperCase() === q.correctAnswer.toUpperCase()) {
           totalEarned += q.marks;
         }
       } else {
@@ -180,8 +207,7 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
     });
 
     const percentage = totalPossible > 0 ? Math.round((totalEarned / totalPossible) * 100) : 0;
-    
-    // Determine grade from boundaries
+
     let grade = 'U';
     const bounds = activePaper.gradeBoundaries;
     if (bounds) {
@@ -199,60 +225,65 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
   }, [activePaper, userAnswers, analyses]);
 
   return (
-    <div className="space-y-6">
-      {/* Header Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-5">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-              <FileText className="w-6 h-6" />
-            </div>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-                Cambridge IGCSE 0653 Interactive Exam Vault
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-400">
-                Official past papers with diagrams, candidate typing areas, and AI Mark Scheme Analysis
-              </p>
-            </div>
+    <div className="w-full max-w-5xl mx-auto space-y-6 pb-12 font-sans text-slate-800">
+      
+      {/* Header Card */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-bold px-2 py-0.5 rounded bg-[#EBF3F5] text-slate-800 border border-slate-300">
+              Official Vault
+            </span>
+            <span className="text-xs font-semibold text-slate-600">
+              Cambridge 0653 Past Examinations
+            </span>
           </div>
+          <h1 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
+            <BookOpen className="w-6 h-6 text-slate-700" />
+            <span>Past Exam Papers and Mark Schemes</span>
+          </h1>
+          <p className="text-base text-slate-600 max-w-xl">
+            Core & Extended multiple choice exam papers with published mark schemes and instant question grading.
+          </p>
         </div>
 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2.5">
           <button
             onClick={() => setShowPeriodicTable(true)}
-            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-2 transition"
+            className="px-4 py-2 rounded-lg bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-sm font-bold flex items-center gap-1.5 transition cursor-pointer"
           >
-            <TableIcon className="w-4 h-4 text-sky-400" />
+            <TableIcon className="w-4 h-4 text-slate-700" />
             <span>Periodic Table</span>
           </button>
 
           <button
             onClick={() => setShowScoreModal(true)}
-            className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-2 transition shadow-sm"
+            className="px-4 py-2 rounded-lg bg-[#EBF3F5] hover:bg-[#d8e9ec] text-slate-800 border border-slate-400 font-bold text-sm flex items-center gap-1.5 transition cursor-pointer"
           >
-            <GraduationCap className="w-4 h-4" />
-            <span>Paper Grade ({paperStats.totalEarned}/{paperStats.totalPossible})</span>
+            <GraduationCap className="w-4 h-4 text-slate-700" />
+            <span>Grade {paperStats.grade} ({paperStats.totalEarned}/{paperStats.totalPossible})</span>
           </button>
         </div>
       </div>
 
-      {/* Paper Selector Pills */}
-      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
+      {/* Paper Selector Tabs */}
+      <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
         {pastExamPapers.map(paper => {
           const isSelected = paper.id === selectedPaperId;
           return (
             <button
               key={paper.id}
               onClick={() => setSelectedPaperId(paper.id)}
-              className={`px-4 py-2.5 rounded-xl text-xs font-semibold whitespace-nowrap transition border shrink-0 flex items-center gap-2 ${
+              className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition border shrink-0 flex items-center gap-2 cursor-pointer ${
                 isSelected
-                  ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-950/40'
-                  : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'
+                  ? 'bg-slate-800 text-white border-slate-800'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
               }`}
             >
-              <span className="font-mono uppercase px-1.5 py-0.5 rounded bg-black/20 text-[10px]">
+              <span className={`font-mono text-xs px-1.5 py-0.5 rounded ${
+                isSelected ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-800 border border-slate-300'
+              }`}>
                 {paper.code}
               </span>
               <span>{paper.paperNumber} ({paper.series})</span>
@@ -261,84 +292,88 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
         })}
       </div>
 
-      {/* Examination Paper Figures Info Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-900/90 border border-slate-800 rounded-xl px-4 py-2.5 text-xs">
-        <div className="flex items-center gap-2 text-slate-300">
-          <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
+      {/* Drive Past Papers Bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl p-4 text-sm text-slate-700 shadow-xs">
+        <div className="flex items-center gap-2 text-slate-600">
+          <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
           <span>
-            <strong className="text-white">Official Examination Paper Figures:</strong> All official paper figures (apparatus, circuit schematics, meters, graphs, and anatomical diagrams) are automatically inserted into the corresponding questions. Click any figure to enlarge to full screen.
+            <strong className="text-slate-800">Authentic Cambridge Papers:</strong> Interactive Core (Paper 1) and Extended (Paper 2) multiple-choice papers with official figures and mark schemes.
           </span>
         </div>
-        {isInstructor && (
-          <div className="flex items-center gap-3 shrink-0">
-            <a
-              href={TARGET_DRIVE_FOLDER_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 font-semibold transition"
-              title="Open Google Drive folder in a new tab"
-            >
-              <span>Drive Folder (1NUzEO8F)</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-          </div>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => setShowDriveVaultModal(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#EBF3F5] hover:bg-[#d8e9ec] border border-slate-400 text-slate-800 text-xs font-bold transition cursor-pointer"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>50+ Drive Papers</span>
+          </button>
+          <a
+            href={PAST_PAPERS_DRIVE_FOLDER_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition"
+          >
+            <span>Drive Folder</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        </div>
       </div>
 
       {/* Active Paper Document View */}
       {activePaper && (
         <div className="space-y-6">
-          {/* Authentic Cambridge Exam Paper Header Sheet */}
-          <div className="bg-slate-900 border-2 border-slate-700/80 rounded-2xl p-6 space-y-5 shadow-lg">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 gap-4">
+          {/* Header Sheet */}
+          <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 pb-4 gap-4">
               <div>
-                <span className="text-[11px] font-mono uppercase tracking-widest text-emerald-400 font-bold block">
+                <span className="text-xs font-mono text-slate-500 font-bold block">
                   Cambridge Assessment International Education
                 </span>
-                <h2 className="text-lg sm:text-xl font-bold text-white mt-1">
-                  Cambridge IGCSE™ Combined Science {activePaper.code}
+                <h2 className="text-xl font-bold text-slate-800 mt-1">
+                  Cambridge IGCSE Combined Science {activePaper.code}
                 </h2>
-                <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-slate-400">
-                  <span className="font-medium text-slate-300">{activePaper.title}</span>
+                <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-slate-600">
+                  <strong className="text-slate-800">{activePaper.title}</strong>
                   <span>•</span>
                   <span>{activePaper.series}</span>
                   <span>•</span>
-                  <span className="flex items-center gap-1 text-sky-400">
+                  <span className="flex items-center gap-1 font-bold text-slate-700">
                     <Clock className="w-3.5 h-3.5" />
                     {activePaper.duration}
                   </span>
                   <span>•</span>
-                  <span className="font-semibold text-amber-400">
+                  <span className="font-semibold text-slate-600">
                     [Total Marks: {activePaper.totalMarks}]
                   </span>
                 </div>
               </div>
 
               {/* Candidate Info Input Box */}
-              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs space-y-2 shrink-0 sm:w-72">
+              <div className="bg-[#FDFBF7] border border-slate-300 rounded-lg p-3 text-xs space-y-2 shrink-0 sm:w-72">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-slate-400">Candidate:</span>
+                  <span className="text-slate-600 font-bold">Candidate:</span>
                   <input
                     type="text"
                     value={candidateName}
                     onChange={e => setCandidateName(e.target.value)}
-                    className="bg-slate-900 border border-slate-700 rounded px-2 py-0.5 text-white font-medium text-right text-xs focus:outline-none focus:border-emerald-500"
+                    className="bg-white border border-black rounded-md px-2 py-0.5 text-slate-800 font-bold text-right text-xs focus:outline-none"
                   />
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-slate-400">Centre / Number:</span>
-                  <div className="flex gap-1">
+                  <span className="text-slate-600 font-bold">Centre / No:</span>
+                  <div className="flex gap-1.5">
                     <input
                       type="text"
                       value={centreNumber}
                       onChange={e => setCentreNumber(e.target.value)}
-                      className="w-16 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-white font-mono text-center text-xs focus:outline-none focus:border-emerald-500"
+                      className="w-16 bg-white border border-black rounded-md px-1.5 py-0.5 text-slate-800 font-mono font-bold text-center text-xs focus:outline-none"
                     />
                     <input
                       type="text"
                       value={candidateNumber}
                       onChange={e => setCandidateNumber(e.target.value)}
-                      className="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-white font-mono text-center text-xs focus:outline-none focus:border-emerald-500"
+                      className="w-16 bg-white border border-black rounded-md px-1.5 py-0.5 text-slate-800 font-mono font-bold text-center text-xs focus:outline-none"
                     />
                   </div>
                 </div>
@@ -347,11 +382,11 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
 
             {/* Official Instructions */}
             {activePaper.examinerNotes && (
-              <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-4 text-xs space-y-2">
-                <span className="font-bold text-slate-300 uppercase tracking-wider block text-[11px]">
+              <div className="bg-[#FDFBF7] border border-slate-200 rounded-lg p-4 text-xs space-y-1.5">
+                <strong className="text-slate-800 block text-sm">
                   Official Candidate Instructions:
-                </span>
-                <ul className="list-disc pl-5 text-slate-400 space-y-1">
+                </strong>
+                <ul className="list-disc pl-5 text-slate-700 space-y-1">
                   {activePaper.examinerNotes.map((note, i) => (
                     <li key={i}>{note}</li>
                   ))}
@@ -360,17 +395,17 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
             )}
 
             {/* Subject Filters within Paper */}
-            <div className="flex items-center justify-between pt-2">
+            <div className="flex items-center justify-between pt-1">
               <div className="flex items-center gap-1.5 text-xs">
-                <span className="text-slate-400 mr-1 font-medium">Filter Subject:</span>
+                <span className="text-slate-600 font-bold mr-1">Filter Subject:</span>
                 {(['all', 'biology', 'chemistry', 'physics'] as const).map(subj => (
                   <button
                     key={subj}
                     onClick={() => setSelectedSubjectFilter(subj)}
-                    className={`px-3 py-1 rounded-lg capitalize font-medium transition ${
+                    className={`px-3 py-1 rounded-md capitalize font-bold transition cursor-pointer border ${
                       selectedSubjectFilter === subj
-                        ? 'bg-slate-700 text-white font-bold'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                        ? 'bg-slate-800 text-white border-slate-800'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
                     }`}
                   >
                     {subj}
@@ -378,14 +413,14 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
                 ))}
               </div>
 
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-slate-500 font-semibold">
                 Showing {filteredQuestions.length} of {activePaper.questions.length} questions
               </span>
             </div>
           </div>
 
           {/* Question List */}
-          <div className="space-y-8">
+          <div className="space-y-6">
             {filteredQuestions.map(q => {
               const studentAnswer = userAnswers[q.id] || '';
               const isRevealed = revealedSolutions[q.id];
@@ -397,30 +432,30 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
               return (
                 <div 
                   key={q.id}
-                  className="bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-6 space-y-5 transition shadow-sm"
+                  className="bg-white border border-slate-200 hover:border-slate-400 rounded-xl p-6 space-y-4 transition shadow-xs"
                 >
                   {/* Question Header */}
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                    <div className="flex items-center gap-3">
-                      <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold font-mono text-sm">
-                        {q.fullLabel || q.number}
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-1 rounded-md bg-[#EBF3F5] border border-slate-300 text-slate-800 font-bold font-mono text-sm">
+                        Question {q.fullLabel || q.number}
                       </span>
-                      <span className="text-xs font-mono font-medium px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 uppercase">
+                      <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-300 uppercase">
                         {q.syllabusCode} • {q.subject}
                       </span>
                     </div>
 
-                    <span className="text-xs font-bold text-amber-400 font-mono bg-amber-500/10 px-2.5 py-1 rounded-md border border-amber-500/20">
+                    <span className="text-xs font-bold text-slate-800 font-mono bg-slate-100 px-2.5 py-1 rounded-md border border-slate-300">
                       [{q.marks} Mark{q.marks === 1 ? '' : 's'}]
                     </span>
                   </div>
 
                   {/* Question Prompt */}
-                  <div className="text-sm sm:text-base font-normal text-slate-100 whitespace-pre-line leading-relaxed">
+                  <div className="text-base font-bold text-slate-800 whitespace-pre-line leading-relaxed">
                     {q.questionText}
                   </div>
 
-                  {/* Examination Paper Figure (Authentic PDF figure representation) */}
+                  {/* Figure Screenshot */}
                   {(q.figureCaption || q.figureScreenshotUrl || q.diagramSvg || q.questionText.includes('Fig.')) ? (
                     <ExamPaperFigureScreenshot 
                       question={q} 
@@ -428,30 +463,30 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
                     />
                   ) : null}
 
-                  {/* Multiple Choice Options (for Paper 1 & 2) */}
+                  {/* Multiple Choice Options */}
                   {isMcq && q.options && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                       {q.options.map(opt => {
                         const isChosen = studentAnswer === opt.key;
                         const isCorrect = isRevealed && opt.key === q.correctAnswer;
                         const isWrong = isRevealed && isChosen && opt.key !== q.correctAnswer;
 
-                        let style = 'bg-slate-950/70 border-slate-800 text-slate-300 hover:bg-slate-800 hover:border-slate-700';
+                        let style = 'bg-[#FDFBF7] border-2 border-black text-slate-800 hover:bg-white';
                         if (isChosen && !isRevealed) {
-                          style = 'bg-indigo-600/20 border-indigo-500 text-white font-semibold ring-1 ring-indigo-500/50';
+                          style = 'bg-[#EBF3F5] border-2 border-slate-800 font-bold text-slate-800';
                         } else if (isCorrect) {
-                          style = 'bg-emerald-950/60 border-emerald-500 text-emerald-200 font-bold ring-1 ring-emerald-500';
+                          style = 'bg-emerald-50 border-2 border-emerald-700 text-emerald-900 font-bold';
                         } else if (isWrong) {
-                          style = 'bg-rose-950/60 border-rose-500 text-rose-200';
+                          style = 'bg-rose-50 border-2 border-rose-700 text-rose-900 font-bold';
                         }
 
                         return (
                           <button
                             key={opt.key}
                             onClick={() => handleSelectOption(q.id, opt.key)}
-                            className={`text-left p-3.5 rounded-xl border text-xs sm:text-sm flex items-start gap-3 transition ${style}`}
+                            className={`text-left p-3.5 rounded-lg border-2 text-sm flex items-start gap-3 transition cursor-pointer ${style}`}
                           >
-                            <span className="font-bold font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 shrink-0">
+                            <span className="font-bold font-mono px-2 py-0.5 rounded bg-white border border-slate-300 shrink-0">
                               {opt.key}
                             </span>
                             <span className="leading-relaxed">{opt.text}</span>
@@ -461,67 +496,65 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
                     </div>
                   )}
 
-                  {/* Interactive Written Answer Area (for Theory & Alternative to Practical) */}
+                  {/* Written Answer Area */}
                   {!isMcq && (
-                    <div className="space-y-3 pt-2">
+                    <div className="space-y-3 pt-1">
                       <div className="flex items-center justify-between text-xs">
-                        <label className="font-semibold text-slate-300 flex items-center gap-1.5">
-                          <span>Candidate Written Response:</span>
+                        <label className="font-bold text-slate-700">
+                          Candidate Written Response:
                         </label>
                         <span className="text-slate-500 font-mono">
                           {studentAnswer.trim() ? studentAnswer.trim().split(/\s+/).length : 0} words
                         </span>
                       </div>
 
-                      <div className="relative">
-                        <textarea
-                          rows={q.marks >= 3 ? 5 : 3}
-                          value={studentAnswer}
-                          onChange={e => handleTextAnswerChange(q.id, e.target.value)}
-                          placeholder={q.inputPlaceholder || "Type your answer here in complete scientific sentences (show calculations, formulas and units where applicable)..."}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40 transition font-sans leading-relaxed"
-                        />
-                      </div>
+                      <textarea
+                        rows={q.marks >= 3 ? 5 : 3}
+                        value={studentAnswer}
+                        onChange={e => handleTextAnswerChange(q.id, e.target.value)}
+                        placeholder={q.inputPlaceholder || "Type your answer here in complete scientific sentences..."}
+                        className="w-full bg-[#FDFBF7] border-2 border-black rounded-lg p-4 text-base text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white transition leading-relaxed"
+                      />
 
-                      {/* AI Examiner Analysis Action Bar */}
+                      {/* Analysis action buttons */}
                       <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => handleAnalyzeAnswer(q)}
                             disabled={analyzing || !studentAnswer.trim()}
-                            className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition ${
+                            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition ${
                               analyzing
-                                ? 'bg-indigo-700 text-white cursor-wait'
+                                ? 'bg-slate-700 text-white cursor-wait'
                                 : studentAnswer.trim()
-                                ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm'
-                                : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50'
+                                ? 'bg-slate-800 hover:bg-slate-700 text-white cursor-pointer'
+                                : 'bg-slate-200 text-slate-400 cursor-not-allowed'
                             }`}
                           >
                             {analyzing ? (
                               <>
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                <span>AI Examiner Evaluating...</span>
+                                <span>Evaluating...</span>
                               </>
                             ) : (
                               <>
-                                <Sparkles className="w-3.5 h-3.5 text-indigo-300" />
-                                <span>AI Mark Scheme Analysis</span>
+                                <Sparkles className="w-3.5 h-3.5" />
+                                <span>Grade Written Answer</span>
                               </>
                             )}
                           </button>
 
                           <button
                             onClick={() => toggleSolution(q.id)}
-                            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-medium flex items-center gap-1.5 transition"
+                            className="px-3 py-2 rounded-lg bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
                           >
-                            <Eye className="w-3.5 h-3.5 text-slate-400" />
-                            <span>{isRevealed ? 'Hide Official Mark Scheme' : 'View Mark Scheme'}</span>
+                            <Eye className="w-3.5 h-3.5 text-slate-600" />
+                            <span>{isRevealed ? 'Hide Mark Scheme' : 'View Mark Scheme'}</span>
                           </button>
                         </div>
 
                         <button
                           onClick={() => onAskAITutor(`Please tutor me on Cambridge question ${q.fullLabel || q.number} (${q.syllabusCode}):\n\n${q.questionText}\n\nCandidate drafted: "${studentAnswer}"`, q.syllabusCode)}
-                          className="text-xs text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1"
+                          className="text-xs text-slate-700 hover:text-black flex items-center gap-1 font-bold cursor-pointer"
                         >
                           <HelpCircle className="w-3.5 h-3.5" />
                           <span>Ask AI Tutor for guidance</span>
@@ -530,79 +563,56 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
 
                       {/* Error Banner */}
                       {analysisError && (
-                        <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+                        <div className="p-3 rounded-lg bg-rose-50 border border-rose-300 text-rose-800 text-xs flex items-center gap-2">
                           <AlertCircle className="w-4 h-4 shrink-0" />
                           <span>{analysisError}</span>
                         </div>
                       )}
 
-                      {/* AI Analysis Feedback Report */}
+                      {/* AI Examiner Analysis Report */}
                       {analysis && (
-                        <div className="mt-4 p-5 rounded-2xl bg-gradient-to-br from-slate-900 to-indigo-950/30 border border-indigo-500/30 text-xs space-y-4">
-                          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-indigo-500/20 pb-3">
-                            <div className="flex items-center gap-2">
-                              <Sparkles className="w-4 h-4 text-indigo-400" />
-                              <span className="font-bold text-white text-sm">Official Cambridge Examiner Assessment</span>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <span className={`px-3 py-1 rounded-full font-mono font-bold text-xs ${
-                                analysis.marksAwarded === analysis.maxMarks
-                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                  : analysis.marksAwarded > 0
-                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                  : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                              }`}>
-                                Marks Awarded: {analysis.marksAwarded} / {analysis.maxMarks} ({analysis.percentage}%)
-                              </span>
-                            </div>
+                        <div className="mt-4 p-5 rounded-lg bg-[#FDFBF7] border border-slate-300 text-xs space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-2">
+                            <span className="font-bold text-slate-800 text-sm">Official Cambridge Examiner Assessment</span>
+                            <span className="px-2.5 py-0.5 rounded text-xs font-bold bg-[#EBF3F5] text-slate-800 border border-slate-300">
+                              Marks Awarded: {analysis.marksAwarded} / {analysis.maxMarks} ({analysis.percentage}%)
+                            </span>
                           </div>
 
-                          {/* Point-by-point breakdown */}
                           {analysis.markBreakdown && analysis.markBreakdown.length > 0 && (
-                            <div className="space-y-2">
-                              <span className="font-bold text-slate-300 uppercase tracking-wider text-[10px]">
-                                Mark Scheme Point Breakdown:
-                              </span>
-                              <div className="space-y-1.5">
-                                {analysis.markBreakdown.map((pt, i) => (
-                                  <div 
-                                    key={i} 
-                                    className={`p-2.5 rounded-xl border flex items-start gap-2.5 ${
-                                      pt.awarded 
-                                        ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-200' 
-                                        : 'bg-rose-950/20 border-rose-500/20 text-rose-300'
-                                    }`}
-                                  >
-                                    <span className="shrink-0 mt-0.5">
-                                      {pt.awarded ? (
-                                        <Check className="w-4 h-4 text-emerald-400 font-bold" />
-                                      ) : (
-                                        <X className="w-4 h-4 text-rose-400" />
-                                      )}
-                                    </span>
-                                    <div className="space-y-0.5">
-                                      <span className="font-semibold block">{pt.point}</span>
-                                      <span className="text-[11px] opacity-90 block">{pt.reason}</span>
-                                    </div>
+                            <div className="space-y-1.5">
+                              <strong className="text-slate-800 text-xs block">Mark Scheme Point Breakdown:</strong>
+                              {analysis.markBreakdown.map((pt, i) => (
+                                <div 
+                                  key={i} 
+                                  className={`p-2.5 rounded-md border flex items-start gap-2.5 ${
+                                    pt.awarded 
+                                      ? 'bg-emerald-50 border-emerald-300 text-emerald-900' 
+                                      : 'bg-rose-50 border-rose-300 text-rose-900'
+                                  }`}
+                                >
+                                  <span className="shrink-0 mt-0.5 font-bold">
+                                    {pt.awarded ? '✓' : '✗'}
+                                  </span>
+                                  <div>
+                                    <span className="font-bold block">{pt.point}</span>
+                                    <span className="text-xs opacity-90 block">{pt.reason}</span>
                                   </div>
-                                ))}
-                              </div>
+                                </div>
+                              ))}
                             </div>
                           )}
 
-                          {/* Examiner Feedback */}
                           {analysis.examinerFeedback && (
-                            <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 text-slate-300 leading-relaxed">
-                              <span className="font-bold text-amber-400 mr-1">Examiner Note:</span>
+                            <div className="bg-white p-3 rounded-md border border-slate-200 text-slate-700 leading-relaxed">
+                              <strong className="text-slate-800 mr-1">Examiner Note: </strong>
                               {analysis.examinerFeedback}
                             </div>
                           )}
 
-                          {/* Model Answer */}
                           {analysis.modelAnswer && (
-                            <div className="bg-slate-950/60 p-3 rounded-xl border border-emerald-500/20 text-emerald-300/90 leading-relaxed">
-                              <span className="font-bold text-emerald-400 block mb-1">Official Model Answer:</span>
+                            <div className="bg-white p-3 rounded-md border border-emerald-300 text-emerald-900 leading-relaxed">
+                              <strong className="text-emerald-900 block mb-0.5">Model Answer: </strong>
                               {analysis.modelAnswer}
                             </div>
                           )}
@@ -611,72 +621,35 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
                     </div>
                   )}
 
-                  {/* Official Published Mark Scheme & Examiner Notes Drawer */}
-                  {isRevealed && (
-                    <div className="mt-4 p-5 rounded-2xl bg-slate-950 border border-emerald-500/30 text-xs space-y-3">
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                          <span className="font-bold text-emerald-300">Published Cambridge Mark Scheme</span>
-                        </div>
-                        <span className="font-mono text-emerald-400 font-bold">
-                          Max: {q.marks} Mark{q.marks === 1 ? '' : 's'}
-                        </span>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <span className="font-bold text-slate-300">Expected Response / Criteria:</span>
-                        <p className="text-slate-200 whitespace-pre-line leading-relaxed font-sans">
-                          {q.correctAnswer}
-                        </p>
-                      </div>
-
-                      {q.markSchemeBreakdown && q.markSchemeBreakdown.length > 0 && (
-                        <div className="space-y-1 pt-1">
-                          <span className="font-semibold text-slate-400">Mark Points:</span>
-                          <ul className="list-disc pl-5 text-slate-300 space-y-0.5">
-                            {q.markSchemeBreakdown.map((pt, i) => (
-                              <li key={i}>{pt}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-
-                      {q.guidanceNotes && q.guidanceNotes.length > 0 && (
-                        <div className="bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-slate-400 space-y-1">
-                          <span className="font-bold text-sky-400 block text-[11px]">Examiner Guidance Notes:</span>
-                          <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
-                            {q.guidanceNotes.map((g, i) => (
-                              <li key={i}>{g}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-
-                      {q.examinerComment && (
-                        <div className="bg-amber-950/20 p-2.5 rounded-lg border border-amber-500/20 text-amber-300 text-[11px] leading-relaxed">
-                          <span className="font-bold text-amber-400">Examiner Report Commentary: </span>
-                          {q.examinerComment}
-                        </div>
-                      )}
+                  {/* MCQ Mark Scheme Toggle */}
+                  {isMcq && (
+                    <div className="pt-2 flex justify-end">
+                      <button
+                        onClick={() => toggleSolution(q.id)}
+                        className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-slate-600" />
+                        <span>{isRevealed ? 'Hide Answer' : 'Check Correct Answer'}</span>
+                      </button>
                     </div>
                   )}
 
-                  {/* Candidate Script Case Study (for Example Candidate Responses) */}
-                  {q.exampleCandidateResponse && (
-                    <div className="mt-4 p-4 rounded-xl bg-slate-950 border border-purple-500/30 text-xs space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-purple-300">Example Candidate Script & Examiner Critique:</span>
-                        <span className="font-mono text-purple-400 font-bold">
-                          Awarded: {q.exampleCandidateResponse.marksAwarded} / {q.marks}
-                        </span>
+                  {/* Official Mark Scheme Details */}
+                  {isRevealed && (
+                    <div className="mt-3 p-4 rounded-lg bg-[#FDFBF7] border border-slate-300 text-xs space-y-2">
+                      <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
+                        <strong className="text-slate-800 text-sm">Published Cambridge Mark Scheme</strong>
+                        <span className="font-bold text-slate-700">Max: {q.marks} Mark{q.marks === 1 ? '' : 's'}</span>
                       </div>
-                      <blockquote className="italic border-l-2 border-purple-500/50 pl-3 text-slate-300">
-                        {q.exampleCandidateResponse.candidateAnswer}
-                      </blockquote>
-                      <p className="text-slate-400 text-[11px] leading-relaxed">
-                        {q.exampleCandidateResponse.examinerComment}
-                      </p>
+                      <div>
+                        <span className="font-bold text-slate-800">Expected Response: </span>
+                        <span className="text-slate-800 font-semibold">{q.correctAnswer}</span>
+                      </div>
+                      {q.explanation && (
+                        <p className="text-slate-700 leading-relaxed">
+                          <strong className="text-slate-800">Rationale: </strong>{q.explanation}
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -688,24 +661,24 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
 
       {/* Periodic Table Modal */}
       {showPeriodicTable && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl">
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-300 rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-xl text-slate-800">
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <TableIcon className="w-5 h-5 text-sky-400" />
-                <h3 className="font-bold text-white text-base">Cambridge IGCSE Periodic Table of Elements</h3>
+                <TableIcon className="w-5 h-5 text-slate-700" />
+                <h3 className="font-bold text-slate-800 text-base">Cambridge IGCSE Periodic Table of Elements</h3>
               </div>
               <button
                 onClick={() => setShowPeriodicTable(false)}
-                className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition"
+                className="p-1 rounded-md hover:bg-slate-100 text-slate-600 hover:text-black cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="p-6 overflow-auto space-y-4 text-xs">
-              <p className="text-slate-400">
-                Key: <span className="font-mono font-bold text-emerald-400">Z</span> = atomic (proton) number, <span className="font-mono font-bold text-sky-400">Ar</span> = relative atomic mass.
+              <p className="text-slate-600">
+                Key: <strong className="font-mono text-slate-800">Z</strong> = atomic (proton) number, <strong className="font-mono text-slate-800">Ar</strong> = relative atomic mass.
               </p>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2 font-mono">
@@ -731,17 +704,14 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
                   { z: 19, sym: 'K', name: 'Potassium', ar: 39 },
                   { z: 20, sym: 'Ca', name: 'Calcium', ar: 40 },
                   { z: 26, sym: 'Fe', name: 'Iron', ar: 56 },
-                  { z: 29, sym: 'Cu', name: 'Copper', ar: 64 },
-                  { z: 30, sym: 'Zn', name: 'Zinc', ar: 65 },
-                  { z: 35, sym: 'Br', name: 'Bromine', ar: 80 },
-                  { z: 53, sym: 'I', name: 'Iodine', ar: 127 },
-                  { z: 82, sym: 'Pb', name: 'Lead', ar: 207 }
+                  { z: 29, sym: 'Cu', name: 'Copper', ar: 63.5 },
+                  { z: 30, sym: 'Zn', name: 'Zinc', ar: 65 }
                 ].map(elem => (
-                  <div key={elem.z} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex flex-col items-center text-center">
-                    <span className="text-[10px] text-emerald-400 font-bold">{elem.z}</span>
-                    <span className="text-lg font-bold text-white tracking-wider">{elem.sym}</span>
-                    <span className="text-[10px] text-slate-300">{elem.name}</span>
-                    <span className="text-[10px] text-sky-400 font-bold">{elem.ar}</span>
+                  <div key={elem.z} className="p-2.5 rounded-md bg-[#FDFBF7] border border-slate-200 flex flex-col items-center text-center">
+                    <span className="text-[10px] text-slate-500">{elem.z}</span>
+                    <strong className="text-base font-bold text-slate-800">{elem.sym}</strong>
+                    <span className="text-[10px] text-slate-600 truncate max-w-full">{elem.name}</span>
+                    <span className="text-[10px] font-bold text-slate-700">{elem.ar}</span>
                   </div>
                 ))}
               </div>
@@ -752,56 +722,210 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
 
       {/* Grade Summary Modal */}
       {showScoreModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6 space-y-5 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-300 rounded-xl w-full max-w-md p-6 space-y-5 shadow-xl text-slate-800">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <div className="flex items-center gap-2">
-                <Award className="w-5 h-5 text-emerald-400" />
-                <h3 className="font-bold text-white text-base">Examination Grade Assessment</h3>
+                <Award className="w-5 h-5 text-slate-700" />
+                <h3 className="font-bold text-slate-800 text-base">Examination Grade Assessment</h3>
               </div>
               <button
                 onClick={() => setShowScoreModal(false)}
-                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
+                className="p-1 rounded-md hover:bg-slate-100 text-slate-600 hover:text-black cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="text-center py-3 space-y-2">
-              <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-emerald-500/10 border-2 border-emerald-500 text-3xl font-extrabold text-emerald-400">
+            <div className="text-center py-2 space-y-2">
+              <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-[#EBF3F5] border-4 border-slate-800 text-3xl font-bold text-slate-800">
                 {paperStats.grade}
               </div>
-              <h4 className="text-lg font-bold text-white">Estimated Cambridge Grade</h4>
-              <p className="text-xs text-slate-400">
+              <h4 className="text-lg font-bold text-slate-800">Estimated Cambridge Grade</h4>
+              <p className="text-xs text-slate-600">
                 Based on official Cambridge grade boundaries for {activePaper.code} ({activePaper.series})
               </p>
             </div>
 
-            <div className="bg-slate-950 rounded-xl p-4 space-y-2 text-xs">
-              <div className="flex justify-between text-slate-300">
+            <div className="bg-[#FDFBF7] border border-slate-200 rounded-lg p-4 space-y-2 text-xs">
+              <div className="flex justify-between text-slate-700">
                 <span>Candidate Name:</span>
-                <span className="font-semibold text-white">{candidateName}</span>
+                <strong className="text-slate-800">{candidateName}</strong>
               </div>
-              <div className="flex justify-between text-slate-300">
+              <div className="flex justify-between text-slate-700">
                 <span>Marks Scored:</span>
-                <span className="font-bold text-emerald-400 font-mono">
+                <strong className="text-slate-800 font-mono">
                   {paperStats.totalEarned} / {paperStats.totalPossible}
-                </span>
+                </strong>
               </div>
-              <div className="flex justify-between text-slate-300">
+              <div className="flex justify-between text-slate-700">
                 <span>Overall Percentage:</span>
-                <span className="font-bold text-sky-400 font-mono">
+                <strong className="text-slate-800 font-mono">
                   {paperStats.percentage}%
-                </span>
+                </strong>
               </div>
             </div>
 
             <button
               onClick={() => setShowScoreModal(false)}
-              className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition"
+              className="w-full py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm transition cursor-pointer"
             >
               Continue Revision
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Google Drive 50+ Papers Vault Modal */}
+      {showDriveVaultModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
+          <div className="bg-white border border-slate-300 rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-xl overflow-hidden text-slate-800">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-200 flex items-start justify-between gap-4 bg-[#FDFBF7]">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-[#EBF3F5] border border-slate-300 text-slate-800 shrink-0">
+                  <FolderOpen className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-base sm:text-lg flex items-center gap-2">
+                    <span>Cambridge 0653 Past Papers & Mark Schemes</span>
+                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-white text-slate-800 border border-slate-300">
+                      50+ Official PDFs
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+                    Filter and access authentic Core and Extended Multiple Choice papers, Alternative to Practical papers, and official Mark Schemes.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => setShowDriveVaultModal(false)}
+                  className="p-1 rounded-md hover:bg-slate-100 text-slate-600 hover:text-black cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Controls */}
+            <div className="p-4 border-b border-slate-200 bg-white space-y-3">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={driveSearch}
+                    onChange={(e) => setDriveSearch(e.target.value)}
+                    placeholder="Search by series or paper number..."
+                    className="w-full pl-9 pr-3 py-2 bg-[#FDFBF7] border-2 border-black rounded-lg text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+                  {(['all', 'Core', 'Extended', 'Alternative to Practical'] as const).map(tier => (
+                    <button
+                      key={tier}
+                      onClick={() => setDriveTierFilter(tier)}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition cursor-pointer border ${
+                        driveTierFilter === tier
+                          ? 'bg-slate-800 text-white border-slate-800'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      {tier === 'all' ? 'All Tiers' : tier}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Papers Grid */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {filteredDriveCatalog.map((paper) => {
+                  const interactivePaper = pastExamPapers.find(p => {
+                    if (paper.code.includes('12/M/26') && p.id === 'paper-0653-12-m-2026') return true;
+                    if (paper.code.includes('22/M/26') && p.id === 'paper-0653-22-m-2026') return true;
+                    if (paper.code.includes('02/SP/25') && p.id === 'paper-0653-02-sp-2025') return true;
+                    if (paper.code.includes('61/M/J/26') && p.id === 'paper-0653-61-mj-2026') return true;
+                    if (paper.code.includes('42/O/N/25') && p.id === 'paper-0653-42-on-2025') return true;
+                    return false;
+                  });
+
+                  return (
+                    <div
+                      key={paper.id}
+                      className="bg-[#FDFBF7] border border-slate-200 hover:border-slate-400 rounded-lg p-3.5 flex flex-col justify-between gap-3 transition"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-mono font-bold px-1.5 py-0.5 rounded bg-white text-slate-800 border border-slate-300">
+                            {paper.code}
+                          </span>
+                          <span className="text-xs font-bold text-slate-600">
+                            {paper.kind}
+                          </span>
+                        </div>
+
+                        <h4 className="text-sm font-bold text-slate-800 leading-snug">
+                          {paper.name.replace(/\.pdf$/i, '')}
+                        </h4>
+
+                        <p className="text-xs text-slate-600">
+                          {paper.series} • {paper.tier}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
+                        {interactivePaper && paper.kind === 'Question Paper' && (
+                          <button
+                            onClick={() => {
+                              setSelectedPaperId(interactivePaper.id);
+                              setShowDriveVaultModal(false);
+                            }}
+                            className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold cursor-pointer"
+                          >
+                            Take Interactive
+                          </button>
+                        )}
+
+                        <a
+                          href={paper.driveViewUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-2.5 py-1 rounded-md bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold"
+                        >
+                          Preview
+                        </a>
+
+                        <a
+                          href={paper.driveDownloadUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-2.5 py-1 rounded-md bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold"
+                        >
+                          Download
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-200 bg-[#FDFBF7] flex items-center justify-between text-xs">
+              <span className="text-slate-600">
+                Cambridge IGCSE Combined Science 0653
+              </span>
+              <button
+                onClick={() => setShowDriveVaultModal(false)}
+                className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

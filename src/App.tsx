@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { LessonSlidesViewer } from './components/LessonSlidesViewer';
 import { SyllabusNotebook } from './components/SyllabusNotebook';
@@ -22,8 +22,11 @@ import { GameLobby } from './components/GameLobby';
 import { AdminBattleControl } from './components/AdminBattleControl';
 import { BattleRoyaleArena } from './components/BattleRoyaleArena';
 import { StudentTaskProgressBar } from './components/StudentTaskProgressBar';
+import { TaskView } from './components/TaskView';
+import { Dashboard } from './components/Dashboard';
 import { subscribeToBattleState, BattleEventState } from './services/firebaseGameService';
 import { ScienceSubject, UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, TaskWithSubmission } from './types';
+import { resolveSubtopicByQuery } from './data/subtopicSlidesData';
 import { logCompletedActivity } from './services/activityService';
 import { 
   Sparkles, 
@@ -75,10 +78,11 @@ export default function App() {
         // ignore
       }
     }
-    return 'lessons';
+    return 'dashboard';
   });
   const [selectedSubject, setSelectedSubject] = useState<ScienceSubject | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [targetLessonCode, setTargetLessonCode] = useState<string | null>(null);
 
   // Auto-switch tab if URL query parameter changes
   useEffect(() => {
@@ -115,9 +119,9 @@ export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY_THEME);
-      return stored === 'light' || stored === 'dark' ? stored : 'dark';
+      return stored === 'dark' ? 'dark' : 'light';
     } catch (e) {
-      return 'dark';
+      return 'light';
     }
   });
 
@@ -140,6 +144,9 @@ export default function App() {
 
   // Authentication & Profile state
   const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [signOutNotice, setSignOutNotice] = useState<string | null>(null);
+  const initialBootSession = useRef<boolean>(Boolean(localStorage.getItem(STORAGE_KEY_USER)));
+
   const [user, setUser] = useState<UserProfile | null>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY_USER);
@@ -203,12 +210,32 @@ export default function App() {
             fbUser.displayName || 'Student',
             fbUser.email || ''
           );
-          setUser(profile);
-          localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(profile));
-          
+
           // Load enrolled classes for progress sync
           const classes = await fetchStudentEnrolledClasses(profile.id);
-          setEnrolledClassIds(classes.map(c => c.id));
+          const validClasses = classes.filter(c => c && c.id && c.id !== 'class_default_0653');
+
+          // User requirement:
+          // "any student who is currently in the group should be signed out unless they are entered into a class that an instructor has created."
+          // If a student had an active pre-existing session on boot, but is not enrolled in any instructor-created class, sign them out immediately!
+          if (profile.role === 'student' && validClasses.length === 0 && initialBootSession.current) {
+            initialBootSession.current = false;
+            localStorage.removeItem(STORAGE_KEY_USER);
+            localStorage.removeItem('igcse_0653_offline_enrolled_' + profile.id);
+            try {
+              await logout();
+            } catch {}
+            setUser(null);
+            setEnrolledClassIds([]);
+            setSignOutNotice('Notice: The default class SCI-0653 has been retired. Students must enter an instructor-created class code to access revision materials. Please sign in and enter your teacher’s class code.');
+            setAuthLoading(false);
+            return;
+          }
+
+          initialBootSession.current = false;
+          setUser(profile);
+          localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(profile));
+          setEnrolledClassIds(validClasses.map(c => c.id));
         } catch (e) {
           console.error('Error resolving user profile on auth change:', e);
         }
@@ -218,9 +245,18 @@ export default function App() {
           try {
             const profile = JSON.parse(stored);
             if (profile && profile.id) {
-              setUser(profile);
               const classes = await fetchStudentEnrolledClasses(profile.id);
-              setEnrolledClassIds(classes.map(c => c.id));
+              const validClasses = classes.filter(c => c && c.id && c.id !== 'class_default_0653');
+              if (profile.role === 'student' && validClasses.length === 0) {
+                localStorage.removeItem(STORAGE_KEY_USER);
+                localStorage.removeItem('igcse_0653_offline_enrolled_' + profile.id);
+                setUser(null);
+                setEnrolledClassIds([]);
+                setSignOutNotice('Notice: The default class SCI-0653 has been retired. Students must enter an instructor-created class code to access revision materials. Please sign in and enter your teacher’s class code.');
+              } else {
+                setUser(profile);
+                setEnrolledClassIds(validClasses.map(c => c.id));
+              }
             } else {
               setUser(null);
               setEnrolledClassIds([]);
@@ -485,7 +521,24 @@ export default function App() {
   };
 
   const handleOpenLesson = (topicCode?: string) => {
-    if (topicCode) setSearchQuery(topicCode);
+    // Clear global search query so opening a lesson task does NOT filter out all other subtopics from the syllabus sidebar!
+    setSearchQuery('');
+    if (topicCode) {
+      setTargetLessonCode(topicCode);
+      const matched = resolveSubtopicByQuery(topicCode);
+      if (matched) {
+        setSelectedSubject(matched.subject);
+      } else {
+        const clean = topicCode.trim().toUpperCase();
+        if (clean.startsWith('B') || clean.includes('BIO')) {
+          setSelectedSubject('biology');
+        } else if (clean.startsWith('C') || clean.includes('CHEM')) {
+          setSelectedSubject('chemistry');
+        } else if (clean.startsWith('P') || clean.includes('PHYS')) {
+          setSelectedSubject('physics');
+        }
+      }
+    }
     setCurrentTab('lessons');
   };
 
@@ -508,11 +561,9 @@ export default function App() {
   // 1. Initial Loading State
   if (authLoading) {
     return (
-      <div className={`min-h-screen flex flex-col items-center justify-center p-6 ${
-        theme === 'dark' ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'
-      }`}>
-        <div className="w-10 h-10 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="text-sm font-semibold tracking-wide text-slate-400 animate-pulse">
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#FDFBF7] text-slate-800 font-sans">
+        <div className="w-8 h-8 border-3 border-slate-800 border-t-transparent rounded-full animate-spin mb-3"></div>
+        <p className="text-base font-bold text-slate-800">
           Connecting to Cambridge IGCSE 0653 Science Hub...
         </p>
       </div>
@@ -525,14 +576,20 @@ export default function App() {
     return (
       <GoogleSignInGate
         theme={theme}
+        noticeMessage={signOutNotice}
         onSignInSuccess={async (profile) => {
-          setUser(profile);
-          localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(profile));
+          setSignOutNotice(null);
+          initialBootSession.current = false;
           try {
             const classes = await fetchStudentEnrolledClasses(profile.id);
-            setEnrolledClassIds(classes.map(c => c.id));
+            const validClasses = classes.filter(c => c && c.id && c.id !== 'class_default_0653');
+            setUser(profile);
+            localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(profile));
+            setEnrolledClassIds(validClasses.map(c => c.id));
           } catch (e) {
             console.error('Error fetching enrolled classes:', e);
+            setUser(profile);
+            setEnrolledClassIds([]);
           }
         }}
       />
@@ -540,7 +597,7 @@ export default function App() {
   }
 
   // 3. Mandatory Class Code Gate for Students on First Sign-In
-  // After students sign in for the first time they must enter a class code to join a class
+  // After students sign in for the first time they must enter a class code to join an instructor's class
   if (user.role === 'student' && enrolledClassIds.length === 0) {
     return (
       <div className={`min-h-screen ${theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-100 text-slate-900'}`}>
@@ -548,6 +605,14 @@ export default function App() {
           user={user}
           progress={progress}
           theme={theme}
+          onSignOut={async () => {
+            try {
+              await logout();
+            } catch {}
+            localStorage.removeItem(STORAGE_KEY_USER);
+            setUser(null);
+            setEnrolledClassIds([]);
+          }}
           onClassJoined={(classItem) => {
             setEnrolledClassIds([classItem.id]);
           }}
@@ -558,9 +623,7 @@ export default function App() {
 
   // 4. Authenticated App Experience
   return (
-    <div className={`min-h-screen flex flex-col font-sans selection:bg-emerald-500 selection:text-white transition-colors duration-200 ${
-      theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-100 text-slate-900'
-    }`}>
+    <div className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${theme === 'dark' ? 'bg-black text-slate-100' : 'bg-[#FDFBF7] text-slate-800'}`}>
       {/* Top Navigation */}
       <Navbar
         currentTab={currentTab}
@@ -582,7 +645,7 @@ export default function App() {
         isPreviewingAsStudent={isPreviewingAsStudent}
         onEnterStudentPreview={() => {
           setIsPreviewingAsStudent(true);
-          setCurrentTab('lessons');
+          setCurrentTab('dashboard');
         }}
         onExitStudentPreview={() => {
           setIsPreviewingAsStudent(false);
@@ -597,92 +660,85 @@ export default function App() {
 
       {/* Role Distinction Sub-bar */}
       {user.role === 'instructor' && isPreviewingAsStudent ? (
-        <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 border-b border-emerald-500/40 px-4 sm:px-6 lg:px-8 py-2.5 transition">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="font-bold text-emerald-300">Student Preview Active:</span>
-              <span className="text-slate-300">
-                You are experiencing the exact interface, tabs (Lesson Slides, Quizzes, Past Papers, Syllabus Notebook, Assignments, My Progress, My Classes), and student revision tools.
+        <div className="bg-[#EBF3F5] border-b border-slate-300 px-4 sm:px-6 lg:px-8 py-2 text-xs text-slate-800">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-slate-800">Student Preview Mode:</span>
+              <span className="text-slate-600">
+                You are viewing the app as a student would see it.
               </span>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={() => {
-                  setIsPreviewingAsStudent(false);
-                  setCurrentTab('instructor');
-                }}
-                className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
-              >
-                <LayoutDashboard className="w-3.5 h-3.5" />
-                <span>Exit Preview & Return to Teaching Hub</span>
-              </button>
-            </div>
+            <button
+              onClick={() => {
+                setIsPreviewingAsStudent(false);
+                setCurrentTab('instructor');
+              }}
+              className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <LayoutDashboard className="w-3.5 h-3.5" />
+              <span>Exit Preview</span>
+            </button>
           </div>
         </div>
       ) : user.role === 'instructor' ? (
-        <div className="bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border-b border-purple-500/30 px-4 sm:px-6 lg:px-8 py-2.5 transition">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+        <div className="bg-[#EBF3F5] border-b border-slate-300 px-4 sm:px-6 lg:px-8 py-2 text-xs text-slate-800">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
-              <span className="font-bold text-purple-300">Instructor Mode Active:</span>
-              <span className="text-slate-300">
-                Teaching Hub integrates your active classes, class tasks & homework manager, and live cohort progress & analytics.
+              <span className="font-bold text-slate-800">Instructor Mode:</span>
+              <span className="text-slate-600">
+                Manage your classes, assign tasks, and track cohort completion.
               </span>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={() => {
                   setIsPreviewingAsStudent(true);
-                  setCurrentTab('lessons');
+                  setCurrentTab('dashboard');
                 }}
-                className="px-3 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                className="px-3 py-1 rounded-lg bg-white border border-slate-300 text-slate-800 hover:bg-slate-100 font-bold transition flex items-center gap-1.5 cursor-pointer"
                 title="Preview exact page and tabs a student would see"
               >
-                <GraduationCap className="w-3.5 h-3.5 text-emerald-400" />
+                <GraduationCap className="w-3.5 h-3.5 text-slate-700" />
                 <span>Preview Student</span>
               </button>
 
               {currentTab !== 'instructor' ? (
                 <button
                   onClick={() => setCurrentTab('instructor')}
-                  className="px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold transition shadow-xs"
+                  className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold transition"
                 >
-                  Open Teaching Hub
+                  Teaching Hub
                 </button>
               ) : (
                 <button
                   onClick={() => setCurrentTab('lessons')}
-                  className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-semibold transition"
+                  className="px-3 py-1 rounded-lg bg-white border border-slate-300 text-slate-800 hover:bg-slate-100 font-semibold transition"
                 >
-                  View Lesson Slides
+                  View Lessons
                 </button>
               )}
             </div>
           </div>
         </div>
       ) : (
-        /* Student Mode indicator: strictly no instructor access */
-        <div className="bg-slate-900/60 border-b border-slate-800/80 px-4 sm:px-6 lg:px-8 py-2">
-          <div className="max-w-7xl mx-auto flex items-center justify-between text-xs text-slate-400">
+        /* Student Mode indicator */
+        <div className="bg-[#FDFBF7] border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-2">
+          <div className="max-w-7xl mx-auto flex items-center justify-between text-xs text-slate-600">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              <span className="font-semibold text-emerald-400">Student Space</span>
-              <span className="hidden sm:inline text-slate-600">•</span>
-              <span className="hidden sm:inline text-slate-400">
-                Logged in as {user.name} ({user.email})
-              </span>
+              <span className="font-bold text-slate-800">Student Space</span>
+              <span>•</span>
+              <span>{user.name} ({user.email})</span>
             </div>
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setCurrentTab('classes')}
-                className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 font-semibold transition"
+                className="flex items-center gap-1 text-xs text-slate-800 hover:text-black font-bold transition cursor-pointer"
               >
                 <Users className="w-3.5 h-3.5" />
-                <span>Join Class with Code</span>
+                <span>Join Class</span>
               </button>
-              <span className="text-slate-600">|</span>
-              <span className="font-mono text-slate-400 font-medium">Target: {user.targetGrade || 'A*'}</span>
+              <span>|</span>
+              <span className="font-bold text-slate-800">Target Grade: {user.targetGrade || 'A*'}</span>
             </div>
           </div>
         </div>
@@ -692,14 +748,14 @@ export default function App() {
       {isEffectiveStudent && (
         <StudentTaskProgressBar
           tasks={studentTasks}
-          onNavigateToTasks={() => setCurrentTab('assignments')}
+          onNavigateToTasks={() => setCurrentTab('tasks')}
           enrolledClassCount={enrolledClassIds.length}
         />
       )}
 
       {/* MODULE 1: USER PROFILE & LOADOUT BANNER */}
       {isEffectiveStudent && (
-        <div className="border-b border-slate-800/80 bg-slate-950/60 px-4 sm:px-6 lg:px-8 py-3">
+        <div className="border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-8 py-3 shadow-xs">
           <div className="max-w-7xl mx-auto">
             <UserProfileHeader
               user={effectiveUser || user}
@@ -722,14 +778,30 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {/* Render Tab Views */}
-        {currentTab === 'assignments' && (
+        {currentTab === 'dashboard' && (
+          <Dashboard
+            user={effectiveUser || user}
+            progress={progress}
+            tasks={studentTasks}
+            enrolledClassCount={enrolledClassIds.length}
+            onNavigateToTasks={() => setCurrentTab('tasks')}
+            onNavigateToLessons={handleOpenLesson}
+            onNavigateToQuizzes={() => setCurrentTab('quizzes')}
+            onNavigateToRoyale={() => setCurrentTab('royale')}
+            onNavigateToLeaderboard={() => setCurrentTab('leaderboard')}
+            onNavigateToClasses={() => setCurrentTab('classes')}
+          />
+        )}
+
+        {(currentTab === 'tasks' || currentTab === 'assignments') && (
           isEffectiveStudent ? (
-            <StudentTasksPanel
+            <TaskView
               user={effectiveUser || user}
               progress={progress}
               enrolledClassIds={enrolledClassIds}
               onNavigateToLessons={handleOpenLesson}
               onNavigateToQuizzes={() => setCurrentTab('quizzes')}
+              onNavigateToRoyale={() => setCurrentTab('royale')}
             />
           ) : (
             <InstructorDashboard
@@ -737,7 +809,7 @@ export default function App() {
               initialTab="tasks"
               onSwitchToStudentMode={() => {
                 setIsPreviewingAsStudent(true);
-                setCurrentTab('lessons');
+                setCurrentTab('dashboard');
               }}
               onNavigateToLessons={() => setCurrentTab('lessons')}
             />
@@ -750,6 +822,8 @@ export default function App() {
             isInstructor={!isEffectiveStudent}
             selectedSubject={selectedSubject}
             searchQuery={searchQuery}
+            targetSubtopicCode={targetLessonCode}
+            onClearTargetSubtopicCode={() => setTargetLessonCode(null)}
             completedLessons={progress.completedLessons}
             trafficLights={progress.trafficLights || {}}
             subtopicQuizScores={progress.subtopicQuizScores || {}}
@@ -989,56 +1063,55 @@ export default function App() {
             />
           ) : (
             /* Student tries to access royale when instructor has not opened the lobby */
-            <div className="max-w-2xl mx-auto my-10 p-6 sm:p-8 bg-slate-900/95 border border-slate-800 rounded-3xl shadow-2xl text-center space-y-6 backdrop-blur-md">
-              <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-3xl mx-auto shadow-lg shadow-amber-500/10">
-                <Lock className="w-8 h-8 text-amber-400" />
+            <div className="max-w-xl mx-auto my-10 p-6 sm:p-8 bg-white border border-slate-200 rounded-xl shadow-xs text-center space-y-5 text-slate-800">
+              <div className="w-14 h-14 rounded-xl bg-[#EBF3F5] border border-slate-300 flex items-center justify-center mx-auto">
+                <Lock className="w-7 h-7 text-slate-700" />
               </div>
               <div className="space-y-2">
-                <span className="text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 inline-flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-                  <span>Lobby Closed</span>
+                <span className="text-xs font-bold px-3 py-1 rounded bg-[#EBF3F5] text-slate-700 border border-slate-300 inline-block">
+                  Lobby Waiting Room
                 </span>
-                <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-                  Royale Tournament Lobby is Closed
+                <h2 className="text-2xl font-bold text-slate-800 tracking-tight">
+                  Tournament Lobby is Closed
                 </h2>
-                <p className="text-xs sm:text-sm text-slate-300 max-w-lg mx-auto leading-relaxed">
-                  Students do not have access to the Revision Royale game until your instructor opens the tournament lobby. When the instructor opens the lobby, this screen will automatically grant access to the pre-game lobby where you can ready up with your classmates!
+                <p className="text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+                  Students join the tournament once your instructor opens the match lobby. In the meantime, you can customize your character loadout or review lesson slides.
                 </p>
               </div>
 
-              {/* Real-time listener pulse banner */}
-              <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-center gap-2.5 text-xs font-semibold text-amber-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping"></span>
-                <span>Live Status: Waiting for your instructor to open the lobby...</span>
+              {/* Status Note */}
+              <div className="p-3 rounded-lg bg-[#FDFBF7] border border-slate-300 text-xs font-semibold text-slate-700">
+                Waiting for your instructor to launch the match session.
               </div>
 
               {/* Accessible alternatives for students */}
-              <div className="pt-2 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-center gap-3">
+              <div className="pt-2 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-center gap-3">
                 <button
                   onClick={() => {
                     setShopInitialTab('shop');
                     setCurrentTab('shop');
                   }}
-                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition active:scale-95 cursor-pointer"
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm flex items-center justify-center gap-2 transition cursor-pointer"
                 >
                   <Package className="w-4 h-4" />
-                  <span>Open Avatar Shop</span>
+                  <span>Open Character Shop</span>
                 </button>
                 <button
                   onClick={() => {
                     setShopInitialTab('collection');
                     setCurrentTab('shop');
                   }}
-                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer"
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-lg bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 font-bold text-sm flex items-center justify-center gap-2 transition cursor-pointer"
                 >
-                  <Layers className="w-4 h-4 text-emerald-400" />
-                  <span>My Card Collection</span>
+                  <Layers className="w-4 h-4 text-slate-700" />
+                  <span>My Collection</span>
                 </button>
                 <button
                   onClick={() => setCurrentTab('lessons')}
-                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-xs font-semibold transition cursor-pointer"
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-lg bg-[#EBF3F5] hover:bg-[#d8e9ec] text-slate-800 border border-slate-400 font-bold text-sm flex items-center justify-center gap-1.5 transition cursor-pointer"
                 >
-                  <span>Back to Study</span>
+                  <span>Return to Lessons</span>
+                  <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             </div>

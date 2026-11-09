@@ -5,6 +5,10 @@ import { clearCachedDriveToken } from './firebaseAuth';
 export const TARGET_DRIVE_FOLDER_ID = '1kypXZXP3nY9pFxuSJOTZ1anODYxxfZ1a';
 export const TARGET_DRIVE_FOLDER_URL = `https://drive.google.com/drive/folders/${TARGET_DRIVE_FOLDER_ID}`;
 
+// Authentic Cambridge IGCSE 0653 Multiple Choice Core and Extended Past Papers Folder
+export const PAST_PAPERS_DRIVE_FOLDER_ID = '1pZOOInJtNUIHh8nje0g4RqHR8GxAJLB4';
+export const PAST_PAPERS_DRIVE_FOLDER_URL = `https://drive.google.com/drive/folders/${PAST_PAPERS_DRIVE_FOLDER_ID}`;
+
 export const DRIVE_STORAGE_KEY = 'igcse_0653_drive_synced_slides_v3';
 export const DRIVE_STORAGE_PDFS_KEY = 'igcse_0653_drive_synced_pdfs_v3';
 export const DRIVE_LAST_SYNC_KEY = 'igcse_0653_drive_last_sync_timestamp';

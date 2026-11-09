@@ -29,17 +29,17 @@ const LOCAL_NOTIFICATIONS_KEY = 'igcse_0653_instructor_notifications';
 const LOCAL_TASKS_KEY = 'igcse_0653_offline_tasks';
 const LOCAL_TASK_SUBMISSIONS_PREFIX = 'igcse_0653_offline_task_subs_';
 
-export const DEFAULT_CLASS_CODE = 'SCI-0653';
+export const DEFAULT_CLASS_CODE = '';
 export const DEFAULT_CLASS_ITEM: ClassItem = {
-  id: 'class_default_0653',
-  classCode: 'SCI-0653',
-  name: 'Cambridge IGCSE Combined Science (0653)',
+  id: '',
+  classCode: '',
+  name: '',
   subject: 'all',
-  description: 'Official class for Cambridge IGCSE Combined Science syllabus revision.',
-  instructorId: 'corbanb_instructor',
-  instructorName: 'Mr. Corban',
-  instructorEmail: 'corbanb@gisboyshigh.net',
-  createdAt: '2026-01-01T00:00:00.000Z',
+  description: 'Deprecated default class - auto-enrollment removed.',
+  instructorId: '',
+  instructorName: '',
+  instructorEmail: '',
+  createdAt: '',
   studentCount: 0
 };
 
@@ -490,7 +490,7 @@ export async function shareClassWithInstructor(
     return { success: false, message: 'Please provide a valid email address.' };
   }
 
-  const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, [DEFAULT_CLASS_ITEM]);
+  const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, []);
   const clsIndex = localClasses.findIndex(c => c.id === classId);
   let targetClass = clsIndex >= 0 ? localClasses[clsIndex] : null;
 
@@ -572,7 +572,7 @@ export async function removeSharedInstructorFromClass(
   targetEmail: string
 ): Promise<{ success: boolean; message: string; classItem?: ClassItem }> {
   const cleanEmail = targetEmail.toLowerCase().trim();
-  const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, [DEFAULT_CLASS_ITEM]);
+  const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, []);
   const clsIndex = localClasses.findIndex(c => c.id === classId);
   let targetClass = clsIndex >= 0 ? localClasses[clsIndex] : null;
 
@@ -624,15 +624,15 @@ export async function removeSharedInstructorFromClass(
  * Fetch all classes created by or shared with an instructor
  */
 export async function fetchClassesByInstructor(instructorId: string, instructorEmail?: string): Promise<ClassItem[]> {
-  const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, [DEFAULT_CLASS_ITEM]);
+  const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, []);
   const cleanEmail = (instructorEmail || '').toLowerCase().trim();
-  const isPrimary = cleanEmail === 'corbanb@gisboyshigh.net' || instructorId === 'corbanb_instructor';
 
   const instructorLocal = localClasses.filter(c => 
-    c.instructorId === instructorId || 
-    (cleanEmail && c.instructorEmail?.toLowerCase() === cleanEmail) ||
-    (cleanEmail && Array.isArray(c.sharedInstructorEmails) && c.sharedInstructorEmails.map(e => e.toLowerCase()).includes(cleanEmail)) ||
-    (isPrimary && (c.id === DEFAULT_CLASS_ITEM.id || c.instructorEmail === 'corbanb@gisboyshigh.net'))
+    c.id && c.id !== 'class_default_0653' && (
+      c.instructorId === instructorId || 
+      (cleanEmail && c.instructorEmail?.toLowerCase() === cleanEmail) ||
+      (cleanEmail && Array.isArray(c.sharedInstructorEmails) && c.sharedInstructorEmails.map(e => e.toLowerCase()).includes(cleanEmail))
+    )
   );
 
   try {
@@ -640,22 +640,16 @@ export async function fetchClassesByInstructor(instructorId: string, instructorE
     const remoteClasses: ClassItem[] = [];
     snap.forEach(docSnap => {
       const c = docSnap.data() as ClassItem;
-      if (c && c.id) {
+      if (c && c.id && c.id !== 'class_default_0653') {
         if (
           c.instructorId === instructorId || 
           (cleanEmail && c.instructorEmail?.toLowerCase() === cleanEmail) ||
-          (cleanEmail && Array.isArray(c.sharedInstructorEmails) && c.sharedInstructorEmails.map(e => e.toLowerCase()).includes(cleanEmail)) ||
-          (isPrimary && (c.id === DEFAULT_CLASS_ITEM.id || c.instructorEmail === 'corbanb@gisboyshigh.net'))
+          (cleanEmail && Array.isArray(c.sharedInstructorEmails) && c.sharedInstructorEmails.map(e => e.toLowerCase()).includes(cleanEmail))
         ) {
           remoteClasses.push(c);
         }
       }
     });
-
-    // Always ensure default class is represented for primary instructor
-    if (isPrimary && !remoteClasses.some(c => c.id === DEFAULT_CLASS_ITEM.id)) {
-      remoteClasses.unshift(DEFAULT_CLASS_ITEM);
-    }
 
     if (remoteClasses.length > 0) {
       // Merge remote with local
@@ -670,10 +664,6 @@ export async function fetchClassesByInstructor(instructorId: string, instructorE
     // Offline mode: return local classes
   }
 
-  if (isPrimary && !instructorLocal.some(c => c.id === DEFAULT_CLASS_ITEM.id)) {
-    instructorLocal.unshift(DEFAULT_CLASS_ITEM);
-  }
-
   return instructorLocal.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
@@ -684,11 +674,18 @@ export async function findClassByCode(rawCode: string): Promise<ClassItem | null
   const cleanCode = rawCode.trim().toUpperCase();
   if (!cleanCode) return null;
 
+  // Block discontinued default code
+  if (cleanCode === 'SCI-0653' || cleanCode === '0653') {
+    return null;
+  }
+
   // Check local classes first
   const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, []);
   let match = localClasses.find(c => 
-    c.classCode.toUpperCase() === cleanCode || 
-    c.classCode.toUpperCase() === `SCI-${cleanCode}`
+    c.id !== 'class_default_0653' && (
+      c.classCode.toUpperCase() === cleanCode || 
+      c.classCode.toUpperCase() === `SCI-${cleanCode}`
+    )
   );
   if (match) return match;
 
@@ -699,7 +696,10 @@ export async function findClassByCode(rawCode: string): Promise<ClassItem | null
     );
     const snap = await getDocs(q);
     if (!snap.empty) {
-      return snap.docs[0].data() as ClassItem;
+      const c = snap.docs[0].data() as ClassItem;
+      if (c && c.id && c.id !== 'class_default_0653') {
+        return c;
+      }
     }
 
     const q2 = query(
@@ -708,20 +708,13 @@ export async function findClassByCode(rawCode: string): Promise<ClassItem | null
     );
     const snap2 = await getDocs(q2);
     if (!snap2.empty) {
-      return snap2.docs[0].data() as ClassItem;
+      const c2 = snap2.docs[0].data() as ClassItem;
+      if (c2 && c2.id && c2.id !== 'class_default_0653') {
+        return c2;
+      }
     }
   } catch {
     // Offline
-  }
-
-  // Fallback: If code matches default class code SCI-0653 or 0653, ensure default class is registered
-  if (cleanCode === 'SCI-0653' || cleanCode === '0653') {
-    const updated = [...localClasses, DEFAULT_CLASS_ITEM];
-    setLocalItem(LOCAL_CLASSES_KEY, updated);
-    try {
-      setDoc(doc(db, 'classes', DEFAULT_CLASS_ITEM.id), DEFAULT_CLASS_ITEM, { merge: true }).catch(() => {});
-    } catch {}
-    return DEFAULT_CLASS_ITEM;
   }
 
   return null;
@@ -735,11 +728,19 @@ export async function joinClassWithCode(
   student: UserProfile,
   progress: StudentProgress
 ): Promise<{ success: boolean; classItem?: ClassItem; message: string }> {
+  const clean = classCode.trim().toUpperCase();
+  if (clean === 'SCI-0653' || clean === '0653') {
+    return {
+      success: false,
+      message: 'The default class code SCI-0653 has been discontinued. Please enter an active class code provided by your instructor.'
+    };
+  }
+
   const targetClass = await findClassByCode(classCode);
-  if (!targetClass) {
+  if (!targetClass || targetClass.id === 'class_default_0653') {
     return { 
       success: false, 
-      message: `No class found with code "${classCode.toUpperCase()}". Please verify the code with your instructor.` 
+      message: `No active class found with code "${classCode.toUpperCase()}". Please verify the code with your instructor.` 
     };
   }
 
@@ -880,28 +881,26 @@ export async function joinClassWithCode(
  */
 export async function fetchStudentEnrolledClasses(studentId: string): Promise<ClassItem[]> {
   const enrolledKey = `${LOCAL_ENROLLED_PREFIX}${studentId}`;
-  const localEnrolled = getLocalItem<ClassItem[]>(enrolledKey, [DEFAULT_CLASS_ITEM]);
+  const localEnrolled = getLocalItem<ClassItem[]>(enrolledKey, [])
+    .filter(c => c && c.id && c.id !== 'class_default_0653');
 
   try {
     const userRef = doc(db, 'users', studentId);
     const userSnap = await getDoc(userRef);
     const enrolledIds: string[] = (userSnap.exists() && userSnap.data()?.enrolledClassIds) || [];
     
-    // Always include DEFAULT_CLASS_ITEM for Cambridge 0653 syllabus
-    if (!enrolledIds.includes(DEFAULT_CLASS_ITEM.id)) {
-      enrolledIds.unshift(DEFAULT_CLASS_ITEM.id);
-    }
+    // Filter out any invalid default class IDs
+    const validEnrolledIds = enrolledIds.filter(id => id && id !== 'class_default_0653');
 
     const classes: ClassItem[] = [];
-    for (const classId of enrolledIds) {
-      if (classId === DEFAULT_CLASS_ITEM.id) {
-        classes.push(DEFAULT_CLASS_ITEM);
-        continue;
-      }
+    for (const classId of validEnrolledIds) {
       try {
         const classSnap = await getDoc(doc(db, 'classes', classId));
         if (classSnap.exists()) {
-          classes.push(classSnap.data() as ClassItem);
+          const cData = classSnap.data() as ClassItem;
+          if (cData && cData.id && cData.id !== 'class_default_0653') {
+            classes.push(cData);
+          }
         }
       } catch {}
     }
@@ -910,26 +909,25 @@ export async function fetchStudentEnrolledClasses(studentId: string): Promise<Cl
     try {
       const allClassSnap = await getDocs(collection(db, 'classes'));
       for (const cd of allClassSnap.docs) {
+        if (cd.id === 'class_default_0653') continue;
         if (!classes.some(c => c.id === cd.id)) {
           const studentDoc = await getDoc(doc(db, 'classes', cd.id, 'students', studentId));
           if (studentDoc.exists()) {
-            classes.push(cd.data() as ClassItem);
+            const cData = cd.data() as ClassItem;
+            if (cData && cData.id && cData.id !== 'class_default_0653') {
+              classes.push(cData);
+            }
           }
         }
       }
     } catch {}
 
-    if (classes.length > 0) {
-      setLocalItem(enrolledKey, classes);
-      return classes;
-    }
+    setLocalItem(enrolledKey, classes);
+    return classes;
   } catch {
     // Offline mode: return local enrolled classes
   }
 
-  if (!localEnrolled.some(c => c.id === DEFAULT_CLASS_ITEM.id)) {
-    localEnrolled.unshift(DEFAULT_CLASS_ITEM);
-  }
   return localEnrolled;
 }
 
@@ -990,7 +988,8 @@ export async function fetchAllRegisteredStudents(): Promise<ClassStudentItem[]> 
   }
 
   // 3. Fallback to local storage cached students
-  const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, [DEFAULT_CLASS_ITEM]);
+  const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, [])
+    .filter(c => c && c.id && c.id !== 'class_default_0653');
   for (const c of localClasses) {
     const studentKey = `${LOCAL_STUDENTS_PREFIX}${c.id}`;
     const localClassStudents = getLocalItem<ClassStudentItem[]>(studentKey, []);
@@ -1008,6 +1007,7 @@ export async function fetchAllRegisteredStudents(): Promise<ClassStudentItem[]> 
  * Fetch all students and their detailed progress enrolled in a specific class
  */
 export async function fetchStudentsInClass(classId: string): Promise<ClassStudentItem[]> {
+  if (!classId || classId === 'class_default_0653') return [];
   const studentKey = `${LOCAL_STUDENTS_PREFIX}${classId}`;
   const localStudents = getLocalItem<ClassStudentItem[]>(studentKey, []);
 
@@ -1021,15 +1021,6 @@ export async function fetchStudentsInClass(classId: string): Promise<ClassStuden
     if (remoteList.length > 0) {
       setLocalItem(studentKey, remoteList);
       return remoteList.sort((a, b) => b.lastActive.localeCompare(a.lastActive));
-    }
-
-    // If default class has no students in subcollection, query all registered students
-    if (classId === DEFAULT_CLASS_ITEM.id || classId === 'class_default_0653') {
-      const allReg = await fetchAllRegisteredStudents();
-      if (allReg.length > 0) {
-        setLocalItem(studentKey, allReg);
-        return allReg;
-      }
     }
   } catch {
     // Offline mode: return local students
@@ -1203,17 +1194,17 @@ export async function moveStudentToClass(
 
   // Check local classes
   const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, []);
-  sourceClass = localClasses.find(c => c.id === sourceClassId) || (sourceClassId === DEFAULT_CLASS_ITEM.id ? DEFAULT_CLASS_ITEM : null);
-  targetClass = localClasses.find(c => c.id === targetClassId) || (targetClassId === DEFAULT_CLASS_ITEM.id ? DEFAULT_CLASS_ITEM : null);
+  sourceClass = localClasses.find(c => c.id === sourceClassId) || null;
+  targetClass = localClasses.find(c => c.id === targetClassId) || null;
 
   // If not found locally, query Firestore
-  if (!sourceClass && sourceClassId !== DEFAULT_CLASS_ITEM.id) {
+  if (!sourceClass && sourceClassId) {
     try {
       const snap = await getDoc(doc(db, 'classes', sourceClassId));
       if (snap.exists()) sourceClass = snap.data() as ClassItem;
     } catch {}
   }
-  if (!targetClass && targetClassId !== DEFAULT_CLASS_ITEM.id) {
+  if (!targetClass && targetClassId) {
     try {
       const snap = await getDoc(doc(db, 'classes', targetClassId));
       if (snap.exists()) targetClass = snap.data() as ClassItem;
@@ -1777,17 +1768,14 @@ export async function fetchTasksForStudent(
   const now = Date.now();
 
   const studentCleanEmail = (student.email || '').toLowerCase().trim();
-  const activeClassIds = new Set(enrolledClassIds || []);
-  activeClassIds.add(DEFAULT_CLASS_ITEM.id);
-  activeClassIds.add('class_default_0653');
+  const activeClassIds = new Set((enrolledClassIds || []).filter(id => id && id !== 'class_default_0653'));
 
-  // If student only has default class in local memory, also resolve enrolled classes from Firestore user profile
-  if (activeClassIds.size <= 2 && student.id) {
+  if (activeClassIds.size === 0 && student.id) {
     try {
       const userDoc = await getDoc(doc(db, 'users', student.id));
       if (userDoc.exists()) {
         const userClasses: string[] = userDoc.data()?.enrolledClassIds || [];
-        userClasses.forEach(cid => activeClassIds.add(cid));
+        userClasses.filter(cid => cid && cid !== 'class_default_0653').forEach(cid => activeClassIds.add(cid));
       }
     } catch {}
   }
@@ -1803,19 +1791,15 @@ export async function fetchTasksForStudent(
     // 2. Class match:
     // - task applies to 'all' classes
     // - OR student is enrolled in the task's class
-    // - OR task is for default class
     const isClassMatch = 
       task.classId === 'all' || 
-      activeClassIds.has(task.classId) || 
-      task.classId === DEFAULT_CLASS_ITEM.id || 
-      task.classId === 'class_default_0653';
+      activeClassIds.has(task.classId);
 
     // If teacher selected specific students, only targeted students see it.
     // If teacher set task for class (or all classes), all students enrolled in that class see it.
-    // If the student hasn't entered a custom class code yet, show course-wide & syllabus tasks so assignments are never hidden.
     const appliesToStudent = hasTargetIds 
       ? isTargetedDirectly 
-      : (isClassMatch || task.classId === 'all' || activeClassIds.size <= 2);
+      : (isClassMatch || task.classId === 'all');
 
     if (appliesToStudent) {
       // Fetch or derive student's submission status
@@ -2546,16 +2530,17 @@ export async function updatePastStudentQuizResultsWithNewTrafficLightParameters(
   // 2. Scan and update all enrolled students in classes (Firestore + localStorage)
   try {
     const classIdsToProcess = new Set<string>();
-    classIdsToProcess.add(DEFAULT_CLASS_ITEM.id);
 
     // Read local classes
     const localClasses = getLocalItem<ClassItem[]>(LOCAL_CLASSES_KEY, []);
-    localClasses.forEach(c => classIdsToProcess.add(c.id));
+    localClasses.filter(c => c && c.id && c.id !== 'class_default_0653').forEach(c => classIdsToProcess.add(c.id));
 
     // Read Firestore classes
     try {
       const classesSnap = await getDocs(collection(db, 'classes'));
-      classesSnap.forEach(d => classIdsToProcess.add(d.id));
+      classesSnap.forEach(d => {
+        if (d.id !== 'class_default_0653') classIdsToProcess.add(d.id);
+      });
     } catch {}
 
     for (const classId of classIdsToProcess) {

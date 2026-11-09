@@ -1,47 +1,8 @@
-import { LeaderboardEntry, UserProfile, StudentProgress, ExamTier, StudentBadge } from '../types';
-import { fetchStudentsInClass, fetchAllRegisteredStudents, ClassStudentItem, fetchStudentEnrolledClasses, DEFAULT_CLASS_ITEM, ClassItem } from './firestoreService';
-import { evaluateStudentBadges, calculateStudentLevel, BADGE_DEFINITIONS } from './badgeService';
+import { LeaderboardEntry, UserProfile, StudentProgress, StudentBadge } from '../types';
+import { fetchStudentsInClass, ClassStudentItem, fetchStudentEnrolledClasses, ClassItem } from './firestoreService';
+import { evaluateStudentBadges, BADGE_DEFINITIONS } from './badgeService';
 
-// Fallback diverse Cambridge 0653 cohort classmates so the competition is always thrilling
-export const COHORT_PEERS: { 
-  name: string; 
-  email: string; 
-  tier: ExamTier; 
-  streak: number; 
-  decks: number; 
-  quizzesPassed: number; 
-  totalQuizScore: number;
-  badgesCount: number;
-  featuredBadgeId: string;
-}[] = [
-  { name: 'Chloe Vance', email: 'chloe.vance@cambridge-academy.org', tier: 'Extended', streak: 12, decks: 58, quizzesPassed: 16, totalQuizScore: 154, badgesCount: 14, featuredBadgeId: 'quiz_cambridge_distinction' },
-  { name: 'Tariq Al-Mansoor', email: 'tariq.m@science-high.edu', tier: 'Extended', streak: 9, decks: 49, quizzesPassed: 14, totalQuizScore: 132, badgesCount: 12, featuredBadgeId: 'topic_B2' },
-  { name: 'Mei-Ling Chen', email: 'meiling.chen@global-igcse.com', tier: 'Extended', streak: 15, decks: 45, quizzesPassed: 12, totalQuizScore: 118, badgesCount: 11, featuredBadgeId: 'streak_14' },
-  { name: 'Lucas Rossi', email: 'lucas.rossi@international.school', tier: 'Extended', streak: 6, decks: 38, quizzesPassed: 10, totalQuizScore: 98, badgesCount: 9, featuredBadgeId: 'topic_C5' },
-  { name: 'Amara Okafor', email: 'amara.okafor@lagos-science.net', tier: 'Core', streak: 8, decks: 32, quizzesPassed: 8, totalQuizScore: 78, badgesCount: 8, featuredBadgeId: 'streak_7' },
-  { name: 'Oliver Bennett', email: 'oliver.bennett@st-peters.ac.uk', tier: 'Extended', streak: 4, decks: 28, quizzesPassed: 7, totalQuizScore: 68, badgesCount: 7, featuredBadgeId: 'quiz_sharpshooter' },
-  { name: 'Sofia Rodriguez', email: 'sofia.r@madrid-intl.es', tier: 'Extended', streak: 5, decks: 24, quizzesPassed: 6, totalQuizScore: 56, badgesCount: 6, featuredBadgeId: 'topic_P1' },
-  { name: 'Devan Patel', email: 'devan.patel@mumbai-scholars.in', tier: 'Core', streak: 3, decks: 19, quizzesPassed: 5, totalQuizScore: 48, badgesCount: 5, featuredBadgeId: 'streak_3' }
-];
 
-function calculatePeerXP(peer: typeof COHORT_PEERS[0]): number {
-  return (peer.decks * 50) + (peer.totalQuizScore * 15) + (peer.streak * 25) + (peer.badgesCount * 120);
-}
-
-function resolvePeerBadges(peer: typeof COHORT_PEERS[0]): StudentBadge[] {
-  const list: StudentBadge[] = [];
-  const featured = BADGE_DEFINITIONS.find(b => b.id === peer.featuredBadgeId);
-  if (featured) {
-    list.push({ ...featured, unlockedAt: new Date(Date.now() - 86400000 * 2).toISOString() });
-  }
-  // Add common badges based on peer badgesCount
-  for (const b of BADGE_DEFINITIONS) {
-    if (b.id !== peer.featuredBadgeId && list.length < peer.badgesCount) {
-      list.push({ ...b, unlockedAt: new Date(Date.now() - 86400000 * (list.length + 1)).toISOString() });
-    }
-  }
-  return list;
-}
 
 export interface ClassLeaderboardData {
   classItem?: ClassItem;
@@ -62,6 +23,21 @@ export async function getClassStudentLeaderboard(
   currentUser?: UserProfile | null,
   currentProgress?: StudentProgress
 ): Promise<ClassLeaderboardData> {
+  const emptyResult: ClassLeaderboardData = {
+    classItem: undefined,
+    entries: [],
+    currentUserEntry: undefined,
+    topThree: [],
+    totalClassBadges: 0,
+    totalClassQuizScore: 0,
+    totalCompetitors: 0
+  };
+
+  // If no class is specified, return empty data
+  if (!classId || !classId.trim()) {
+    return emptyResult;
+  }
+
   let rawStudents: ClassStudentItem[] = [];
   let classInfo: ClassItem | undefined;
 
@@ -69,10 +45,16 @@ export async function getClassStudentLeaderboard(
     if (currentUser?.id) {
       const classes = await fetchStudentEnrolledClasses(currentUser.id);
       classInfo = classes.find(c => c.id === classId);
+
+      // Student visibility restriction:
+      // Students can ONLY view the leaderboard of a class they are officially enrolled in.
+      if (currentUser.role === 'student' && !classInfo) {
+        return emptyResult;
+      }
     }
     rawStudents = await fetchStudentsInClass(classId);
   } catch (err) {
-    console.warn('Error fetching class students for leaderboard, using fallback cohort:', err);
+    console.warn('Error fetching class students for leaderboard:', err);
     rawStudents = [];
   }
 
@@ -230,36 +212,6 @@ export async function getClassStudentLeaderboard(
     });
   }
 
-  // Populate cohort classmates if class size is small (< 5) to keep class competition exciting
-  if (studentMap.size < 6) {
-    COHORT_PEERS.forEach((peer, i) => {
-      const peerId = `cohort_classmate_${i}`;
-      if (!studentMap.has(peerId)) {
-        const featuredBadgeDef = BADGE_DEFINITIONS.find(b => b.id === peer.featuredBadgeId);
-        const unlockedBadges = resolvePeerBadges(peer);
-        studentMap.set(peerId, {
-          studentId: peerId,
-          name: peer.name,
-          email: peer.email,
-          tier: peer.tier,
-          xp: calculatePeerXP(peer),
-          rank: 0,
-          streakDays: peer.streak,
-          completedLessonsCount: peer.decks,
-          badgesCount: peer.badgesCount,
-          totalQuizScore: peer.totalQuizScore,
-          quizzesCompletedCount: peer.quizzesPassed,
-          unlockedBadges,
-          featuredBadge: featuredBadgeDef as any,
-          // PRIVACY INVARIANT: NO quiz average for other students
-          quizAccuracy: undefined,
-          lastActive: new Date(Date.now() - (i * 3600000 * 3)).toISOString(),
-          isCurrentUser: false
-        });
-      }
-    });
-  }
-
   // Sort primarily by totalQuizScore, then by badgesCount, then by xp
   const sorted = Array.from(studentMap.values()).sort((a, b) => {
     const scoreA = a.totalQuizScore || 0;
@@ -282,7 +234,7 @@ export async function getClassStudentLeaderboard(
   const totalClassQuizScore = sorted.reduce((sum, s) => sum + (s.totalQuizScore || 0), 0);
 
   return {
-    classItem: classInfo || DEFAULT_CLASS_ITEM,
+    classItem: classInfo || undefined,
     entries: sorted,
     currentUserEntry,
     topThree,
@@ -307,7 +259,7 @@ export async function getStudentLeaderboard(
   totalCompetitors: number;
 }> {
   const result = await getClassStudentLeaderboard(
-    currentClassId || DEFAULT_CLASS_ITEM.id,
+    currentClassId || '',
     currentUser,
     currentProgress
   );

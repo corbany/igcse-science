@@ -1716,6 +1716,7 @@ function buildDynamicSubtopicQuiz(subtopic: SubtopicTopicGroup): QuizQuestion[] 
 }
 
 import { selectFreshSubtopicQuiz, buildComprehensiveSubtopicPool, getSeenQuestionIds, clearSeenQuestionHistory } from './expandedSubtopicQuestions';
+import { getSubtopicQuiz, getSubtopicPoolSize } from './subtopicQuestionEngine';
 
 export { selectFreshSubtopicQuiz, buildComprehensiveSubtopicPool, getSeenQuestionIds, clearSeenQuestionHistory };
 
@@ -1723,17 +1724,17 @@ export { selectFreshSubtopicQuiz, buildComprehensiveSubtopicPool, getSeenQuestio
  * Returns the total number of unique, syllabus-aligned questions available in the pool for a subtopic.
  */
 export function getSubtopicQuestionPoolSize(subtopicCode: string): number {
-  return buildComprehensiveSubtopicPool(subtopicCode).length;
+  return getSubtopicPoolSize(subtopicCode);
 }
 
 /**
  * Returns a complete, 10-question quiz tailored specifically to the given subtopic.
  * Guarantees that:
- * 1. Huge variety: draws from an expanded library of 35-50+ questions per subtopic.
- * 2. Non-repeating rotation: successive quiz attempts on the same subtopic will NOT present the same questions.
- * 3. ZERO repeat questions within any single quiz attempt.
- * 4. Option order is randomized with correctIndex evenly balanced across A (0), B (1), C (2), and D (3).
- * 5. Strictly aligned with Cambridge 0653 syllabus constraints (NO genetics/monohybrid crosses, NO C3 mole calculations).
+ * 1. 100% targeting of the exact syllabus subtopic that the lesson slide covers.
+ * 2. Authentic Cambridge 0653 Paper 2 Multiple Choice question parameters and quality.
+ * 3. 4 plausible scientific options (A, B, C, D) with balanced distribution.
+ * 4. Comprehensive examiner rationale explaining why the answer is correct and why other options are wrong.
+ * 5. Non-repeating rotation on consecutive attempts.
  */
 export function getQuizForSubtopic(
   subtopicCode: string,
@@ -1743,35 +1744,7 @@ export function getQuizForSubtopic(
     resetHistory?: boolean;
   }
 ): QuizQuestion[] {
-  const normalized = subtopicCode.trim().toUpperCase();
-
-  // Use the intelligent non-repeating selection engine
-  const selection = selectFreshSubtopicQuiz(normalized, options);
-  
-  if (selection.questions && selection.questions.length > 0) {
-    return randomizeQuizQuestions(selection.questions);
-  }
-
-  // Fallback if empty
-  const subtopic = getSubtopicByCode(normalized) || 
-    allSubtopicsData.find(s => s.subtopicCode.toLowerCase() === normalized.toLowerCase());
-
-  if (subtopic) {
-    const dynamicQuiz = buildDynamicSubtopicQuiz(subtopic);
-    const uniqueQuestions = deduplicateQuizQuestions(dynamicQuiz);
-    return randomizeQuizQuestions(shuffleArray(uniqueQuestions).slice(0, options?.count || 10));
-  }
-
-  const subject: ScienceSubject = normalized.startsWith('B') ? 'biology' : normalized.startsWith('C') ? 'chemistry' : 'physics';
-  const topicCode = normalized.split('.')[0] || 'B1';
-  const fallback = (predefinedSubtopicQuizzes['B1.1'] || []).slice(0, 10).map((q, idx) => ({
-    ...q,
-    id: `${normalized}-fb-${idx}`,
-    subject,
-    topicCode,
-    syllabusRef: normalized
-  }));
-
-  return randomizeQuizQuestions(shuffleArray(deduplicateQuizQuestions(fallback)).slice(0, options?.count || 10));
+  return getSubtopicQuiz(subtopicCode, options);
 }
+
 

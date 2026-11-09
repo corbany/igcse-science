@@ -40,7 +40,11 @@ import {
   Clock,
   Lock,
   RefreshCw,
-  Key
+  Key,
+  Brain,
+  XCircle,
+  CheckCircle2,
+  ChevronUp
 } from 'lucide-react';
 import { ScienceSubject, TrafficLightStatus, SubtopicQuizResult, StudentProgress } from '../types';
 import { 
@@ -48,7 +52,8 @@ import {
   SubtopicTopicGroup, 
   TeacherSlideDeck, 
   ClassroomSlide,
-  getSubtopicsBySubject 
+  getSubtopicsBySubject,
+  resolveSubtopicByQuery 
 } from '../data/subtopicSlidesData';
 import { getQuizForSubtopic, getSubtopicQuestionPoolSize } from '../data/subtopicQuizzes';
 import { 
@@ -80,6 +85,8 @@ interface LessonSlidesViewerProps {
   isInstructor?: boolean;
   selectedSubject: ScienceSubject | 'all';
   searchQuery: string;
+  targetSubtopicCode?: string | null;
+  onClearTargetSubtopicCode?: () => void;
   completedLessons: string[];
   trafficLights: Record<string, TrafficLightStatus>;
   subtopicQuizScores: Record<string, SubtopicQuizResult>;
@@ -97,6 +104,8 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   isInstructor = false,
   selectedSubject,
   searchQuery,
+  targetSubtopicCode,
+  onClearTargetSubtopicCode,
   completedLessons,
   trafficLights = {},
   subtopicQuizScores = {},
@@ -122,6 +131,27 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
   // Selected subtopic
   const [selectedSubtopicCode, setSelectedSubtopicCode] = useState<string>('B1.1');
+
+  // React to targetSubtopicCode navigation from student tasks or assignment links
+  useEffect(() => {
+    if (!targetSubtopicCode) return;
+    const matched = resolveSubtopicByQuery(targetSubtopicCode);
+    if (matched) {
+      setActiveSubjectTab(matched.subject);
+      setStatusFilter('all');
+      setSelectedSubtopicCode(matched.subtopicCode);
+      setActiveDeckIndex(0);
+      setActiveSlideIndex(0);
+      setExpandedSubtopics(prev => ({
+        ...prev,
+        [matched.subtopicCode]: true
+      }));
+    }
+    if (onClearTargetSubtopicCode) {
+      onClearTargetSubtopicCode();
+    }
+  }, [targetSubtopicCode, onClearTargetSubtopicCode]);
+
   const [activeDeckIndex, setActiveDeckIndex] = useState<number>(0);
   const [activeSlideIndex, setActiveSlideIndex] = useState<number>(0);
   const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
@@ -208,6 +238,37 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   const [submittedAnswers, setSubmittedAnswers] = useState<Record<number, boolean>>({});
   const [quizCompleted, setQuizCompleted] = useState<boolean>(false);
   const [quizScore, setQuizScore] = useState<number>(0);
+  const [quizTimerSeconds, setQuizTimerSeconds] = useState<number>(0);
+  const [quizReviewFilter, setQuizReviewFilter] = useState<'all' | 'incorrect' | 'correct'>('all');
+
+  // Quiz active timer
+  useEffect(() => {
+    let interval: any = null;
+    if (isQuizModalOpen && !quizCompleted) {
+      interval = setInterval(() => {
+        setQuizTimerSeconds(prev => prev + 1);
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isQuizModalOpen, quizCompleted]);
+
+  const formatQuizTimer = (totalSec: number) => {
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const getCambridgeGrade = (pct: number) => {
+    if (pct >= 90) return { grade: 'A*', label: 'Grade A* (Outstanding)', color: 'text-amber-400 bg-amber-500/15 border-amber-500/40' };
+    if (pct >= 80) return { grade: 'A', label: 'Grade A (Mastery Certified)', color: 'text-emerald-400 bg-emerald-500/15 border-emerald-500/40' };
+    if (pct >= 70) return { grade: 'B', label: 'Grade B (Proficient)', color: 'text-teal-400 bg-teal-500/15 border-teal-500/40' };
+    if (pct >= 60) return { grade: 'C', label: 'Grade C (Standard Pass)', color: 'text-sky-400 bg-sky-500/15 border-sky-500/40' };
+    if (pct >= 50) return { grade: 'D', label: 'Grade D (Developing)', color: 'text-amber-400 bg-amber-500/15 border-amber-500/40' };
+    if (pct >= 40) return { grade: 'E', label: 'Grade E (Basic Foundation)', color: 'text-orange-400 bg-orange-500/15 border-orange-500/40' };
+    return { grade: 'U', label: 'Grade U (Needs Revision)', color: 'text-rose-400 bg-rose-500/15 border-rose-500/40' };
+  };
 
   // Filter subtopics based on subject, search, and traffic light filter
   const filteredSubtopics = useMemo(() => {
@@ -734,7 +795,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   const startQuizForSubtopic = (code: string, isRetake: boolean = false) => {
     const nextAttempt = (subtopicAttemptCounts[code] || 0) + (isRetake ? 1 : 1);
     setSubtopicAttemptCounts(prev => ({ ...prev, [code]: nextAttempt }));
-    const questions = getQuizForSubtopic(code, { attemptNumber: nextAttempt });
+    const questions = getQuizForSubtopic(code, { attemptNumber: nextAttempt, resetHistory: isRetake });
     setQuizSubtopicCode(code);
     setQuizQuestions(questions);
     setCurrentQuestionIndex(0);
@@ -742,6 +803,8 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     setSubmittedAnswers({});
     setQuizCompleted(false);
     setQuizScore(0);
+    setQuizTimerSeconds(0);
+    setQuizReviewFilter('all');
     setIsQuizModalOpen(true);
   };
 
@@ -823,104 +886,71 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   };
 
   return (
-    <div className={`space-y-6 ${theme === 'light' ? 'text-slate-800' : 'text-slate-100'}`}>
-      {/* Subject Tabs & Traffic Light Summary Banner */}
-      <div className={`rounded-2xl border p-5 sm:p-6 transition shadow-sm ${
-        theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
-      }`}>
+    <div className="w-full max-w-5xl mx-auto space-y-6 pb-12 font-sans text-slate-800">
+      {/* Header & Subject Filter Strip */}
+      <div className="rounded-xl border border-slate-200 p-6 transition bg-white shadow-xs">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className={`text-xs font-mono font-bold px-2.5 py-0.5 rounded border ${
-                theme === 'dark' ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-300'
-              }`}>
-                Cambridge IGCSE 0653
+              <span className="text-xs font-bold px-2 py-0.5 rounded bg-[#EBF3F5] text-slate-800 border border-slate-300">
+                Cambridge 0653
               </span>
-              <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${
-                theme === 'dark' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-100 text-emerald-800'
-              }`}>
-                {subjectCounts.total} Subtopic Slide Units
+              <span className="text-xs font-semibold text-slate-600">
+                {subjectCounts.total} Syllabus Units
               </span>
             </div>
-            <h1 className={`text-xl sm:text-2xl font-black tracking-tight ${
-              theme === 'dark' ? 'text-white' : 'text-slate-900'
-            }`}>
-              Interactive Lesson Slide Decks & Subtopic Mastery
+            <h1 className="text-2xl font-bold tracking-tight text-slate-800">
+              Syllabus Library and Lesson Slides
             </h1>
-            <p className={`text-xs sm:text-sm ${
-              theme === 'dark' ? 'text-slate-400' : 'text-slate-600'
-            }`}>
-              Browse every syllabus subtopic with the subtopic code in every slide header. Track your mastery using the 
-              <span className="font-semibold text-emerald-400 mx-1">Traffic Light System</span> 
-              (earn Green by scoring ≥80% on the 10-Question Knowledge Check).
+            <p className="text-base text-slate-600 max-w-2xl">
+              Curated Cambridge IGCSE Combined Science slide presentations, syllabus objectives, and 10-question mastery checks.
             </p>
           </div>
 
           {/* Google Drive Folder Sync & Direct Folder Link - INSTRUCTOR ONLY */}
           {isInstructor ? (
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 shrink-0 self-start lg:self-center">
-              <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-purple-500/15 text-purple-400 border border-purple-500/30">
-                Instructor Drive Tools
-              </span>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 shrink-0 self-start lg:self-center">
               <button
                 onClick={handleOrganizeDriveLessons}
                 disabled={isOrganizingDrive || isSyncingDrive}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition shadow-xs ${
-                  isOrganizingDrive 
-                    ? 'bg-amber-800 text-white animate-pulse'
-                    : 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white shadow-amber-600/30'
-                }`}
-                title="Reads the syllabus code at the start of each file name (e.g. P1.5.1.), creates corresponding subfolders in Google Drive, moves lessons into them, and replaces all synced lessons freshly."
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition bg-white text-slate-800 border border-slate-300 hover:bg-slate-100 cursor-pointer"
+                title="Sort Drive files into subfolders"
               >
                 <FolderSync className={`w-3.5 h-3.5 ${isOrganizingDrive ? 'animate-spin' : ''}`} />
-                <span>
-                  {isOrganizingDrive 
-                    ? 'Sorting into Subfolders...' 
-                    : 'Sort into Subfolders (e.g. P1.5.1)'}
-                </span>
+                <span>{isOrganizingDrive ? 'Sorting...' : 'Sort Subfolders'}</span>
               </button>
 
               <button
                 onClick={handleReplaceAllLessons}
                 disabled={isSyncingDrive || isOrganizingDrive}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition shadow-xs ${
-                  isSyncingDrive && !isOrganizingDrive
-                    ? 'bg-purple-800 text-white animate-pulse'
-                    : 'bg-purple-600 hover:bg-purple-500 text-white'
-                }`}
-                title="Clears all existing cached lessons and re-syncs from Drive freshly."
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition bg-slate-800 text-white hover:bg-slate-700 cursor-pointer"
+                title="Re-sync from Drive"
               >
                 <RotateCcw className={`w-3.5 h-3.5 ${isSyncingDrive ? 'animate-spin' : ''}`} />
-                <span>Replace All Lessons</span>
+                <span>Sync Lessons</span>
               </button>
 
               <a
                 href={TARGET_DRIVE_FOLDER_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition ${
-                  theme === 'dark' 
-                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700' 
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
-                }`}
-                title="Open Google Drive folder in new tab"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-100 transition"
               >
                 <span>Drive Folder</span>
-                <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                <ExternalLink className="w-3.5 h-3.5" />
               </a>
             </div>
           ) : (
-            /* STUDENT MODE: Clean status badge */
-            <div className="hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold self-start lg:self-center">
-              <CheckCircle className="w-4 h-4 text-emerald-400" />
-              <span>Score ≥80% on 10-Q Quiz to earn Green Status</span>
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#EBF3F5] text-slate-800 border border-slate-300 text-xs font-bold self-start lg:self-center">
+              <CheckCircle className="w-4 h-4 text-emerald-700" />
+              <span>Score ≥80% for Green Status</span>
             </div>
           )}
         </div>
 
         {/* Sync message if present (Instructor only) */}
         {isInstructor && driveSyncMessage && (
-          <div className="mt-3 text-xs px-3.5 py-2.5 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-300 flex flex-wrap items-center justify-between gap-2">
+          <div className="mt-3 text-xs px-4 py-2.5 rounded-lg bg-[#FDFBF7] border border-slate-300 text-slate-800 flex flex-wrap items-center justify-between gap-2">
             <span className="flex-1 min-w-[240px] leading-relaxed">{driveSyncMessage}</span>
             <div className="flex items-center gap-2">
               {(driveSyncMessage.includes('insufficient') || 
@@ -947,7 +977,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                       setDriveSyncMessage(`Authorization error: ${e?.message || 'Failed to authorize Drive'}`);
                     }
                   }}
-                  className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md transition flex items-center gap-1.5 cursor-pointer"
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition flex items-center gap-1.5 cursor-pointer"
                 >
                   <Key className="w-3.5 h-3.5" />
                   <span>Grant Drive Access</span>
@@ -955,7 +985,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
               )}
               <button 
                 onClick={() => setDriveSyncMessage(null)} 
-                className="text-slate-400 hover:text-white p-1 rounded-md"
+                className="text-slate-500 hover:text-slate-800 p-1 rounded-md"
                 title="Dismiss notice"
               >
                 <X className="w-3.5 h-3.5" />
@@ -965,98 +995,75 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
         )}
 
         {/* 3 Science Subject Selector Bar */}
-        <div className="mt-6 pt-5 border-t border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="mt-5 pt-4 border-t border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
             <button
-              onClick={() => setActiveSubjectTab('biology')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition ${
-                activeSubjectTab === 'biology'
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
-                  : theme === 'dark' 
-                    ? 'bg-slate-800/80 text-emerald-400 hover:bg-slate-800 border border-slate-700/60' 
-                    : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
+              onClick={() => setActiveSubjectTab('all')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer select-none border ${
+                activeSubjectTab === 'all'
+                  ? 'bg-slate-800 text-white border-slate-800'
+                  : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
               }`}
             >
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
-              <span>Biology Topics (B1–B16)</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                activeSubjectTab === 'biology' ? 'bg-emerald-700 text-white' : 'bg-emerald-950/60 text-emerald-300'
-              }`}>
-                {subjectCounts.biology}
-              </span>
+              All Units ({subjectCounts.total})
+            </button>
+
+            <button
+              onClick={() => setActiveSubjectTab('biology')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer select-none border ${
+                activeSubjectTab === 'biology'
+                  ? 'bg-slate-800 text-white border-slate-800'
+                  : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+              <span>Biology ({subjectCounts.biology})</span>
             </button>
 
             <button
               onClick={() => setActiveSubjectTab('chemistry')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition ${
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer select-none border ${
                 activeSubjectTab === 'chemistry'
-                  ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
-                  : theme === 'dark' 
-                    ? 'bg-slate-800/80 text-sky-400 hover:bg-slate-800 border border-slate-700/60' 
-                    : 'bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200'
+                  ? 'bg-slate-800 text-white border-slate-800'
+                  : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
               }`}
             >
-              <span className="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
-              <span>Chemistry Topics (C1–C12)</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                activeSubjectTab === 'chemistry' ? 'bg-sky-700 text-white' : 'bg-sky-950/60 text-sky-300'
-              }`}>
-                {subjectCounts.chemistry}
-              </span>
+              <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+              <span>Chemistry ({subjectCounts.chemistry})</span>
             </button>
 
             <button
               onClick={() => setActiveSubjectTab('physics')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition ${
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer select-none border ${
                 activeSubjectTab === 'physics'
-                  ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30'
-                  : theme === 'dark' 
-                    ? 'bg-slate-800/80 text-amber-400 hover:bg-slate-800 border border-slate-700/60' 
-                    : 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200'
+                  ? 'bg-slate-800 text-white border-slate-800'
+                  : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
               }`}
             >
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-              <span>Physics Topics (P1–P5)</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                activeSubjectTab === 'physics' ? 'bg-amber-700 text-white' : 'bg-amber-950/60 text-amber-300'
-              }`}>
-                {subjectCounts.physics}
-              </span>
-            </button>
-
-            <button
-              onClick={() => setActiveSubjectTab('all')}
-              className={`px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                activeSubjectTab === 'all'
-                  ? 'bg-slate-700 text-white'
-                  : theme === 'dark' ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              All Subjects
+              <span className="w-2 h-2 rounded-full bg-amber-600"></span>
+              <span>Physics ({subjectCounts.physics})</span>
             </button>
           </div>
 
-          {/* Traffic Light Quick Filter Pill */}
-          <div className={`flex items-center gap-1.5 p-1 rounded-xl border text-xs ${
-            theme === 'dark' ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-100 border-slate-300'
-          }`}>
-            <span className="text-[11px] font-semibold text-slate-400 px-2">Filter Status:</span>
+          {/* Traffic Light Quick Filter Buttons */}
+          <div className="flex items-center gap-1.5 p-1 rounded-lg border border-slate-300 bg-[#FDFBF7] text-xs">
+            <span className="text-xs font-bold text-slate-600 px-1">Status:</span>
             <button
               onClick={() => setStatusFilter('all')}
-              className={`px-2.5 py-1 rounded-lg font-medium transition ${
+              className={`px-2.5 py-1 rounded-md text-xs font-bold transition cursor-pointer ${
                 statusFilter === 'all' 
-                  ? 'bg-slate-700 text-white' 
-                  : theme === 'dark' ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-slate-800 text-white' 
+                  : 'text-slate-700 hover:bg-slate-200'
               }`}
             >
-              All ({currentSubjectTrafficCounts.total})
+              All
             </button>
             <button
               onClick={() => setStatusFilter('green')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium transition ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold transition cursor-pointer ${
                 statusFilter === 'green' 
-                  ? 'bg-emerald-600 text-white' 
-                  : 'text-emerald-400 hover:bg-emerald-500/10'
+                  ? 'bg-emerald-700 text-white' 
+                  : 'text-emerald-800 hover:bg-emerald-100'
               }`}
             >
               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
@@ -1064,21 +1071,21 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
             </button>
             <button
               onClick={() => setStatusFilter('orange')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium transition ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold transition cursor-pointer ${
                 statusFilter === 'orange' 
-                  ? 'bg-amber-600 text-white' 
-                  : 'text-amber-400 hover:bg-amber-500/10'
+                  ? 'bg-amber-700 text-white' 
+                  : 'text-amber-800 hover:bg-amber-100'
               }`}
             >
               <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-              <span>Amber / Orange ({currentSubjectTrafficCounts.orange})</span>
+              <span>Amber ({currentSubjectTrafficCounts.orange})</span>
             </button>
             <button
               onClick={() => setStatusFilter('red')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium transition ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold transition cursor-pointer ${
                 statusFilter === 'red' 
-                  ? 'bg-rose-600 text-white' 
-                  : 'text-rose-400 hover:bg-rose-500/10'
+                  ? 'bg-rose-700 text-white' 
+                  : 'text-rose-800 hover:bg-rose-100'
               }`}
             >
               <span className="w-2 h-2 rounded-full bg-rose-500"></span>
@@ -1092,15 +1099,13 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* LEFT COLUMN: Subtopics Accordion/List (lg:col-span-4) - Collapsible via button */}
         {isSidebarExpanded && (
-          <div className={`lg:col-span-4 rounded-2xl border p-4 space-y-3 max-h-[850px] overflow-y-auto transition-all ${
-            theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
-          }`}>
+          <div className="lg:col-span-4 rounded-2xl border border-[#E2E8F0] bg-white p-4 space-y-3 max-h-[850px] overflow-y-auto shadow-xs">
             {/* Sidebar Header with Minimise Button and Expand/Collapse All */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-emerald-400" />
-                <h2 className="font-bold text-sm">Subtopics</h2>
-                <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-300 border border-slate-700/60">
+                <Layers className="w-4 h-4 text-emerald-700" />
+                <h2 className="font-bold text-sm text-slate-800">Subtopics</h2>
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-[#EBF3F5] text-slate-700 border border-slate-300">
                   {filteredSubtopics.length}
                 </span>
               </div>
@@ -1116,28 +1121,20 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                       handleExpandAllSubtopics();
                     }
                   }}
-                  className={`text-[10px] font-medium px-2 py-1 rounded-lg transition border ${
-                    theme === 'dark'
-                      ? 'bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-700'
-                      : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
-                  }`}
+                  className="text-xs font-bold px-2 py-1 rounded-lg transition border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 cursor-pointer"
                   title="Toggle expand or collapse all subtopic lessons"
                 >
-                  {filteredSubtopics.some(s => expandedSubtopics[s.subtopicCode]) ? 'Collapse All' : 'Expand All'}
+                  {filteredSubtopics.some(s => expandedSubtopics[s.subtopicCode]) ? 'Collapse all' : 'Expand all'}
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setIsSidebarExpanded(false)}
-                  className={`p-1.5 rounded-lg transition border flex items-center gap-1 text-[11px] font-medium ${
-                    theme === 'dark'
-                      ? 'bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white'
-                      : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
-                  }`}
+                  className="p-1.5 rounded-lg transition border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 flex items-center gap-1 text-xs font-bold cursor-pointer"
                   title="Minimise sidebar to expand slides view"
                 >
-                  <PanelLeftClose className="w-4 h-4 text-slate-400" />
-                  <span className="text-[10px] hidden sm:inline">Minimise</span>
+                  <PanelLeftClose className="w-4 h-4 text-slate-600" />
+                  <span className="text-xs hidden sm:inline">Minimise</span>
                 </button>
               </div>
             </div>
@@ -1146,12 +1143,10 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
             <div className="space-y-3">
               {groupedSubtopics.map(group => (
                 <div key={group.topicCode} className="space-y-1">
-                  {/* Clean, minimal Topic Divider */}
-                  <div className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider flex items-center justify-between ${
-                    theme === 'dark' ? 'bg-slate-950/60 text-slate-400' : 'bg-slate-100 text-slate-600'
-                  }`}>
+                  {/* Clean Topic Header */}
+                  <div className="px-2 py-1 rounded-md text-xs font-bold bg-[#FDFBF7] text-slate-700 border border-slate-200 flex items-center justify-between">
                     <span className="truncate">{group.topicCode}: {group.topicName}</span>
-                    <span className="font-mono text-[9px] opacity-75 shrink-0 ml-1">
+                    <span className="font-mono text-[10px] text-slate-500 shrink-0 ml-1">
                       {group.items.length} {group.items.length === 1 ? 'subtopic' : 'subtopics'}
                     </span>
                   </div>
@@ -1170,12 +1165,8 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                           key={sub.subtopicCode}
                           className={`rounded-xl border transition-all overflow-hidden ${
                             isSelected
-                              ? theme === 'dark'
-                                ? 'border-emerald-500/60 bg-slate-800/60 shadow-xs'
-                                : 'border-emerald-500/60 bg-emerald-50/70 shadow-xs'
-                              : theme === 'dark'
-                                ? 'border-slate-800/70 bg-slate-950/40 hover:border-slate-700 hover:bg-slate-850/40'
-                                : 'border-slate-200 bg-slate-50/80 hover:border-slate-300 hover:bg-slate-100/80'
+                              ? 'border-2 border-black bg-[#EBF3F5] shadow-xs'
+                              : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-[#FDFBF7]'
                           }`}
                         >
                           {/* Subtopic Header Row: Code, Name, Traffic Light Status, Expand/Minimise Button */}
@@ -1184,28 +1175,25 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                               setSelectedSubtopicCode(sub.subtopicCode);
                               setActiveDeckIndex(0);
                               setActiveSlideIndex(0);
-                              // Auto-expand so student immediately sees the lessons
                               if (!isExpanded) {
                                 toggleSubtopicExpanded(sub.subtopicCode);
                               }
                             }}
-                            className="w-full text-left p-2.5 flex items-center justify-between gap-2.5 cursor-pointer select-none group"
+                            className="w-full text-left p-3 flex items-center justify-between gap-2.5 cursor-pointer select-none group"
                           >
                             <div className="flex items-center gap-2 min-w-0 flex-1">
                               {/* Subtopic Code */}
-                              <span className={`font-mono text-xs font-bold px-1.5 py-0.5 rounded shrink-0 transition ${
+                              <span className={`font-mono text-xs font-bold px-2 py-0.5 rounded-md shrink-0 transition ${
                                 isSelected
-                                  ? 'bg-emerald-500 text-slate-950 font-black'
-                                  : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                                  ? 'bg-slate-800 text-white'
+                                  : 'bg-[#FDFBF7] text-slate-700 border border-slate-300'
                               }`}>
                                 {sub.subtopicCode}
                               </span>
 
                               {/* Subtopic Name */}
-                              <span className={`text-xs font-semibold truncate ${
-                                isSelected
-                                  ? theme === 'dark' ? 'text-white' : 'text-slate-900 font-bold'
-                                  : theme === 'dark' ? 'text-slate-200 group-hover:text-white' : 'text-slate-700 group-hover:text-slate-900'
+                              <span className={`text-xs font-bold truncate ${
+                                isSelected ? 'text-slate-900' : 'text-slate-800 group-hover:text-black'
                               }`}>
                                 {sub.title}
                               </span>
@@ -1217,27 +1205,25 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                               {light === 'green' && (
                                 <span 
                                   title="Mastered (Quiz ≥ 80%)" 
-                                  className="w-3 h-3 rounded-full bg-emerald-500 shadow-xs shadow-emerald-500/50 flex items-center justify-center text-[7px] text-slate-950 font-bold"
-                                >
-                                  ✓
-                                </span>
+                                  className="w-2.5 h-2.5 rounded-full bg-emerald-600 shadow-xs"
+                                />
                               )}
                               {light === 'orange' && (
                                 <span 
                                   title="Needs some revision" 
-                                  className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-xs shadow-amber-500/50"
+                                  className="w-2.5 h-2.5 rounded-full bg-amber-500"
                                 />
                               )}
                               {light === 'red' && (
                                 <span 
-                                  title="Needs a lot of revision" 
-                                  className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-xs shadow-rose-500/50"
+                                  title="Needs revision" 
+                                  className="w-2.5 h-2.5 rounded-full bg-rose-500"
                                 />
                               )}
                               {!light && (
                                 <span 
                                   title="Unranked knowledge" 
-                                  className="w-2.5 h-2.5 rounded-full border border-dashed border-slate-500/70"
+                                  className="w-2 h-2 rounded-full border border-slate-400"
                                 />
                               )}
 
@@ -1245,21 +1231,17 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                               <button
                                 type="button"
                                 onClick={(e) => toggleSubtopicExpanded(sub.subtopicCode, e)}
-                                className={`p-1 rounded-md transition ${
-                                  theme === 'dark' 
-                                    ? 'hover:bg-slate-700 text-slate-400 hover:text-slate-200' 
-                                    : 'hover:bg-slate-200 text-slate-500 hover:text-slate-800'
-                                }`}
+                                className="p-1 rounded-md transition hover:bg-slate-200 text-slate-600 hover:text-black cursor-pointer"
                                 title={isExpanded ? "Minimise lessons list" : `Expand ${lessonCount} categorised ${lessonCount === 1 ? 'lesson' : 'lessons'}`}
                               >
                                 <div className="flex items-center gap-0.5">
-                                  <span className="text-[10px] font-mono opacity-60 mr-0.5">
+                                  <span className="text-[10px] font-mono text-slate-500 mr-0.5">
                                     {lessonCount}
                                   </span>
                                   {isExpanded ? (
-                                    <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                                    <ChevronDown className="w-3.5 h-3.5 text-slate-600" />
                                   ) : (
-                                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                                    <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
                                   )}
                                 </div>
                               </button>
@@ -1268,12 +1250,10 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
                           {/* Categorised Lessons List (Shown when student expands subtopic) */}
                           {isExpanded && (
-                            <div className={`px-2.5 pb-2.5 pt-1 space-y-1.5 border-t ${
-                              theme === 'dark' ? 'border-slate-800/80 bg-slate-950/30' : 'border-emerald-100 bg-emerald-50/30'
-                            }`}>
-                              <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1 pt-0.5">
-                                <span>Categorised Lessons ({subDecks.length})</span>
-                                <span className="text-[9px] font-normal normal-case opacity-70">Click to load</span>
+                            <div className="px-2.5 pb-2.5 pt-1 space-y-1.5 border-t border-slate-200 bg-[#FDFBF7]">
+                              <div className="flex items-center justify-between text-[10px] font-bold text-slate-600 uppercase tracking-wide px-1 pt-0.5">
+                                <span>Categorised lessons ({subDecks.length})</span>
+                                <span className="text-[10px] font-normal normal-case text-slate-500">Click to load</span>
                               </div>
 
                               <div className="space-y-1">
@@ -1291,34 +1271,30 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                                         setActiveDeckIndex(deckIdx);
                                         setActiveSlideIndex(0);
                                       }}
-                                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition flex items-center justify-between gap-2 border ${
+                                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition flex items-center justify-between gap-2 border cursor-pointer ${
                                         isDeckActive
-                                          ? theme === 'dark'
-                                            ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300 font-semibold'
-                                            : 'bg-emerald-100 border-emerald-400 text-emerald-900 font-semibold'
-                                          : theme === 'dark'
-                                            ? 'bg-slate-900/60 border-slate-800 hover:bg-slate-800 hover:border-slate-700 text-slate-300'
-                                            : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-700'
+                                          ? 'bg-white border-2 border-black text-slate-900 font-bold shadow-2xs'
+                                          : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700'
                                       }`}
                                     >
                                       <div className="flex items-center gap-2 min-w-0">
                                         <span className="text-xs shrink-0">{cat.icon}</span>
                                         <div className="min-w-0">
-                                          <p className="truncate text-[11px] leading-tight font-medium">
+                                          <p className="truncate text-xs leading-tight font-medium text-slate-800">
                                             {deck.title}
                                           </p>
                                         </div>
                                       </div>
 
                                       <div className="shrink-0 flex items-center gap-1.5">
-                                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${cat.badge}`}>
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${cat.badge}`}>
                                           {cat.label}
                                         </span>
-                                        <span className="text-[10px] font-mono text-slate-400">
+                                        <span className="text-xs font-mono text-slate-500">
                                           {deck.slides?.length || 0}s
                                         </span>
                                         {isDeckActive && (
-                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
                                         )}
                                       </div>
                                     </button>
@@ -1337,109 +1313,61 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
           </div>
         )}
 
-        {/* RIGHT COLUMN: Active Subtopic Slide Viewer & Traffic Light Panel (lg:col-span-8 or 12) */}
-        <div className={`${isSidebarExpanded ? 'lg:col-span-8' : 'lg:col-span-12'} space-y-6 transition-all`}>
-          {/* Subtopic Header & Traffic Light Ranking System */}
-          <div className={`rounded-2xl border p-5 sm:p-6 transition shadow-sm ${
-            theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
-          }`}>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b pb-4 mb-4 border-slate-800/80">
-              <div>
+        {/* RIGHT COLUMN: Slide Presentation & Traffic Light Controls */}
+        <div className={isSidebarExpanded ? 'lg:col-span-8 space-y-6' : 'lg:col-span-12 space-y-6'}>
+          {/* Unit Spotlight Header & Rating */}
+          <div className="rounded-2xl border border-[#E2E8F0] p-6 sm:p-7 transition bg-white shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-5 border-b pb-5 mb-5 border-slate-200">
+              <div className="space-y-1.5 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`font-mono text-sm font-black px-2.5 py-0.5 rounded border ${currentThemeStyles.badge}`}>
-                    [{currentSubtopic.subtopicCode}] {currentSubtopic.subject.toUpperCase()}
+                  <span className="font-mono text-xs font-bold text-slate-800 bg-[#EBF3F5] border border-slate-300 px-2.5 py-0.5 rounded-full">
+                    Unit Spotlight · {currentSubtopic.subtopicCode}
                   </span>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    theme === 'dark' ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'
-                  }`}>
-                    {currentSubtopic.topicName}
+                  <span className="text-xs font-medium text-slate-600 capitalize">
+                    {currentSubtopic.subject} · {currentSubtopic.tier}
                   </span>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300">
-                    {currentSubtopic.tier}
-                  </span>
-                  {/* Clear number of lessons badge */}
-                  <span className="inline-flex items-center gap-1.5 text-xs font-black px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-xs">
-                    <BookOpen className="w-3.5 h-3.5" />
-                    <span>{currentLessonCount} {currentLessonCount === 1 ? 'Lesson' : 'Lessons'}</span>
+                  <span className="text-xs text-slate-500">
+                    • {currentLessonCount} {currentLessonCount === 1 ? 'lesson' : 'lessons'}
                   </span>
                 </div>
-                <div className="flex flex-wrap items-baseline gap-2.5 mt-1.5">
-                  <h2 className={`text-xl sm:text-2xl font-black ${
-                    theme === 'dark' ? 'text-white' : 'text-slate-900'
-                  }`}>
-                    {currentSubtopic.title}
-                  </h2>
-                  <span className="text-base font-extrabold text-emerald-400 font-mono">
-                    • {currentLessonCount} {currentLessonCount === 1 ? 'Lesson' : 'Lessons'}
-                  </span>
-                </div>
+                <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-800 leading-tight">
+                  {currentSubtopic.title}
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-600">
+                  Cambridge International Examinations · {currentSubtopic.topicCode}: {currentSubtopic.topicName}
+                </p>
               </div>
 
               {/* Sidebar Minimise / Expand Button */}
-              <div className="shrink-0 flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
                 <button
                   type="button"
                   onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}
-                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition shadow-xs ${
-                    !isSidebarExpanded
-                      ? 'bg-emerald-600/15 border-emerald-500/40 text-emerald-400 hover:bg-emerald-600/25'
-                      : theme === 'dark'
-                        ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-750'
-                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                  }`}
-                  title={isSidebarExpanded ? "Minimise curriculum sidebar to expand slides view" : "Expand curriculum sidebar"}
+                  className="p-2 rounded-lg border border-slate-300 hover:bg-slate-100 transition text-slate-700 cursor-pointer"
+                  title={isSidebarExpanded ? "Minimise sidebar" : "Show sidebar"}
                 >
-                  {isSidebarExpanded ? (
-                    <>
-                      <PanelLeftClose className="w-4 h-4 text-slate-400" />
-                      <span className="hidden sm:inline">Minimise Sidebar</span>
-                    </>
-                  ) : (
-                    <>
-                      <PanelLeftOpen className="w-4 h-4 text-emerald-400" />
-                      <span>Show Subtopics Sidebar</span>
-                      <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
-                        {filteredSubtopics.length}
-                      </span>
-                    </>
-                  )}
+                  {isSidebarExpanded ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
                 </button>
               </div>
             </div>
 
-            {/* TRAFFIC LIGHT CONTROLS: Red, Orange, Green (with 80% quiz requirement) */}
-            <div className={`p-4 rounded-xl border space-y-3 ${
-              theme === 'dark' ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-200'
-            }`}>
+            {/* TRAFFIC LIGHT CONTROLS: Red, Amber, Green */}
+            <div className="p-4 rounded-xl border border-slate-200 bg-[#FDFBF7] space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                      Subtopic Traffic Light Knowledge Rating:
-                    </span>
-                    {trafficLights[currentSubtopic.subtopicCode] && (
-                      <span className={`text-xs font-bold capitalize px-2 py-0.2 rounded-full ${
-                        trafficLights[currentSubtopic.subtopicCode] === 'green'
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                          : trafficLights[currentSubtopic.subtopicCode] === 'orange'
-                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                            : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                      }`}>
-                        Current: {trafficLights[currentSubtopic.subtopicCode]}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    How well do you know this subtopic? (To achieve <strong className="text-emerald-400">Green</strong>, you must score ≥80% on the 10-question quiz).
+                  <span className="text-xs font-bold uppercase tracking-wide text-slate-700">
+                    Traffic Light Mastery Assessment
+                  </span>
+                  <p className="text-xs text-slate-600 mt-0.5">
+                    Self-rate your confidence. Achieving <strong className="text-emerald-700 font-bold">Green</strong> requires scoring ≥80% on the official 10-question check.
                   </p>
                 </div>
 
-                {/* Subtopic Quiz Score summary if taken */}
                 {subtopicQuizScores[currentSubtopic.subtopicCode] && (
-                  <div className="text-right">
-                    <span className="text-[11px] text-slate-400">Knowledge Check: </span>
-                    <span className={`text-xs font-bold font-mono ${
-                      subtopicQuizScores[currentSubtopic.subtopicCode].passed ? 'text-emerald-400' : 'text-amber-400'
+                  <div className="text-right font-mono text-xs">
+                    <span className="text-slate-600">Latest check: </span>
+                    <span className={`font-bold ${
+                      subtopicQuizScores[currentSubtopic.subtopicCode].passed ? 'text-emerald-700' : 'text-amber-700'
                     }`}>
                       {subtopicQuizScores[currentSubtopic.subtopicCode].score}/10 ({subtopicQuizScores[currentSubtopic.subtopicCode].percentage}%)
                     </span>
@@ -1447,107 +1375,93 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                 )}
               </div>
 
-              {/* 3 Interactive Traffic Light Buttons */}
+              {/* 3 Traffic Light Action Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
                 {/* RED BUTTON */}
                 <button
                   onClick={() => handleTrafficLightSelect(currentSubtopic.subtopicCode, 'red')}
-                  className={`p-3 rounded-xl border text-left transition flex items-center gap-3 ${
+                  className={`p-3.5 rounded-xl border text-left transition flex items-center gap-3 cursor-pointer ${
                     trafficLights[currentSubtopic.subtopicCode] === 'red'
-                      ? 'bg-rose-500/20 border-rose-500 text-rose-300 ring-2 ring-rose-500/30'
-                      : theme === 'dark' 
-                        ? 'bg-slate-900 border-slate-800 text-slate-300 hover:border-rose-500/50' 
-                        : 'bg-white border-slate-200 text-slate-700 hover:border-rose-400'
+                      ? 'bg-rose-50 border-2 border-rose-600 text-rose-900 shadow-2xs'
+                      : 'bg-white border-slate-200 text-slate-800 hover:border-slate-400'
                   }`}
                 >
-                  <div className="w-5 h-5 rounded-full bg-rose-500 shrink-0 flex items-center justify-center text-white text-xs font-bold shadow-xs shadow-rose-500/50">
+                  <div className="w-5 h-5 rounded-full bg-rose-600 shrink-0 flex items-center justify-center text-white text-xs font-bold">
                     {trafficLights[currentSubtopic.subtopicCode] === 'red' ? '✓' : ''}
                   </div>
                   <div>
-                    <div className="text-xs font-bold text-rose-400">Red Grade</div>
-                    <div className="text-[10px] text-slate-400 leading-tight">40% or less in quiz · Needs revision</div>
+                    <div className="text-xs font-bold text-rose-800 uppercase font-mono">Red (≤40%)</div>
+                    <div className="text-xs text-slate-600 leading-tight">Needs revision & notes</div>
                   </div>
                 </button>
 
                 {/* ORANGE BUTTON */}
                 <button
                   onClick={() => handleTrafficLightSelect(currentSubtopic.subtopicCode, 'orange')}
-                  className={`p-3 rounded-xl border text-left transition flex items-center gap-3 ${
+                  className={`p-3.5 rounded-xl border text-left transition flex items-center gap-3 cursor-pointer ${
                     trafficLights[currentSubtopic.subtopicCode] === 'orange'
-                      ? 'bg-amber-500/20 border-amber-500 text-amber-300 ring-2 ring-amber-500/30'
-                      : theme === 'dark' 
-                        ? 'bg-slate-900 border-slate-800 text-slate-300 hover:border-amber-500/50' 
-                        : 'bg-white border-slate-200 text-slate-700 hover:border-amber-400'
+                      ? 'bg-amber-50 border-2 border-amber-600 text-amber-900 shadow-2xs'
+                      : 'bg-white border-slate-200 text-slate-800 hover:border-slate-400'
                   }`}
                 >
-                  <div className="w-5 h-5 rounded-full bg-amber-500 shrink-0 flex items-center justify-center text-white text-xs font-bold shadow-xs shadow-amber-500/50">
+                  <div className="w-5 h-5 rounded-full bg-amber-600 shrink-0 flex items-center justify-center text-white text-xs font-bold">
                     {trafficLights[currentSubtopic.subtopicCode] === 'orange' ? '✓' : ''}
                   </div>
                   <div>
-                    <div className="text-xs font-bold text-amber-400">Amber / Orange Grade</div>
-                    <div className="text-[10px] text-slate-400 leading-tight">50%, 60% or 70% in quiz · Solid progress</div>
+                    <div className="text-xs font-bold text-amber-800 uppercase font-mono">Amber (50–70%)</div>
+                    <div className="text-xs text-slate-600 leading-tight">Solid working foundation</div>
                   </div>
                 </button>
 
                 {/* GREEN BUTTON (Trigger Quiz if <80%) */}
                 <button
                   onClick={() => handleTrafficLightSelect(currentSubtopic.subtopicCode, 'green')}
-                  className={`p-3 rounded-xl border text-left transition flex items-center gap-3 ${
+                  className={`p-3.5 rounded-xl border text-left transition flex items-center gap-3 cursor-pointer ${
                     trafficLights[currentSubtopic.subtopicCode] === 'green'
-                      ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 ring-2 ring-emerald-500/30'
-                      : theme === 'dark' 
-                        ? 'bg-slate-900 border-slate-800 text-slate-300 hover:border-emerald-500/50' 
-                        : 'bg-white border-slate-200 text-slate-700 hover:border-emerald-400'
+                      ? 'bg-emerald-50 border-2 border-emerald-600 text-emerald-900 shadow-2xs'
+                      : 'bg-white border-slate-200 text-slate-800 hover:border-slate-400'
                   }`}
                 >
-                  <div className="w-5 h-5 rounded-full bg-emerald-500 shrink-0 flex items-center justify-center text-slate-950 text-xs font-black shadow-xs shadow-emerald-500/50">
+                  <div className="w-5 h-5 rounded-full bg-emerald-600 shrink-0 flex items-center justify-center text-white text-xs font-bold">
                     {trafficLights[currentSubtopic.subtopicCode] === 'green' ? '✓' : '★'}
                   </div>
                   <div>
-                    <div className="text-xs font-bold text-emerald-400 flex items-center gap-1">
-                      <span>Green Grade</span>
-                      <Award className="w-3 h-3" />
+                    <div className="text-xs font-bold text-emerald-800 uppercase font-mono flex items-center gap-1">
+                      <span>Green (≥80%)</span>
+                      <Award className="w-3.5 h-3.5 text-emerald-700" />
                     </div>
-                    <div className="text-[10px] text-slate-400 leading-tight">
+                    <div className="text-xs text-slate-600 leading-tight">
                       {subtopicQuizScores[currentSubtopic.subtopicCode]?.passed
-                        ? 'Mastered! (Score ≥ 80%)'
-                        : 'Requires 10-Q Quiz (≥80%)'}
+                        ? 'Mastered! Exam certified'
+                        : 'Unlock via 10-Q Quiz'}
                     </div>
                   </div>
                 </button>
               </div>
 
-              {/* Slide Deck Read Status & Take/Retake Quiz Action Links */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs pt-2 border-t border-slate-800/60">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => onToggleCompleteLesson(currentSubtopic.subtopicCode)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition ${
-                      completedLessons.includes(currentSubtopic.subtopicCode)
-                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
-                        : theme === 'dark'
-                          ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
-                          : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
-                    }`}
-                    title="Mark or unmark this slide deck as read & completed"
-                  >
-                    <Check className={`w-3.5 h-3.5 ${completedLessons.includes(currentSubtopic.subtopicCode) ? 'text-white' : 'text-emerald-400'}`} />
-                    <span>
-                      {completedLessons.includes(currentSubtopic.subtopicCode)
-                        ? '✓ Slide Deck Completed'
-                        : 'Mark Slide Deck as Read'}
-                    </span>
-                  </button>
-                  <span className="text-slate-400 text-[11px] hidden sm:inline">
-                    Live slide deck & syllabus tracking
+              {/* CTAs */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-200">
+                <button
+                  onClick={() => onToggleCompleteLesson(currentSubtopic.subtopicCode)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+                    completedLessons.includes(currentSubtopic.subtopicCode)
+                      ? 'bg-emerald-700 text-white font-bold'
+                      : 'border border-slate-300 hover:bg-slate-100 text-slate-800 bg-white'
+                  }`}
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>
+                    {completedLessons.includes(currentSubtopic.subtopicCode)
+                      ? '✓ Lesson completed'
+                      : 'Mark lesson read'}
                   </span>
-                </div>
+                </button>
 
                 <button
                   onClick={() => startQuizForSubtopic(currentSubtopic.subtopicCode)}
-                  className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 transition self-start sm:self-auto"
+                  className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs"
                 >
-                  <span>Take 10-Question Knowledge Check</span>
+                  <span>Take 10-question knowledge check</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -1559,30 +1473,26 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
           {/* OR AI GENERATED SLIDES (IF MISSING FROM DRIVE)                          */}
           {/* ========================================================================= */}
           {hasMatchingDriveSlide && activeDriveSlide ? (
-            <div className={`rounded-2xl border transition shadow-sm overflow-hidden ${
-              theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
-            }`}>
+            <div className="rounded-2xl border border-[#E2E8F0] transition shadow-xs overflow-hidden bg-white">
               {/* Slide Top Toolbar for Exact Unaltered Google Slide */}
-              <div className={`p-4 border-b flex flex-wrap items-center justify-between gap-3 ${
-                theme === 'dark' ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-100 border-slate-200'
-              }`}>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-mono text-xs font-black px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                    [{currentSubtopic.subtopicCode}] {currentSubtopic.title} · ({currentLessonCount} {currentLessonCount === 1 ? 'Lesson' : 'Lessons'})
+              <div className="p-4 sm:p-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-[#FDFBF7]">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="font-mono text-xs font-bold px-3 py-1 rounded-full bg-[#EBF3F5] text-slate-800 border border-slate-300">
+                    [{currentSubtopic.subtopicCode}] {currentSubtopic.title} · ({currentLessonCount} {currentLessonCount === 1 ? 'lesson' : 'lessons'})
                   </span>
                   {isInstructor ? (
                     <>
-                      <span className="text-xs px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-semibold flex items-center gap-1">
-                        <Cloud className="w-3 h-3 text-purple-400" />
+                      <span className="text-xs px-3 py-1 rounded-full bg-white text-slate-700 border border-slate-300 font-bold flex items-center gap-1.5">
+                        <Cloud className="w-3.5 h-3.5 text-blue-600" />
                         <span>Exact Drive Slide</span>
                       </span>
-                      <span className="text-xs text-slate-400 font-medium truncate max-w-xs md:max-w-md" title={activeDriveSlide.name}>
+                      <span className="text-xs text-slate-600 font-medium truncate max-w-xs md:max-w-md" title={activeDriveSlide.name}>
                         {activeDriveSlide.name}
                       </span>
                     </>
                   ) : (
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 font-semibold flex items-center gap-1">
-                      <BookOpen className="w-3 h-3 text-emerald-400" />
+                    <span className="text-xs px-3 py-1 rounded-full bg-white text-slate-700 border border-slate-300 font-bold flex items-center gap-1.5">
+                      <BookOpen className="w-3.5 h-3.5 text-emerald-700" />
                       <span>Cambridge Slide Deck</span>
                     </span>
                   )}
@@ -1592,18 +1502,18 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                 <div className="flex items-center gap-2 flex-wrap">
                   {/* If multiple decks match this subtopic, deck switcher */}
                   {driveSlidesForCurrentSubtopic.length > 1 && (
-                    <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1 rounded-xl border border-slate-700">
-                      <Layers className="w-3.5 h-3.5 text-blue-400" />
-                      <span className="text-xs text-slate-300 font-bold">Deck:</span>
+                    <div className="flex items-center gap-1.5 bg-white px-3 py-1 rounded-xl border border-slate-300">
+                      <Layers className="w-3.5 h-3.5 text-slate-600" />
+                      <span className="text-xs text-slate-700 font-bold">Deck:</span>
                       <select
                         value={activeDriveSlideIdx}
                         onChange={e => setActiveDriveSlideIdx(Number(e.target.value))}
-                        className={`text-xs px-2 py-1 rounded-lg border font-bold ${
-                          theme === 'dark' ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
-                        }`}
+                        className="text-xs px-2 py-0.5 rounded-lg border-none font-bold bg-transparent text-slate-800 focus:outline-none cursor-pointer"
                       >
                         {driveSlidesForCurrentSubtopic.map((d, i) => (
-                          <option key={d.id} value={i}>Lesson {i + 1}: {d.name}</option>
+                          <option key={d.id} value={i} className="bg-white text-slate-800">
+                            Lesson {i + 1}: {d.name}
+                          </option>
                         ))}
                       </select>
                     </div>
@@ -1613,15 +1523,15 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                   {currentDeck && (
                     <button
                       onClick={() => setShowAiNotesWithDrive(prev => !prev)}
-                      className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition ${
+                      className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
                         showAiNotesWithDrive
-                          ? 'bg-emerald-600 text-white border-emerald-500'
-                          : theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-white border-slate-300 text-slate-700'
+                          ? 'bg-slate-800 text-white border-slate-800'
+                          : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
                       }`}
                       title="Toggle syllabus companion notes and practical risk assessment"
                     >
                       <BookOpen className="w-3.5 h-3.5" />
-                      <span>{showAiNotesWithDrive ? 'Hide Notes' : 'Companion Notes'}</span>
+                      <span>{showAiNotesWithDrive ? 'Hide notes' : 'Notes'}</span>
                     </button>
                   )}
 
@@ -1629,7 +1539,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                     href={activeDriveSlide.directUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition shadow-xs"
+                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white transition shadow-2xs cursor-pointer"
                     title="Open full Google Slides presentation in a new tab"
                   >
                     <span>Open in Slides</span>
@@ -1640,22 +1550,20 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                   {isInstructor && (
                     <button
                       onClick={() => setShowManualInput(prev => !prev)}
-                      className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition ${
+                      className={`flex items-center gap-1 px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer ${
                         showManualInput
-                          ? 'bg-purple-600 text-white border-purple-500'
-                          : theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-white border-slate-300 text-slate-700'
+                          ? 'bg-slate-800 text-white border-slate-800'
+                          : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
                       }`}
                       title="Instructor: Set custom slide URL or presentation ID"
                     >
-                      <span>{showManualInput ? 'Close' : 'Set Slide URL'}</span>
+                      <span>{showManualInput ? 'Close' : 'Set slide URL'}</span>
                     </button>
                   )}
 
                   <button
                     onClick={() => setIsFullScreen(prev => !prev)}
-                    className={`p-2 rounded-lg border text-xs transition ${
-                      theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-white border-slate-300 text-slate-700'
-                    }`}
+                    className="p-2 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 transition cursor-pointer text-xs"
                     title={isFullScreen ? "Exit Fullscreen" : "Fullscreen presentation"}
                   >
                     {isFullScreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -1663,103 +1571,84 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                 </div>
               </div>
 
-              {/* Manual URL / Presentation ID Direct Embed Form (Instructor Only) */}
+              {/* Manual URL Direct Embed Form (Instructor Only) */}
               {isInstructor && showManualInput && (
-                <div className={`p-4 border-b space-y-3 ${
-                  theme === 'dark' ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-200'
-                }`}>
+                <div className="p-4 border-b border-slate-200 bg-[#FDFBF7] space-y-3">
                   <form onSubmit={handleSaveManualSlide} className="flex flex-col sm:flex-row gap-2">
                     <input
                       type="text"
                       value={manualInputUrl}
                       onChange={e => setManualInputUrl(e.target.value)}
                       placeholder={`Paste Google Slides link or presentation ID for [${currentSubtopic.subtopicCode}]...`}
-                      className={`flex-1 px-3 py-2 rounded-xl text-xs border focus:outline-none focus:ring-2 focus:ring-purple-500 ${
-                        theme === 'dark' ? 'bg-slate-900 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400'
-                      }`}
+                      className="flex-1 px-3 py-2 rounded-xl text-xs border-2 border-black bg-[#FDFBF7] text-slate-800 placeholder-slate-500 focus:outline-none"
                     />
                     <button
                       type="submit"
-                      className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shrink-0 transition"
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white shrink-0 transition cursor-pointer"
                     >
-                      Save Slide Embed
+                      Save slide embed
                     </button>
                   </form>
-                  <p className="text-[11px] text-slate-400">
-                    Accepts any Google Slides URL or Presentation ID from your Drive folder (<code>1kypXZXP3nY9pFxuSJOTZ1anODYxxfZ1a</code>).
+                  <p className="text-xs text-slate-600">
+                    Accepts any Google Slides URL or Presentation ID from your Drive folder.
                   </p>
                 </div>
               )}
 
-              {/* LARGE & OBVIOUS LESSON DECK SWITCHER (DRIVE SLIDES) */}
+              {/* Large Lesson Deck Switcher (Drive Slides) */}
               {driveSlidesForCurrentSubtopic.length > 1 && (
-                <div className={`p-4 sm:p-5 border-b space-y-3 ${
-                  theme === 'dark' ? 'bg-slate-950/95 border-slate-800' : 'bg-blue-50/90 border-blue-200'
-                }`}>
+                <div className="p-4 sm:p-5 border-b border-slate-200 bg-[#FDFBF7] space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-9 rounded-xl bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center justify-center font-bold shrink-0 shadow-xs">
-                        <Presentation className="w-5 h-5" />
+                      <div className="w-8 h-8 rounded-xl bg-white text-slate-800 border border-slate-300 flex items-center justify-center font-bold shrink-0">
+                        <Presentation className="w-4 h-4" />
                       </div>
                       <div>
-                        <h4 className="text-sm font-black tracking-wide flex items-center gap-2">
-                          <span className={theme === 'dark' ? 'text-white' : 'text-slate-900'}>
-                            {isInstructor ? 'SWITCH LESSON DECK' : 'SELECT LESSON'}
-                          </span>
-                          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                            {driveSlidesForCurrentSubtopic.length} {driveSlidesForCurrentSubtopic.length === 1 ? 'Part' : 'Parts'}
+                        <h4 className="text-xs font-bold uppercase tracking-wide flex items-center gap-2 text-slate-800">
+                          <span>{isInstructor ? 'Switch Lesson Deck' : 'Select Lesson'}</span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#EBF3F5] text-slate-700 border border-slate-300">
+                            {driveSlidesForCurrentSubtopic.length} {driveSlidesForCurrentSubtopic.length === 1 ? 'part' : 'parts'}
                           </span>
                         </h4>
-                        <p className="text-xs text-slate-400">
-                          {isInstructor 
-                            ? 'Switch between Google Slides presentations for this subtopic:' 
-                            : 'Choose a lesson part to view its interactive presentation:'}
-                        </p>
                       </div>
                     </div>
-                    <div className="text-xs font-black font-mono px-3.5 py-1.5 rounded-xl bg-blue-950/80 border border-blue-500/40 text-blue-300 self-start sm:self-auto shadow-xs">
-                      Active: Lesson {activeDriveSlideIdx + 1} of {driveSlidesForCurrentSubtopic.length}
+                    <div className="text-xs font-mono uppercase tracking-wider px-3 py-1 rounded-xl bg-white border border-slate-300 text-slate-700 self-start sm:self-auto">
+                      Part {activeDriveSlideIdx + 1} of {driveSlidesForCurrentSubtopic.length}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
                     {driveSlidesForCurrentSubtopic.map((slideItem, idx) => {
                       const isCurrent = idx === activeDriveSlideIdx;
                       return (
                         <button
                           key={slideItem.id}
                           onClick={() => setActiveDriveSlideIdx(idx)}
-                          className={`flex items-start gap-3.5 p-3.5 rounded-2xl border text-left transition relative cursor-pointer ${
+                          className={`flex items-start gap-3 p-3 rounded-xl border text-left transition cursor-pointer ${
                             isCurrent
-                              ? 'bg-blue-600 border-blue-400 text-white shadow-xl shadow-blue-600/30 ring-2 ring-blue-400 scale-[1.01]'
-                              : theme === 'dark'
-                                ? 'bg-slate-900/90 border-slate-800 text-slate-300 hover:bg-slate-850 hover:border-slate-700 hover:text-white'
-                                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100 hover:text-slate-950 shadow-xs'
+                              ? 'bg-[#EBF3F5] border-2 border-black text-slate-900 shadow-2xs font-bold'
+                              : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-50'
                           }`}
                         >
-                          <div className={`w-10 h-10 rounded-xl shrink-0 flex items-center justify-center font-black text-base transition ${
-                            isCurrent ? 'bg-white text-blue-600 shadow-md' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                          <div className={`w-8 h-8 rounded-lg shrink-0 flex items-center justify-center font-bold text-xs transition ${
+                            isCurrent 
+                              ? 'bg-slate-800 text-white'
+                              : 'bg-[#FDFBF7] text-slate-700 border border-slate-300'
                           }`}>
-                            {idx + 1}
+                            0{idx + 1}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-1 mb-1">
-                              <span className={`text-xs font-black uppercase tracking-wider ${
-                                isCurrent ? 'text-blue-100' : 'text-blue-400'
+                            <div className="flex items-center justify-between gap-1 mb-0.5">
+                              <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                                isCurrent ? 'text-slate-900' : 'text-slate-500'
                               }`}>
-                                Lesson Deck {idx + 1}
+                                Lesson {idx + 1}
                               </span>
-                              {isCurrent ? (
-                                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-white/20 text-white shadow-xs">
-                                  Current Deck
-                                </span>
-                              ) : (
-                                <span className="text-[10px] font-semibold text-slate-400">
-                                  Click to load
-                                </span>
+                              {isCurrent && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
                               )}
                             </div>
-                            <p className={`text-xs font-bold line-clamp-2 leading-snug ${isCurrent ? 'text-white' : ''}`} title={slideItem.name}>
+                            <p className="text-xs font-semibold line-clamp-2 leading-tight" title={slideItem.name}>
                               {slideItem.name}
                             </p>
                           </div>
@@ -1770,10 +1659,10 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                 </div>
               )}
 
-              {/* Slide Content: Unaltered Google Slides Iframe Embed */}
-              <div className="p-3 sm:p-5 bg-slate-950">
+              {/* Slide Content: Google Slides Iframe Embed */}
+              <div className="p-3 sm:p-5 bg-[#FDFBF7] border-b border-slate-200">
                 <div className="space-y-3">
-                  <div className="relative w-full aspect-[16/9] min-h-[480px] sm:min-h-[580px] rounded-xl overflow-hidden bg-black shadow-xl border border-slate-800">
+                  <div className="relative w-full aspect-[16/9] min-h-[480px] sm:min-h-[580px] rounded-xl overflow-hidden bg-white shadow-xs border border-slate-300">
                     <iframe
                       src={activeDriveSlide.embedUrl}
                       title={activeDriveSlide.name}
@@ -1782,18 +1671,18 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                     />
                   </div>
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-slate-400 px-1 pt-1">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-slate-600 px-1 pt-1">
                     <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                      <span>Showing exact, unaltered presentation from Google Drive: <strong className="text-slate-200">{activeDriveSlide.name}</strong></span>
+                      <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+                      <span>Showing presentation from Google Drive: <strong className="text-slate-800">{activeDriveSlide.name}</strong></span>
                     </div>
                     <a
                       href={TARGET_DRIVE_FOLDER_URL}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-emerald-400 hover:underline flex items-center gap-1"
+                      className="text-slate-700 hover:text-black hover:underline flex items-center gap-1 font-bold"
                     >
-                      <span>Drive Folder: 1kypXZXP3nY9pFxuSJOTZ1anODYxxfZ1a</span>
+                      <span>Drive Folder</span>
                       <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
@@ -1802,29 +1691,25 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
               {/* Optional AI Companion Notes under Drive Slide */}
               {showAiNotesWithDrive && currentDeck && (
-                <div className={`p-6 border-t space-y-4 ${
-                  theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'
-                }`}>
+                <div className="p-6 border-b border-slate-200 bg-white space-y-4">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-bold flex items-center gap-2 text-emerald-400">
-                      <BookOpen className="w-4 h-4" />
+                    <h4 className="text-sm font-bold flex items-center gap-2 text-slate-800">
+                      <BookOpen className="w-4 h-4 text-emerald-700" />
                       <span>Cambridge 0653 AI Syllabus Notes & Practical Guidelines</span>
                     </h4>
                     <button
                       onClick={handleCopyNotes}
-                      className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1"
+                      className="text-xs px-2.5 py-1 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 flex items-center gap-1 cursor-pointer font-bold"
                     >
-                      {copiedNote ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedNote ? 'Copied' : 'Copy All Notes'}</span>
+                      {copiedNote ? <Check className="w-3.5 h-3.5 text-emerald-700" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedNote ? 'Copied' : 'Copy notes'}</span>
                     </button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs leading-relaxed">
                     {currentDeck.slides.map((s, idx) => (
-                      <div key={idx} className={`p-3 rounded-xl border ${
-                        theme === 'dark' ? 'bg-slate-950/60 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'
-                      }`}>
-                        <div className="font-bold text-emerald-400 mb-1">{s.title}</div>
-                        <ul className="list-disc pl-4 space-y-1">
+                      <div key={idx} className="p-3 rounded-xl border border-slate-200 bg-[#FDFBF7] text-slate-800">
+                        <div className="font-bold text-slate-800 mb-1">{s.title}</div>
+                        <ul className="list-disc pl-4 space-y-1 text-slate-600">
                           {s.content.slice(0, 3).map((pt, pidx) => (
                             <li key={pidx}>{pt}</li>
                           ))}
@@ -1835,32 +1720,30 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                 </div>
               )}
 
-              {/* MODULE 2: REVISION ROYALE ANTI-FARMING CLAIM GATE (Drive Presentation View) */}
-              <div className={`p-4 border-t flex flex-col sm:flex-row items-center justify-between gap-4 ${
-                theme === 'dark' ? 'bg-slate-900/90 border-slate-800' : 'bg-slate-50 border-slate-200'
-              }`}>
+              {/* Revision Royale Dwell / Rewards Bar */}
+              <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#FDFBF7]">
                 <div className="flex items-center gap-3 w-full sm:w-auto">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-black text-lg shrink-0">
+                  <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-300 flex items-center justify-center text-amber-700 font-bold text-lg shrink-0">
                     🎮
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-black uppercase tracking-wider text-amber-400">
+                      <span className="text-xs font-bold uppercase tracking-wide text-amber-800">
                         Revision Royale Rewards
                       </span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-white text-slate-700 border border-slate-300 font-mono">
                         {Math.floor(deckDwellSeconds / 60)}:{(deckDwellSeconds % 60).toString().padStart(2, '0')} / {Math.floor(((currentDeck?.slides?.length || 5) * 10) / 60)}:{(((currentDeck?.slides?.length || 5) * 10) % 60).toString().padStart(2, '0')}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
+                    <p className="text-xs text-slate-600 mt-0.5">
                       {isModuleClaimed ? (
-                        <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                          <CheckCircle className="w-3.5 h-3.5 inline text-emerald-400" /> Module completed! Complete topic quizzes for additional materials.
+                        <span className="text-emerald-700 font-bold flex items-center gap-1">
+                          <CheckCircle className="w-3.5 h-3.5 inline text-emerald-700" /> Module completed! Complete topic quizzes for additional materials.
                         </span>
                       ) : deckDwellSeconds < (currentDeck?.slides?.length || 5) * 10 ? (
                         <span>Dwell Gate: study for at least 10s per slide ({Math.max(0, (currentDeck?.slides?.length || 5) * 10 - deckDwellSeconds)}s remaining) to unlock battle materials.</span>
                       ) : (
-                        <span className="text-emerald-400 font-bold">Dwell requirement satisfied! Claim +20 Wood, +10 Brick, +5 Metal, +50 XP & +20 Gold.</span>
+                        <span className="text-emerald-700 font-bold">Dwell requirement satisfied! Claim +20 Wood, +10 Brick, +5 Metal, +50 XP & +20 Gold.</span>
                       )}
                     </p>
                   </div>
@@ -1868,17 +1751,17 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
                 <div className="w-full sm:w-auto flex items-center justify-end">
                   {isModuleClaimed ? (
-                    <span className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center gap-1.5">
+                    <span className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-800 flex items-center gap-1.5">
                       <CheckCircle className="w-4 h-4" /> Claimed
                     </span>
                   ) : (
                     <button
                       onClick={handleClaimRevisionRewards}
                       disabled={claimLoading || deckDwellSeconds < (currentDeck?.slides?.length || 5) * 10}
-                      className={`w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition ${
+                      className={`w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
                         deckDwellSeconds >= (currentDeck?.slides?.length || 5) * 10 && !claimLoading
-                          ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 shadow-lg shadow-amber-500/25 cursor-pointer ring-2 ring-amber-400/50'
-                          : 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed opacity-60'
+                          ? 'bg-slate-800 hover:bg-slate-900 text-white shadow-xs'
+                          : 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
                       }`}
                     >
                       <Sparkles className="w-4 h-4" />
@@ -1891,12 +1774,12 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
               {claimFeedback && (
                 <div className={`mx-4 mb-4 p-3 rounded-xl border text-xs font-medium flex items-center justify-between ${
                   claimFeedback.isError 
-                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-300' 
-                    : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    ? 'bg-rose-50 border-rose-300 text-rose-800' 
+                    : 'bg-emerald-50 border-emerald-300 text-emerald-800'
                 }`}>
                   <span>{claimFeedback.message}</span>
                   {claimFeedback.rewards && (
-                    <span className="font-mono font-bold text-amber-300">
+                    <span className="font-mono font-bold text-slate-800">
                       +{claimFeedback.rewards.wood}🪵 +{claimFeedback.rewards.brick}🧱 +{claimFeedback.rewards.metal}⚙️ +{claimFeedback.rewards.xp}XP +{claimFeedback.rewards.gold}🪙
                     </span>
                   )}
@@ -1904,24 +1787,19 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
               )}
             </div>
           ) : (
-            /* SUBTOPIC MISSING CORRESPONDING GOOGLE SLIDE FROM DRIVE: Keep AI Generated Slide Deck */
+            /* SUBTOPIC MISSING CORRESPONDING GOOGLE SLIDE FROM DRIVE: AI Generated Slide Deck */
             currentDeck && currentSlide && (
-              <div className={`rounded-2xl border transition shadow-sm overflow-hidden ${
-                theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
-              }`}>
-                {/* Slide Top Toolbar with Header containing [SubtopicCode] */}
-                <div className={`p-4 border-b flex flex-wrap items-center justify-between gap-3 ${
-                  theme === 'dark' ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-100 border-slate-200'
-                }`}>
+              <div className="rounded-2xl border border-[#E2E8F0] transition shadow-xs overflow-hidden bg-white">
+                {/* Slide Top Toolbar with Header */}
+                <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-[#FDFBF7]">
                   <div className="flex items-center gap-2 flex-wrap">
-                    {/* Every single slide has the subtopic letter and number in the header with lesson count! */}
-                    <span className="font-mono text-xs font-black px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                      {currentSlide.subtopicHeader || `[${currentSubtopic.subtopicCode}] ${currentSubtopic.title}`} · ({currentLessonCount} {currentLessonCount === 1 ? 'Lesson' : 'Lessons'})
+                    <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-md bg-[#EBF3F5] text-slate-800 border border-slate-300">
+                      {currentSlide.subtopicHeader || `[${currentSubtopic.subtopicCode}] ${currentSubtopic.title}`} · ({currentLessonCount} {currentLessonCount === 1 ? 'lesson' : 'lessons'})
                     </span>
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-medium">
-                      AI-Generated Deck
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-white text-slate-700 border border-slate-300 font-bold">
+                      Interactive Deck
                     </span>
-                    <span className="text-xs text-slate-400 font-mono">
+                    <span className="text-xs text-slate-600 font-mono">
                       Slide {activeSlideIndex + 1} of {currentDeck.slides.length}
                     </span>
                   </div>
@@ -1930,92 +1808,86 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <button
                       onClick={() => setShowManualInput(prev => !prev)}
-                      className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition ${
+                      className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer ${
                         showManualInput
-                          ? 'bg-blue-600 text-white border-blue-500'
-                          : theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-white border-slate-300 text-slate-700'
+                          ? 'bg-slate-800 text-white border-slate-800'
+                          : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
                       }`}
                       title="Link or embed a direct Google Slides presentation for this subtopic"
                     >
-                      <Cloud className="w-3.5 h-3.5 text-blue-400" />
-                      <span>{showManualInput ? 'Close' : 'Set Slide URL'}</span>
+                      <Cloud className="w-3.5 h-3.5 text-blue-600" />
+                      <span>{showManualInput ? 'Close' : 'Set slide URL'}</span>
                     </button>
 
                     <button
                       onClick={handleCopyNotes}
                       title="Copy slide notes to clipboard and syllabus notebook"
-                      className={`p-2 rounded-lg text-xs font-medium transition flex items-center gap-1 ${
+                      className={`p-2 rounded-lg text-xs font-bold transition flex items-center gap-1 border border-slate-300 cursor-pointer ${
                         copiedNote
-                          ? 'bg-emerald-500 text-slate-950'
-                          : theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-200 text-slate-600'
+                          ? 'bg-emerald-700 text-white'
+                          : 'bg-white hover:bg-slate-100 text-slate-700'
                       }`}
                     >
                       {copiedNote ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                      <span className="hidden sm:inline">{copiedNote ? 'Copied' : 'Save Notes'}</span>
+                      <span className="hidden sm:inline">{copiedNote ? 'Copied' : 'Save notes'}</span>
                     </button>
 
                     <button
                       onClick={() => onAskAITutor(`Explain ${currentSlide.title} for IGCSE 0653 [${currentSubtopic.subtopicCode}]`, currentSubtopic.subtopicCode)}
                       title="Ask AI Tutor to explain this slide"
-                      className="p-2 rounded-lg text-xs font-medium text-emerald-400 hover:bg-emerald-500/10 transition flex items-center gap-1"
+                      className="p-2 rounded-lg text-xs font-bold text-slate-800 bg-white border border-slate-300 hover:bg-slate-100 transition flex items-center gap-1 cursor-pointer"
                     >
-                      <Sparkles className="w-4 h-4" />
+                      <Sparkles className="w-4 h-4 text-purple-600" />
                       <span className="hidden sm:inline">Ask Tutor</span>
                     </button>
                   </div>
                 </div>
 
-                {/* Manual URL / Presentation ID Direct Embed Form */}
+                {/* Manual URL Form */}
                 {showManualInput && (
-                  <div className={`p-4 border-b space-y-3 ${
-                    theme === 'dark' ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-200'
-                  }`}>
+                  <div className="p-4 border-b border-slate-200 bg-[#FDFBF7] space-y-3">
                     <form onSubmit={handleSaveManualSlide} className="flex flex-col sm:flex-row gap-2">
                       <input
                         type="text"
                         value={manualInputUrl}
                         onChange={e => setManualInputUrl(e.target.value)}
                         placeholder={`Paste Google Slides link or presentation ID for [${currentSubtopic.subtopicCode}]...`}
-                        className={`flex-1 px-3 py-2 rounded-xl text-xs border focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
-                          theme === 'dark' ? 'bg-slate-900 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400'
-                        }`}
+                        className="flex-1 px-3 py-2 rounded-xl text-xs border-2 border-black bg-white text-slate-800 placeholder-slate-400 focus:outline-none"
                       />
                       <button
                         type="submit"
-                        className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shrink-0 transition"
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white shrink-0 transition cursor-pointer"
                       >
-                        Embed Direct Slide
+                        Embed direct slide
                       </button>
                     </form>
-                    <p className="text-[11px] text-slate-400">
-                      Paste any Google Slides URL or Presentation ID from your Drive folder (<code>1kypXZXP3nY9pFxuSJOTZ1anODYxxfZ1a</code>) to replace this AI slide with your exact presentation.
+                    <p className="text-xs text-slate-600">
+                      Paste any Google Slides URL or Presentation ID to replace this interactive deck.
                     </p>
                   </div>
                 )}
 
-                {/* LARGE & OBVIOUS LESSON DECK SWITCHER (AI SYLLABUS DECKS) */}
+                {/* Lesson Deck Switcher (AI Syllabus Decks) */}
                 {currentSubtopic.decks.length > 1 && (
-                  <div className={`p-4 sm:p-5 border-b space-y-3 ${
-                    theme === 'dark' ? 'bg-slate-950/95 border-slate-800' : 'bg-emerald-50/90 border-emerald-200'
-                  }`}>
+                  <div className="p-4 sm:p-5 border-b border-slate-200 bg-[#FDFBF7] space-y-3">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold shrink-0 shadow-xs">
+                        <div className="w-9 h-9 rounded-xl bg-white text-slate-800 border border-slate-300 flex items-center justify-center font-bold shrink-0">
                           <Presentation className="w-5 h-5" />
                         </div>
                         <div>
-                          <h4 className="text-sm font-black tracking-wide flex items-center gap-2">
-                            <span className={theme === 'dark' ? 'text-white' : 'text-slate-900'}>SWITCH LESSON DECK</span>
-                            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                              {currentSubtopic.decks.length} Lessons Available
+                          <h4 className="text-sm font-bold tracking-wide flex items-center gap-2 text-slate-800">
+                            <span>Switch Lesson Deck</span>
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-[#EBF3F5] text-slate-800 border border-slate-300">
+                              {currentSubtopic.decks.length} lessons available
                             </span>
                           </h4>
-                          <p className="text-xs text-slate-400">
+                          <p className="text-xs text-slate-600">
                             This subtopic has multiple lesson decks. Click any lesson below to view its slides:
                           </p>
                         </div>
                       </div>
-                      <div className="text-xs font-black font-mono px-3.5 py-1.5 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 self-start sm:self-auto shadow-xs">
+                      <div className="text-xs font-mono font-bold px-3 py-1 rounded-xl bg-white border border-slate-300 text-slate-700 self-start sm:self-auto">
                         Active: Lesson {activeDeckIndex + 1} of {currentSubtopic.decks.length}
                       </div>
                     </div>
@@ -2030,33 +1902,29 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                               setActiveDeckIndex(idx);
                               setActiveSlideIndex(0);
                             }}
-                            className={`flex items-start gap-3.5 p-3.5 rounded-2xl border text-left transition relative cursor-pointer ${
+                            className={`flex items-start gap-3.5 p-3.5 rounded-xl border text-left transition relative cursor-pointer ${
                               isCurrent
-                                ? 'bg-emerald-600 border-emerald-400 text-white shadow-xl shadow-emerald-600/30 ring-2 ring-emerald-400 scale-[1.01]'
-                                : theme === 'dark'
-                                  ? 'bg-slate-900/90 border-slate-800 text-slate-300 hover:bg-slate-850 hover:border-slate-700 hover:text-white'
-                                  : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100 hover:text-slate-950 shadow-xs'
+                                ? 'bg-[#EBF3F5] border-2 border-black text-slate-900 shadow-2xs font-bold'
+                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
                             }`}
                           >
-                            <div className={`w-10 h-10 rounded-xl shrink-0 flex items-center justify-center font-black text-base transition ${
-                              isCurrent ? 'bg-white text-emerald-600 shadow-md' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            <div className={`w-10 h-10 rounded-xl shrink-0 flex items-center justify-center font-bold text-sm transition ${
+                              isCurrent ? 'bg-slate-800 text-white' : 'bg-[#FDFBF7] text-slate-700 border border-slate-300'
                             }`}>
                               {idx + 1}
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center justify-between gap-1 mb-1">
-                                <span className={`text-xs font-black uppercase tracking-wider ${
-                                  isCurrent ? 'text-emerald-100' : 'text-emerald-400'
+                                <span className={`text-xs font-bold uppercase tracking-wider ${
+                                  isCurrent ? 'text-slate-900' : 'text-slate-500'
                                 }`}>
                                   Lesson {idx + 1}
                                 </span>
-                                <span className={`text-[10px] font-mono font-bold ${
-                                  isCurrent ? 'text-emerald-100' : 'text-slate-400'
-                                }`}>
-                                  {deck.slides.length} Slides
+                                <span className="text-xs font-mono text-slate-500">
+                                  {deck.slides.length} slides
                                 </span>
                               </div>
-                              <p className={`text-xs font-bold line-clamp-2 leading-snug ${isCurrent ? 'text-white' : ''}`} title={deck.title}>
+                              <p className="text-xs font-bold line-clamp-2 leading-snug" title={deck.title}>
                                 {deck.title}
                               </p>
                             </div>
@@ -2068,17 +1936,13 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                 )}
 
                 {/* Slide Body Canvas */}
-                <div className={`p-6 sm:p-8 space-y-6 ${
-                  theme === 'dark' ? 'bg-slate-900/90' : 'bg-white'
-                }`}>
+                <div className="p-6 sm:p-8 space-y-6 bg-white text-slate-800">
                   {/* Slide Title */}
                   <div>
-                    <h3 className={`text-xl sm:text-2xl font-bold tracking-tight ${
-                      theme === 'dark' ? 'text-white' : 'text-slate-900'
-                    }`}>
+                    <h3 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-800">
                       {currentSlide.title}
                     </h3>
-                    <div className="w-12 h-1 bg-emerald-500 rounded-full mt-2"></div>
+                    <div className="w-12 h-1 bg-slate-800 rounded-full mt-2"></div>
                   </div>
 
                   {/* Slide Content Bullet Points */}
@@ -2086,11 +1950,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                     {currentSlide.content.map((point, idx) => (
                       <div 
                         key={idx} 
-                        className={`p-3.5 rounded-xl border text-sm sm:text-base ${
-                          theme === 'dark' 
-                            ? 'bg-slate-950/50 border-slate-800/80 text-slate-200' 
-                            : 'bg-slate-50 border-slate-200 text-slate-800'
-                        }`}
+                        className="p-3.5 rounded-xl border border-slate-200 bg-[#FDFBF7] text-slate-800 text-base"
                       >
                         {point}
                       </div>
@@ -2099,16 +1959,16 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
                   {/* Special Practical Box if present */}
                   {currentSlide.practicalInfo && (
-                    <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-3">
-                      <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider">
-                        <Lightbulb className="w-4 h-4" />
+                    <div className="p-4 rounded-xl border border-amber-300 bg-amber-50 space-y-3">
+                      <div className="flex items-center gap-2 text-xs font-bold text-amber-800 uppercase tracking-wide">
+                        <Lightbulb className="w-4 h-4 text-amber-700" />
                         <span>Cambridge Required Practical Protocol & Risk Assessment</span>
                       </div>
-                      <div className="text-xs space-y-2 text-slate-300">
-                        <div><strong className="text-white">Aim:</strong> {currentSlide.practicalInfo.aim}</div>
-                        <div><strong className="text-white">Equipment:</strong> {currentSlide.practicalInfo.equipment.join(', ')}</div>
+                      <div className="text-xs space-y-2 text-slate-700">
+                        <div><strong className="text-slate-900">Aim:</strong> {currentSlide.practicalInfo.aim}</div>
+                        <div><strong className="text-slate-900">Equipment:</strong> {currentSlide.practicalInfo.equipment.join(', ')}</div>
                         <div>
-                          <strong className="text-white">Safety Precaution:</strong> {currentSlide.practicalInfo.riskAssessment[0]?.hazard} - {currentSlide.practicalInfo.riskAssessment[0]?.precaution}
+                          <strong className="text-slate-900">Safety precaution:</strong> {currentSlide.practicalInfo.riskAssessment[0]?.hazard} - {currentSlide.practicalInfo.riskAssessment[0]?.precaution}
                         </div>
                       </div>
                     </div>
@@ -2116,14 +1976,12 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
                   {/* Keywords Cloud */}
                   {currentDeck.keywords && currentDeck.keywords.length > 0 && (
-                    <div className="pt-2 border-t border-slate-800/60 flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-semibold text-slate-400">Syllabus Keywords:</span>
+                    <div className="pt-2 border-t border-slate-200 flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-bold text-slate-600">Syllabus keywords:</span>
                       {currentDeck.keywords.map(kw => (
                         <span 
                           key={kw} 
-                          className={`text-xs px-2 py-0.5 rounded-full font-mono font-medium ${
-                            theme === 'dark' ? 'bg-slate-800 text-slate-300' : 'bg-slate-200 text-slate-700'
-                          }`}
+                          className="text-xs px-2 py-0.5 rounded-md font-mono font-medium bg-[#EBF3F5] text-slate-700 border border-slate-300"
                         >
                           {kw}
                         </span>
@@ -2133,20 +1991,18 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                 </div>
 
                 {/* Slide Bottom Navigation Bar */}
-                <div className={`p-4 border-t flex items-center justify-between gap-4 ${
-                  theme === 'dark' ? 'bg-slate-950/90 border-slate-800' : 'bg-slate-100 border-slate-200'
-                }`}>
+                <div className="p-4 border-t border-slate-200 flex items-center justify-between gap-4 bg-[#FDFBF7]">
                   <button
                     onClick={goToPreviousSlide}
                     disabled={activeSlideIndex === 0 && activeDeckIndex === 0}
-                    className={`flex items-center gap-1 px-4 py-2 rounded-xl text-xs font-bold transition ${
+                    className={`flex items-center gap-1 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
                       activeSlideIndex === 0 && activeDeckIndex === 0
-                        ? 'opacity-40 cursor-not-allowed'
-                        : theme === 'dark' ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-800'
+                        ? 'opacity-40 cursor-not-allowed border border-slate-200 bg-white text-slate-400'
+                        : 'bg-white border-2 border-black hover:bg-slate-100 text-slate-800 shadow-2xs'
                     }`}
                   >
                     <ChevronLeft className="w-4 h-4" />
-                    <span>Previous Slide</span>
+                    <span>Previous slide</span>
                   </button>
 
                   {/* Slide dots indicator */}
@@ -2156,10 +2012,10 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                         key={idx}
                         onClick={() => setActiveSlideIndex(idx)}
                         title={`Go to slide ${idx + 1}`}
-                        className={`w-2.5 h-2.5 rounded-full transition ${
+                        className={`w-2.5 h-2.5 rounded-full transition cursor-pointer ${
                           idx === activeSlideIndex 
-                            ? 'bg-emerald-400 scale-125' 
-                            : theme === 'dark' ? 'bg-slate-700 hover:bg-slate-500' : 'bg-slate-300 hover:bg-slate-400'
+                            ? 'bg-slate-800 scale-125' 
+                            : 'bg-slate-300 hover:bg-slate-400'
                         }`}
                       />
                     ))}
@@ -2168,56 +2024,54 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                   <button
                     onClick={goToNextSlide}
                     disabled={(activeSlideIndex === currentDeck.slides.length - 1 && activeDeckIndex === currentSubtopic.decks.length - 1) || nextSlideCountdown > 0}
-                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition ${
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
                       activeSlideIndex === currentDeck.slides.length - 1 && activeDeckIndex === currentSubtopic.decks.length - 1
-                        ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-400'
+                        ? 'opacity-40 cursor-not-allowed bg-slate-200 text-slate-500 border border-slate-300'
                         : nextSlideCountdown > 0
-                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 cursor-wait'
-                          : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md'
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300 cursor-wait'
+                          : 'bg-slate-800 hover:bg-slate-900 text-white shadow-xs'
                     }`}
                   >
                     {nextSlideCountdown > 0 ? (
                       <>
-                        <Lock className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                        <Lock className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
                         <span>Next ({nextSlideCountdown}s)</span>
                       </>
                     ) : activeSlideIndex === currentDeck.slides.length - 1 && activeDeckIndex === currentSubtopic.decks.length - 1 ? (
-                      <span>Deck Finished</span>
+                      <span>Deck finished</span>
                     ) : (
                       <>
-                        <span>Next Slide</span>
+                        <span>Next slide</span>
                         <ChevronRight className="w-4 h-4" />
                       </>
                     )}
                   </button>
                 </div>
 
-                {/* MODULE 2: REVISION ROYALE ANTI-FARMING CLAIM GATE */}
-                <div className={`p-4 border-t flex flex-col sm:flex-row items-center justify-between gap-4 ${
-                  theme === 'dark' ? 'bg-slate-900/90 border-slate-800' : 'bg-slate-50 border-slate-200'
-                }`}>
+                {/* Revision Royale Rewards Bar */}
+                <div className="p-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#FDFBF7]">
                   <div className="flex items-center gap-3 w-full sm:w-auto">
-                    <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-black text-lg shrink-0">
+                    <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-300 flex items-center justify-center text-amber-700 font-bold text-lg shrink-0">
                       🎮
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-black uppercase tracking-wider text-amber-400">
+                        <span className="text-xs font-bold uppercase tracking-wide text-amber-800">
                           Revision Royale Rewards
                         </span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-white text-slate-700 border border-slate-300 font-mono">
                           {Math.floor(deckDwellSeconds / 60)}:{(deckDwellSeconds % 60).toString().padStart(2, '0')} / {Math.floor((currentDeck.slides.length * 10) / 60)}:{((currentDeck.slides.length * 10) % 60).toString().padStart(2, '0')}
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
+                      <p className="text-xs text-slate-600 mt-0.5">
                         {isModuleClaimed ? (
-                          <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                            <CheckCircle className="w-3.5 h-3.5 inline text-emerald-400" /> Module completed! Complete topic quizzes for additional materials.
+                          <span className="text-emerald-700 font-bold flex items-center gap-1">
+                            <CheckCircle className="w-3.5 h-3.5 inline text-emerald-700" /> Module completed! Complete topic quizzes for additional materials.
                           </span>
                         ) : deckDwellSeconds < currentDeck.slides.length * 10 ? (
                           <span>Dwell Gate: spend at least 10s per slide ({Math.max(0, currentDeck.slides.length * 10 - deckDwellSeconds)}s remaining) to claim battle materials.</span>
                         ) : (
-                          <span className="text-emerald-400 font-bold">Dwell requirement satisfied! Claim +20 Wood, +10 Brick, +5 Metal, +50 XP & +20 Gold.</span>
+                          <span className="text-emerald-700 font-bold">Dwell requirement satisfied! Claim +20 Wood, +10 Brick, +5 Metal, +50 XP & +20 Gold.</span>
                         )}
                       </p>
                     </div>
@@ -2225,17 +2079,17 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
                   <div className="w-full sm:w-auto flex items-center justify-end">
                     {isModuleClaimed ? (
-                      <span className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center gap-1.5">
+                      <span className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-800 flex items-center gap-1.5">
                         <CheckCircle className="w-4 h-4" /> Claimed
                       </span>
                     ) : (
                       <button
                         onClick={handleClaimRevisionRewards}
                         disabled={claimLoading || deckDwellSeconds < currentDeck.slides.length * 10}
-                        className={`w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition ${
+                        className={`w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
                           deckDwellSeconds >= currentDeck.slides.length * 10 && !claimLoading
-                            ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 shadow-lg shadow-amber-500/25 cursor-pointer ring-2 ring-amber-400/50'
-                            : 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed opacity-60'
+                            ? 'bg-slate-800 hover:bg-slate-900 text-white shadow-xs'
+                            : 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
                         }`}
                       >
                         <Sparkles className="w-4 h-4" />
@@ -2248,12 +2102,12 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                 {claimFeedback && (
                   <div className={`mx-4 mb-4 p-3 rounded-xl border text-xs font-medium flex items-center justify-between ${
                     claimFeedback.isError 
-                      ? 'bg-rose-500/10 border-rose-500/30 text-rose-300' 
-                      : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                      ? 'bg-rose-50 border-rose-300 text-rose-800' 
+                      : 'bg-emerald-50 border-emerald-300 text-emerald-800'
                   }`}>
                     <span>{claimFeedback.message}</span>
                     {claimFeedback.rewards && (
-                      <span className="font-mono font-bold text-amber-300">
+                      <span className="font-mono font-bold text-slate-800">
                         +{claimFeedback.rewards.wood}🪵 +{claimFeedback.rewards.brick}🧱 +{claimFeedback.rewards.metal}⚙️ +{claimFeedback.rewards.xp}XP +{claimFeedback.rewards.gold}🪙
                       </span>
                     )}
@@ -2265,16 +2119,14 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
           {/* Syllabus Objectives Summary for this Subtopic */}
           {currentSubtopic.syllabusSummary && (
-            <div className={`rounded-2xl border p-5 space-y-3 ${
-              theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
-            }`}>
+            <div className="rounded-2xl border border-[#E2E8F0] p-5 space-y-3 bg-white shadow-xs">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <h4 className="font-bold text-xs uppercase tracking-wider text-slate-400">
+                <ShieldCheck className="w-4 h-4 text-emerald-700" />
+                <h4 className="font-bold text-xs uppercase tracking-wide text-slate-700">
                   Cambridge 0653 Syllabus Learning Outcomes:
                 </h4>
               </div>
-              <ul className="space-y-1.5 text-xs text-slate-300 list-disc list-inside">
+              <ul className="space-y-1.5 text-xs text-slate-700 list-disc list-inside">
                 {currentSubtopic.syllabusSummary.map((item, idx) => (
                   <li key={idx}>{item}</li>
                 ))}
@@ -2286,42 +2138,51 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
       {/* 10-QUESTION SUBTOPIC QUIZ MODAL FOR GREEN STATUS CERTIFICATION */}
       {isQuizModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className={`rounded-2xl border max-w-2xl w-full p-6 sm:p-7 space-y-6 shadow-2xl max-h-[90vh] overflow-y-auto ${
-            theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 text-slate-900'
-          }`}>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="rounded-3xl border-2 border-black max-w-3xl w-full p-5 sm:p-7 space-y-6 shadow-2xl max-h-[92vh] overflow-y-auto bg-white text-slate-800">
             {/* Modal Header */}
-            <div className="flex items-center justify-between border-b pb-4 border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
-                  ★
+            <div className="flex items-center justify-between border-b pb-4 border-slate-200 gap-3">
+              <div className="space-y-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`text-xs font-mono font-bold px-2.5 py-0.5 rounded-lg border ${
+                    (quizQuestions[0]?.subject || currentSubtopic?.subject) === 'chemistry'
+                      ? 'bg-cyan-50 text-cyan-800 border-cyan-300'
+                      : (quizQuestions[0]?.subject || currentSubtopic?.subject) === 'physics'
+                        ? 'bg-purple-50 text-purple-800 border-purple-300'
+                        : 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                  }`}>
+                    [{quizSubtopicCode}] {currentSubtopic?.title || 'Subtopic Lesson'}
+                  </span>
+                  <span className="text-xs font-mono px-2 py-0.5 rounded-md bg-[#FDFBF7] text-slate-700 border border-slate-300">
+                    Cambridge 0653 Paper 2 Standards
+                  </span>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-[#EBF3F5] text-slate-800 border border-slate-300">
+                    Attempt #{subtopicAttemptCounts[quizSubtopicCode] || 1}
+                  </span>
                 </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-bold text-base">
-                      [{quizSubtopicCode}] Knowledge Check: Green Status Quiz
-                    </h3>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-mono font-bold">
-                      Attempt #{subtopicAttemptCounts[quizSubtopicCode] || 1} • Fresh Questions
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-400">
-                    Cambridge 0653 Standards • 10 Fresh questions drawn from a pool of {getSubtopicQuestionPoolSize(quizSubtopicCode)} questions • Score 80%+ (8/10) to earn Green status
-                  </p>
-                </div>
+                <h3 className="font-bold text-base sm:text-lg tracking-tight truncate text-slate-800">
+                  Traffic Light Mastery Check: 10 Target Questions
+                </h3>
               </div>
-              <div className="flex items-center gap-2">
+
+              <div className="flex items-center gap-2 shrink-0">
+                {/* Active Elapsed Timer */}
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-[#FDFBF7] border border-slate-300 text-xs font-mono text-slate-700">
+                  <Clock className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>{formatQuizTimer(quizTimerSeconds)}</span>
+                </div>
+
                 <button
                   onClick={() => startQuizForSubtopic(quizSubtopicCode, true)}
                   title="Generate a completely fresh 10-question set from the bank"
-                  className="hidden sm:flex text-xs px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 items-center gap-1.5 transition"
+                  className="hidden sm:flex text-xs px-2.5 py-1 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-black items-center gap-1.5 transition font-bold cursor-pointer"
                 >
-                  <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Roll New Questions</span>
+                  <RefreshCw className="w-3 h-3 text-slate-700" />
+                  <span>Fresh Set</span>
                 </button>
                 <button 
                   onClick={() => setIsQuizModalOpen(false)}
-                  className="text-slate-400 hover:text-white p-1 rounded-lg"
+                  className="text-slate-600 hover:text-black p-1 rounded-xl hover:bg-slate-100 transition cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -2331,61 +2192,107 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
             {/* If Quiz Not Completed: Question by Question */}
             {!quizCompleted && quizQuestions.length > 0 && (
               <div className="space-y-6">
+                {/* 10-Question Navigator Pill Strip */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs text-slate-600">
+                    <span className="font-bold text-slate-700">Question Navigator:</span>
+                    <span>
+                      Answered: <strong className="text-slate-900 font-mono">{Object.keys(submittedAnswers).length}</strong> / {quizQuestions.length}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {quizQuestions.map((q, idx) => {
+                      const isCurrent = idx === currentQuestionIndex;
+                      const isAnswered = submittedAnswers[idx];
+                      const isCorrect = selectedAnswers[idx] === q.correctIndex;
+
+                      return (
+                        <button
+                          key={q.id || idx}
+                          type="button"
+                          onClick={() => setCurrentQuestionIndex(idx)}
+                          className={`w-8 h-8 rounded-xl text-xs font-mono font-bold transition flex items-center justify-center cursor-pointer ${
+                            isCurrent
+                              ? 'bg-slate-800 text-white ring-2 ring-slate-800 shadow-md'
+                              : isAnswered
+                                ? isCorrect
+                                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-400 font-bold'
+                                  : 'bg-rose-50 text-rose-800 border border-rose-400 font-bold'
+                                : 'bg-[#FDFBF7] text-slate-700 hover:text-slate-900 border border-slate-300 hover:bg-slate-100'
+                          }`}
+                        >
+                          {idx + 1}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* Progress bar */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-                    <span>Question {currentQuestionIndex + 1} of {quizQuestions.length}</span>
-                    <span>Answered: {Object.keys(submittedAnswers).length} / {quizQuestions.length}</span>
-                  </div>
-                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-emerald-500 transition-all duration-300"
-                      style={{ width: `${((currentQuestionIndex + 1) / quizQuestions.length) * 100}%` }}
-                    />
-                  </div>
+                <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-slate-800 transition-all duration-300"
+                    style={{ width: `${((currentQuestionIndex + 1) / quizQuestions.length) * 100}%` }}
+                  />
                 </div>
 
                 {/* Active Question Card */}
                 {quizQuestions[currentQuestionIndex] && (
-                  <div className="space-y-4">
-                    <h4 className="text-base sm:text-lg font-bold text-white leading-snug">
+                  <div className="space-y-5 bg-[#FDFBF7] border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-xs">
+                    {/* Question metadata badge */}
+                    <div className="flex items-center justify-between text-xs text-slate-600 gap-2 flex-wrap">
+                      <span className="font-mono font-bold text-slate-800">
+                        Question {currentQuestionIndex + 1} of {quizQuestions.length}
+                      </span>
+                      <span className="font-mono text-xs px-2 py-0.5 rounded bg-white text-slate-700 border border-slate-300">
+                        Syllabus Ref: {quizQuestions[currentQuestionIndex].syllabusRef || quizSubtopicCode}
+                      </span>
+                    </div>
+
+                    <h4 className="text-base sm:text-lg font-bold leading-relaxed text-slate-800">
                       {quizQuestions[currentQuestionIndex].question}
                     </h4>
 
                     {/* 4 Options */}
-                    <div className="space-y-2.5">
+                    <div className="space-y-3">
                       {quizQuestions[currentQuestionIndex].options.map((opt, optIdx) => {
+                        const optLetter = ['A', 'B', 'C', 'D'][optIdx];
                         const isSelected = selectedAnswers[currentQuestionIndex] === optIdx;
                         const isSubmitted = submittedAnswers[currentQuestionIndex];
                         const isCorrect = optIdx === quizQuestions[currentQuestionIndex].correctIndex;
+                        const isWrong = isSubmitted && isSelected && !isCorrect;
 
-                        let btnStyle = theme === 'dark' 
-                          ? 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-200' 
-                          : 'bg-slate-50 border-slate-300 hover:border-slate-400 text-slate-800';
+                        let cardStyle = 'bg-white border-2 border-black hover:bg-[#EBF3F5] text-slate-800';
+                        let letterStyle = 'bg-[#FDFBF7] text-slate-700 border border-slate-300';
+
+                        if (isSelected && !isSubmitted) {
+                          cardStyle = 'bg-[#EBF3F5] border-2 border-black text-slate-900 shadow-2xs font-bold';
+                          letterStyle = 'bg-slate-800 text-white';
+                        }
 
                         if (isSubmitted) {
                           if (isCorrect) {
-                            btnStyle = 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-semibold';
-                          } else if (isSelected) {
-                            btnStyle = 'bg-rose-500/20 border-rose-500 text-rose-300';
+                            cardStyle = 'bg-emerald-50 border-2 border-emerald-600 text-emerald-900 font-bold';
+                            letterStyle = 'bg-emerald-600 text-white';
+                          } else if (isWrong) {
+                            cardStyle = 'bg-rose-50 border-2 border-rose-600 text-rose-900 font-bold';
+                            letterStyle = 'bg-rose-600 text-white';
                           } else {
-                            btnStyle = 'opacity-50 border-slate-800';
+                            cardStyle = 'opacity-40 border border-slate-200 bg-white text-slate-500';
                           }
-                        } else if (isSelected) {
-                          btnStyle = 'bg-emerald-500/20 border-emerald-500 text-emerald-300';
                         }
 
                         return (
                           <button
                             key={optIdx}
+                            disabled={isSubmitted}
                             onClick={() => handleSelectQuizAnswer(currentQuestionIndex, optIdx)}
-                            className={`w-full text-left p-3.5 rounded-xl border text-sm transition flex items-start gap-3 ${btnStyle}`}
+                            className={`w-full text-left p-3.5 sm:p-4 rounded-xl text-xs sm:text-sm transition flex items-start gap-3.5 cursor-pointer ${cardStyle}`}
                           >
-                            <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-800 shrink-0">
-                              {String.fromCharCode(65 + optIdx)}
+                            <span className={`w-7 h-7 rounded-lg font-mono font-bold text-xs flex items-center justify-center shrink-0 ${letterStyle}`}>
+                              {isSubmitted && isCorrect ? <Check className="w-4 h-4 text-white" /> : isSubmitted && isWrong ? <X className="w-4 h-4 text-white" /> : optLetter}
                             </span>
-                            <span className="flex-1">{opt}</span>
-                            {isSubmitted && isCorrect && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
+                            <span className="flex-1 leading-relaxed pt-0.5">{opt}</span>
                           </button>
                         );
                       })}
@@ -2393,23 +2300,56 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
                     {/* Instant Explanation upon answering */}
                     {submittedAnswers[currentQuestionIndex] && (
-                      <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 text-xs space-y-1">
-                        <div className="font-bold text-emerald-400">Examiner Rationale:</div>
-                        <p className="text-slate-300 leading-relaxed">
-                          {quizQuestions[currentQuestionIndex].explanation}
-                        </p>
+                      <div className="space-y-3 pt-2">
+                        <div className={`p-4 rounded-xl border text-xs sm:text-sm flex items-start gap-3 ${
+                          selectedAnswers[currentQuestionIndex] === quizQuestions[currentQuestionIndex].correctIndex
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                            : 'bg-rose-50 border-rose-300 text-rose-800'
+                        }`}>
+                          {selectedAnswers[currentQuestionIndex] === quizQuestions[currentQuestionIndex].correctIndex ? (
+                            <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
+                          ) : (
+                            <XCircle className="w-5 h-5 text-rose-700 shrink-0 mt-0.5" />
+                          )}
+                          <div className="space-y-1">
+                            <div className="font-bold">
+                              {selectedAnswers[currentQuestionIndex] === quizQuestions[currentQuestionIndex].correctIndex ? 'Correct!' : 'Incorrect'}
+                            </div>
+                            <p className="text-xs text-slate-700 leading-relaxed">
+                              {quizQuestions[currentQuestionIndex].explanation}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Ask AI Tutor action button */}
+                        <div className="flex items-center justify-end">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsQuizModalOpen(false);
+                              onAskAITutor(
+                                `Explain Cambridge 0653 [${quizSubtopicCode}] question: "${quizQuestions[currentQuestionIndex].question}" and why the answer is "${quizQuestions[currentQuestionIndex].options[quizQuestions[currentQuestionIndex].correctIndex]}"`,
+                                quizQuestions[currentQuestionIndex].topicCode
+                              );
+                            }}
+                            className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                          >
+                            <Brain className="w-4 h-4 text-purple-700" />
+                            <span>Ask AI Tutor about this question</span>
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
                 )}
 
                 {/* Modal Navigation Buttons */}
-                <div className="flex items-center justify-between pt-4 border-t border-slate-800">
+                <div className="flex items-center justify-between pt-3 border-t border-slate-200">
                   <button
                     onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))}
                     disabled={currentQuestionIndex === 0}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold ${
-                      currentQuestionIndex === 0 ? 'opacity-40 cursor-not-allowed' : 'bg-slate-800 hover:bg-slate-700 text-white'
+                    className={`px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      currentQuestionIndex === 0 ? 'opacity-40 cursor-not-allowed border border-slate-200 bg-white text-slate-400' : 'bg-white border border-black hover:bg-slate-100 text-slate-800'
                     }`}
                   >
                     Previous
@@ -2418,95 +2358,238 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                   {currentQuestionIndex < quizQuestions.length - 1 ? (
                     <button
                       onClick={() => setCurrentQuestionIndex(prev => prev + 1)}
-                      className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white"
+                      className="px-6 py-2.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white flex items-center gap-1.5 transition shadow-xs cursor-pointer"
                     >
-                      Next Question
+                      <span>Next question</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   ) : (
                     <button
                       onClick={handleCompleteQuiz}
                       disabled={Object.keys(submittedAnswers).length < quizQuestions.length}
-                      className={`px-5 py-2 rounded-xl text-xs font-bold ${
+                      className={`px-6 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
                         Object.keys(submittedAnswers).length < quizQuestions.length
-                          ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-400'
-                          : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg'
+                          ? 'opacity-40 cursor-not-allowed bg-slate-200 text-slate-500 border border-slate-300'
+                          : 'bg-emerald-700 hover:bg-emerald-800 text-white shadow-xs'
                       }`}
                     >
-                      Submit & Certify Status
+                      <Award className="w-4 h-4" />
+                      <span>Submit & certify status</span>
                     </button>
                   )}
                 </div>
               </div>
             )}
 
-            {/* If Quiz Completed: Score Summary & Status Award */}
+            {/* If Quiz Completed: Score Summary, Traffic Light Status & Full Review Mode */}
             {quizCompleted && (
-              <div className="text-center py-6 space-y-5">
-                <div 
-                  className="w-16 h-16 rounded-full mx-auto flex items-center justify-center text-3xl font-black shadow-xl"
-                  style={{
-                    backgroundColor: quizScore >= 8 ? '#10b981' : quizScore >= 5 ? '#f59e0b' : '#ef4444',
-                    color: '#ffffff'
-                  }}
-                >
-                  {quizScore >= 8 ? '🎉' : quizScore >= 5 ? '⚠️' : '🚨'}
+              <div className="space-y-6 py-2">
+                {/* Result Hero Banner */}
+                <div className="text-center space-y-4">
+                  <div 
+                    className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-3xl font-black shadow-xs"
+                    style={{
+                      backgroundColor: quizScore >= 8 ? '#059669' : quizScore >= 5 ? '#d97706' : '#e11d48',
+                      color: '#ffffff'
+                    }}
+                  >
+                    {quizScore >= 8 ? '🎉' : quizScore >= 5 ? '⚠️' : '🚨'}
+                  </div>
+
+                  <div className="space-y-1">
+                    <h4 className="text-2xl font-bold tracking-tight text-slate-800">
+                      {quizScore >= 8 
+                        ? 'Green Status Awarded (Mastery Certified)' 
+                        : quizScore >= 5 
+                          ? 'Amber / Orange Grade Assigned' 
+                          : 'Red Grade Assigned (Needs Revision)'}
+                    </h4>
+                    <p className="text-xs sm:text-sm text-slate-600">
+                      You scored <strong className="text-slate-800 font-mono text-base">{quizScore}/{quizQuestions.length}</strong> ({Math.round((quizScore / Math.max(1, quizQuestions.length)) * 100)}%) on [{quizSubtopicCode}].
+                    </p>
+                  </div>
+
+                  {/* Cambridge Grade Prediction Pill */}
+                  <div className="flex items-center justify-center gap-2 flex-wrap pt-1">
+                    <span className={`text-xs font-mono font-bold px-3 py-1 rounded-xl border ${getCambridgeGrade(Math.round((quizScore / Math.max(1, quizQuestions.length)) * 100)).color}`}>
+                      {getCambridgeGrade(Math.round((quizScore / Math.max(1, quizQuestions.length)) * 100)).label}
+                    </span>
+                    <span className="text-xs font-mono px-3 py-1 rounded-xl bg-white border border-slate-300 text-slate-700">
+                      ⏱ Time: {formatQuizTimer(quizTimerSeconds)}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="space-y-1">
-                  <h4 className="text-2xl font-black text-white">
-                    {quizScore >= 8 
-                      ? 'Green Grade Awarded (Mastery Unlocked)' 
-                      : quizScore >= 5 
-                        ? 'Amber / Orange Grade Assigned' 
-                        : 'Red Grade Assigned'}
-                  </h4>
-                  <p className="text-sm text-slate-300">
-                    You scored <strong className="text-emerald-400 font-mono text-base">{quizScore}/{quizQuestions.length}</strong> ({Math.round((quizScore / Math.max(1, quizQuestions.length)) * 100)}%) on [{quizSubtopicCode}].
-                  </p>
-                </div>
-
+                {/* Status Guidance Card */}
                 {quizScore >= 8 ? (
-                  <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 max-w-md mx-auto space-y-1">
-                    <div className="font-bold text-sm text-emerald-400 flex items-center justify-center gap-1.5">
+                  <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-xs text-emerald-800 max-w-lg mx-auto space-y-1">
+                    <div className="font-bold text-sm text-emerald-900 flex items-center justify-center gap-1.5">
                       <span>✓ High Mastery Certified (80%+)</span>
                     </div>
-                    <p>
+                    <p className="text-center text-slate-700">
                       Outstanding performance! Your score meets the Cambridge 80% threshold. Green status has been recorded in your Progress Tracker.
                     </p>
                   </div>
                 ) : quizScore >= 5 ? (
-                  <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 max-w-md mx-auto space-y-1">
-                    <div className="font-bold text-sm text-amber-400 flex items-center justify-center gap-1.5">
+                  <div className="p-4 rounded-2xl bg-amber-50 border border-amber-300 text-xs text-amber-800 max-w-lg mx-auto space-y-1">
+                    <div className="font-bold text-sm text-amber-900 flex items-center justify-center gap-1.5">
                       <span>⚠️ Amber / Orange Grade Awarded (50% - 70%)</span>
                     </div>
-                    <p>
+                    <p className="text-center text-slate-700">
                       Good effort! Scoring in the 50%, 60%, or 70% range assigns you an <strong>Amber / Orange grade</strong>. Review the key formulas and explanations in the lesson slides to reach the 80%+ threshold for Green status!
                     </p>
                   </div>
                 ) : (
-                  <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300 max-w-md mx-auto space-y-1">
-                    <div className="font-bold text-sm text-rose-400 flex items-center justify-center gap-1.5">
+                  <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-800 max-w-lg mx-auto space-y-1">
+                    <div className="font-bold text-sm text-rose-900 flex items-center justify-center gap-1.5">
                       <span>🚨 Red Grade Assigned (40% or Less)</span>
                     </div>
-                    <p>
+                    <p className="text-center text-slate-700">
                       Scoring 40% or less assigns you a <strong>Red grade</strong>. Key syllabus definitions require reinforcement. Please review the interactive lesson slides carefully and retake the quiz.
                     </p>
                   </div>
                 )}
 
-                <div className="pt-4 flex items-center justify-center gap-3 flex-wrap">
+                {/* Question-by-Question Review Section with Filter Tabs */}
+                <div className="space-y-4 pt-4 border-t border-slate-200">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <h5 className="font-bold text-sm text-slate-800 flex items-center gap-2">
+                      <BookOpen className="w-4 h-4 text-emerald-700" />
+                      <span>Detailed Question Breakdown & Review</span>
+                    </h5>
+
+                    {/* Review Filter Tabs */}
+                    <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[#FDFBF7] border border-slate-200 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setQuizReviewFilter('all')}
+                        className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                          quizReviewFilter === 'all' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        All ({quizQuestions.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQuizReviewFilter('incorrect')}
+                        className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                          quizReviewFilter === 'incorrect' ? 'bg-rose-100 text-rose-800' : 'text-rose-700 hover:text-rose-900'
+                        }`}
+                      >
+                        Incorrect ({quizQuestions.length - quizScore})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQuizReviewFilter('correct')}
+                        className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                          quizReviewFilter === 'correct' ? 'bg-emerald-100 text-emerald-800' : 'text-emerald-700 hover:text-emerald-900'
+                        }`}
+                      >
+                        Correct ({quizScore})
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Filtered Question Review List */}
+                  <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                    {quizQuestions
+                      .map((q, idx) => ({ q, idx }))
+                      .filter(({ q, idx }) => {
+                        const isCorrect = selectedAnswers[idx] === q.correctIndex;
+                        if (quizReviewFilter === 'correct') return isCorrect;
+                        if (quizReviewFilter === 'incorrect') return !isCorrect;
+                        return true;
+                      })
+                      .map(({ q, idx }) => {
+                        const userChoiceIdx = selectedAnswers[idx];
+                        const isCorrect = userChoiceIdx === q.correctIndex;
+
+                        return (
+                          <div
+                            key={q.id || idx}
+                            className={`p-4 rounded-xl border text-xs space-y-2.5 transition ${
+                              isCorrect
+                                ? 'bg-emerald-50/50 border-emerald-300'
+                                : 'bg-rose-50/50 border-rose-300'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="font-mono font-bold text-slate-600">
+                                #{idx + 1} • Ref: {q.syllabusRef || quizSubtopicCode}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                isCorrect ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                              }`}>
+                                {isCorrect ? 'Correct' : 'Needs Review'}
+                              </span>
+                            </div>
+
+                            <p className="font-bold text-slate-800 text-xs sm:text-sm">
+                              {q.question}
+                            </p>
+
+                            <div className="space-y-1 pt-1 text-xs">
+                              <div className="flex items-center gap-2">
+                                <span className="text-slate-600 font-semibold w-24 shrink-0">Your Answer:</span>
+                                <span className={isCorrect ? 'text-emerald-800 font-bold' : 'text-rose-800 font-bold'}>
+                                  {userChoiceIdx !== undefined && q.options[userChoiceIdx] ? q.options[userChoiceIdx] : 'Unanswered'}
+                                </span>
+                              </div>
+                              {!isCorrect && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-slate-600 font-semibold w-24 shrink-0">Correct Answer:</span>
+                                  <span className="text-emerald-800 font-bold">
+                                    {q.options[q.correctIndex]}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="p-2.5 rounded-xl bg-white border border-slate-200 text-xs space-y-1">
+                              <span className="font-bold text-slate-800">Examiner Rationale:</span>
+                              <p className="text-slate-600 leading-relaxed">
+                                {q.explanation}
+                              </p>
+                            </div>
+
+                            {!isCorrect && (
+                              <div className="flex justify-end pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsQuizModalOpen(false);
+                                    onAskAITutor(
+                                      `Explain Cambridge 0653 [${quizSubtopicCode}] question: "${q.question}" and why the answer is "${q.options[q.correctIndex]}"`,
+                                      q.topicCode
+                                    );
+                                  }}
+                                  className="text-xs text-purple-700 hover:text-purple-900 font-bold flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Brain className="w-3.5 h-3.5" />
+                                  <span>Ask AI Tutor to explain this question</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+
+                {/* Completion Actions */}
+                <div className="pt-4 border-t border-slate-200 flex items-center justify-center gap-3 flex-wrap">
                   <button
                     onClick={() => startQuizForSubtopic(quizSubtopicCode, true)}
-                    className="px-5 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition"
+                    className="px-5 py-2.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white shadow-xs flex items-center gap-2 transition cursor-pointer"
                   >
                     <RefreshCw className="w-4 h-4" />
-                    <span>Practice with NEW Questions (Fresh Rotation)</span>
+                    <span>Practice with NEW questions (fresh rotation)</span>
                   </button>
                   <button
                     onClick={() => setIsQuizModalOpen(false)}
-                    className="px-5 py-2.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 transition shadow-md"
+                    className="px-5 py-2.5 rounded-xl text-xs font-bold bg-white hover:bg-slate-100 text-slate-800 border border-black transition shadow-xs cursor-pointer"
                   >
-                    Back to Lesson Slides
+                    Back to lesson slides
                   </button>
                 </div>
               </div>
@@ -2517,3 +2600,4 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     </div>
   );
 };
+

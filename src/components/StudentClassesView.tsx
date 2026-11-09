@@ -6,13 +6,12 @@ import {
   AlertCircle, 
   BookOpen, 
   GraduationCap, 
-  ShieldCheck, 
-  BarChart3, 
   Clock, 
   User, 
   ArrowRight,
-  Sparkles,
-  Trophy
+  Trophy,
+  Calendar,
+  FileText
 } from 'lucide-react';
 import { UserProfile, StudentProgress } from '../types';
 import { 
@@ -20,9 +19,8 @@ import {
   joinClassWithCode, 
   fetchStudentEnrolledClasses 
 } from '../services/firestoreService';
-import { StudentTasksPanel } from './StudentTasksPanel';
+import { TaskView } from './TaskView';
 import { StudentLeaderboard } from './StudentLeaderboard';
-import { Calendar } from 'lucide-react';
 
 interface StudentClassesViewProps {
   user: UserProfile;
@@ -77,7 +75,6 @@ export const StudentClassesView: React.FC<StudentClassesViewProps> = ({
       if (result.success && result.classItem) {
         setStatusMessage({ type: 'success', text: result.message });
         setClassCodeInput('');
-        // Add to local state if not present
         if (!enrolledClasses.some(c => c.id === result.classItem!.id)) {
           setEnrolledClasses(prev => [result.classItem!, ...prev]);
         }
@@ -98,74 +95,76 @@ export const StudentClassesView: React.FC<StudentClassesViewProps> = ({
     : 0;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8">
-      {/* Banner */}
-      <div className="bg-gradient-to-r from-emerald-950/60 via-slate-900 to-teal-950/60 border border-emerald-500/30 rounded-3xl p-6 sm:p-8 shadow-sm">
+    <div className="w-full max-w-5xl mx-auto space-y-6 pb-12 font-sans text-slate-800">
+      
+      {/* Banner Card */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-2">
+          <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+              <span className="text-xs font-bold px-2 py-0.5 rounded bg-[#EBF3F5] text-slate-800 border border-slate-300">
                 Student Classes Portal
               </span>
-              <span className="text-xs text-slate-400">
+              <span className="text-xs font-semibold text-slate-600">
                 Cambridge IGCSE 0653
               </span>
             </div>
-            <h1 className="text-xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-3">
-              <Users className="w-7 h-7 text-emerald-400" />
-              <span>My Classes & Progress Sharing</span>
+            <h1 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-2.5">
+              <Users className="w-6 h-6 text-slate-700" />
+              <span>My Classes and Cohorts</span>
             </h1>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-xl">
-              Join your teacher's class using the specific class code provided by your instructor. Your progress, completed lesson decks, and quiz scores will automatically be shared with your instructor.
+            <p className="text-base text-slate-600 max-w-2xl">
+              Connect with your teacher by entering your class code. Your revision progress and quiz scores sync automatically to your teacher's gradebook.
             </p>
           </div>
 
-          <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-center shrink-0">
-            <div className="text-2xl font-black text-emerald-400">{enrolledClasses.length}</div>
-            <div className="text-xs text-slate-400 font-medium">Joined Classes</div>
+          <div className="bg-[#EBF3F5] border border-slate-300 rounded-lg px-5 py-3 text-center shrink-0">
+            <span className="block text-2xl font-bold text-slate-800">{enrolledClasses.length}</span>
+            <span className="block text-xs font-semibold text-slate-600">Enrolled Classes</span>
           </div>
+        </div>
+
+        {/* Navigation Sub-Tabs */}
+        <div className="mt-6 pt-4 border-t border-slate-200 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setActiveSubTab('tasks')}
+            className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 cursor-pointer transition border ${
+              activeSubTab === 'tasks'
+                ? 'bg-slate-800 text-white border-slate-800'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+            }`}
+          >
+            <Calendar className="w-4 h-4" />
+            <span>Assigned Tasks</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('classes')}
+            className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 cursor-pointer transition border ${
+              activeSubTab === 'classes'
+                ? 'bg-slate-800 text-white border-slate-800'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Enrolled Classes ({enrolledClasses.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('leaderboard')}
+            className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 cursor-pointer transition border ${
+              activeSubTab === 'leaderboard'
+                ? 'bg-slate-800 text-white border-slate-800'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+            }`}
+          >
+            <Trophy className="w-4 h-4 text-amber-600" />
+            <span>Class Leaderboard</span>
+          </button>
         </div>
       </div>
 
-      {/* Navigation Sub-Tabs */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
-        <button
-          onClick={() => setActiveSubTab('tasks')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-            activeSubTab === 'tasks'
-              ? 'bg-emerald-600 text-white shadow-md'
-              : 'bg-slate-800 text-slate-400 hover:text-white'
-          }`}
-        >
-          <Calendar className="w-4 h-4" />
-          <span>Assigned Tasks & Homework</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('classes')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-            activeSubTab === 'classes'
-              ? 'bg-emerald-600 text-white shadow-md'
-              : 'bg-slate-800 text-slate-400 hover:text-white'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>Enrolled Classes & Join Code ({enrolledClasses.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('leaderboard')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-            activeSubTab === 'leaderboard'
-              ? 'bg-amber-500 text-slate-950 font-black shadow-md shadow-amber-500/20'
-              : 'bg-slate-800 text-slate-400 hover:text-white'
-          }`}
-        >
-          <Trophy className="w-4 h-4 text-amber-400" />
-          <span>Class Leaderboard & Ranks</span>
-        </button>
-      </div>
-
+      {/* Tab 1: Leaderboard */}
       {activeSubTab === 'leaderboard' ? (
         <StudentLeaderboard
           user={user}
@@ -175,7 +174,8 @@ export const StudentClassesView: React.FC<StudentClassesViewProps> = ({
           onNavigateToQuizzes={onNavigateToQuizzes}
         />
       ) : activeSubTab === 'tasks' ? (
-        <StudentTasksPanel
+        /* Tab 2: Assigned Tasks */
+        <TaskView
           user={user}
           progress={progress}
           enrolledClassIds={enrolledClasses.map(c => c.id)}
@@ -183,189 +183,181 @@ export const StudentClassesView: React.FC<StudentClassesViewProps> = ({
           onNavigateToQuizzes={onNavigateToQuizzes}
         />
       ) : (
-        <>
+        /* Tab 3: Enrolled Classes & Join Code */
+        <div className="space-y-6">
           {/* Join Class Form Card */}
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-sm">
-        <div className="max-w-xl mx-auto space-y-5">
-          <div className="text-center space-y-1">
-            <div className="inline-flex items-center justify-center p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 mb-1">
-              <KeyRound className="w-5 h-5" />
+          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
+            <div className="space-y-1">
+              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <KeyRound className="w-5 h-5 text-slate-700" />
+                <span>Join a New Class</span>
+              </h2>
+              <p className="text-sm text-slate-600">
+                Enter the class code given by your teacher (for example: <strong className="font-mono text-slate-800 font-bold">SCI-8492</strong>).
+              </p>
             </div>
-            <h2 className="text-lg sm:text-xl font-bold text-white">Enter Class Code</h2>
-            <p className="text-xs text-slate-400">
-              Ask your teacher for your class code (e.g. <span className="font-mono text-emerald-400 font-bold">SCI-8492</span>) to join their class.
-            </p>
-          </div>
 
-          <form onSubmit={handleJoinClass} className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1">
-              <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={classCodeInput}
-                onChange={e => setClassCodeInput(e.target.value.toUpperCase())}
-                placeholder="e.g. SCI-8492"
-                maxLength={10}
-                className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-700 rounded-2xl text-sm font-mono tracking-wider text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 uppercase"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={joining || !classCodeInput.trim()}
-              className={`px-6 py-3 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition shadow-md ${
-                joining || !classCodeInput.trim()
-                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                  : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
-              }`}
-            >
-              {joining ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  <span>Joining...</span>
-                </>
-              ) : (
-                <>
-                  <span>Join Class</span>
-                  <ArrowRight className="w-4 h-4" />
-                </>
-              )}
-            </button>
-          </form>
-
-          {statusMessage && (
-            <div className={`p-4 rounded-2xl text-xs flex items-start gap-3 ${
-              statusMessage.type === 'success'
-                ? 'bg-emerald-950/40 border border-emerald-500/40 text-emerald-300'
-                : 'bg-red-950/40 border border-red-500/40 text-red-300'
-            }`}>
-              {statusMessage.type === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-              ) : (
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-              )}
-              <div className="flex-1 font-medium">{statusMessage.text}</div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Enrolled Classes List */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-            <Users className="w-5 h-5 text-emerald-400" />
-            <span>My Enrolled Classes ({enrolledClasses.length})</span>
-          </h2>
-          <span className="text-xs text-slate-400">
-            Progress updates sync automatically with your instructors
-          </span>
-        </div>
-
-        {loadingClasses ? (
-          <div className="p-8 text-center text-slate-400 bg-slate-900 border border-slate-800 rounded-3xl">
-            <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-            <span className="text-xs">Loading your classes...</span>
-          </div>
-        ) : enrolledClasses.length === 0 ? (
-          <div className="p-10 text-center bg-slate-900/60 border border-dashed border-slate-800 rounded-3xl space-y-3">
-            <GraduationCap className="w-12 h-12 text-slate-600 mx-auto" />
-            <h3 className="text-base font-bold text-slate-300">You haven't joined any classes yet</h3>
-            <p className="text-xs text-slate-400 max-w-md mx-auto">
-              Ask your science teacher for your class code to join your cohort and start sharing your revision progress.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {enrolledClasses.map(cls => (
-              <div 
-                key={cls.id} 
-                className="bg-slate-900 border border-slate-800 hover:border-emerald-500/40 rounded-3xl p-6 transition shadow-sm space-y-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                        {cls.classCode}
-                      </span>
-                      <span className="text-[11px] font-semibold text-slate-400 capitalize">
-                        {cls.subject === 'all' ? 'All Sciences (Bio, Chem, Phys)' : `${cls.subject} Focused`}
-                      </span>
-                    </div>
-                    <h3 className="text-base font-bold text-white">{cls.name}</h3>
-                    {cls.description && (
-                      <p className="text-xs text-slate-400">{cls.description}</p>
-                    )}
-                  </div>
-
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 ring-4 ring-emerald-400/20" title="Active Connection"></span>
-                </div>
-
-                <div className="pt-2 border-t border-slate-800 text-xs text-slate-400 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <User className="w-3.5 h-3.5 text-purple-400" />
-                      <span>Instructor:</span>
-                    </span>
-                    <span className="font-semibold text-slate-200">{cls.instructorName}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>Instructor Email:</span>
-                    <span className="font-mono text-slate-300">{cls.instructorEmail}</span>
-                  </div>
-                </div>
-
-                {/* Progress Snapshot Shared */}
-                <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3.5 space-y-2">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-slate-400 font-medium">Shared Progress Snapshot</span>
-                    <span className="text-emerald-400 font-bold flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" />
-                      Syncing Live
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="bg-slate-900 p-2 rounded-xl border border-slate-800/80">
-                      <span className="text-slate-400 block text-[10px]">Completed Decks</span>
-                      <span className="font-bold text-white text-sm">{completedCount} Lessons</span>
-                    </div>
-                    <div className="bg-slate-900 p-2 rounded-xl border border-slate-800/80">
-                      <span className="text-slate-400 block text-[10px]">Average Quiz Score</span>
-                      <span className="font-bold text-white text-sm">{avgQuizScore}%</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <button
-                    onClick={() => setActiveSubTab('leaderboard')}
-                    className="w-full py-2 px-3 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-xs font-bold text-amber-300 transition text-center flex items-center justify-center gap-1.5"
-                  >
-                    <Trophy className="w-3.5 h-3.5 text-amber-400" />
-                    <span>View Class Leaderboard & Ranks</span>
-                  </button>
-                  {onNavigateToLessons && (
-                    <button
-                      onClick={() => onNavigateToLessons?.()}
-                      className="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition text-center"
-                    >
-                      Study Slides
-                    </button>
-                  )}
-                  {onNavigateToQuizzes && (
-                    <button
-                      onClick={() => onNavigateToQuizzes?.()}
-                      className="flex-1 py-2 px-3 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-xs font-semibold text-emerald-300 transition text-center"
-                    >
-                      Practice Quizzes
-                    </button>
-                  )}
-                </div>
+            <form onSubmit={handleJoinClass} className="flex flex-col sm:flex-row gap-3 max-w-xl">
+              <div className="relative flex-1">
+                <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={classCodeInput}
+                  onChange={e => setClassCodeInput(e.target.value.toUpperCase())}
+                  placeholder="Enter code (e.g. SCI-8492)"
+                  maxLength={12}
+                  className="w-full pl-10 pr-4 py-2.5 bg-[#FDFBF7] border-2 border-black rounded-lg text-base font-mono font-bold text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white uppercase tracking-wider"
+                />
               </div>
-            ))}
+
+              <button
+                type="submit"
+                disabled={joining || !classCodeInput.trim()}
+                className={`px-5 py-2.5 rounded-lg text-sm font-bold flex items-center justify-center gap-2 cursor-pointer transition ${
+                  joining || !classCodeInput.trim()
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                    : 'bg-slate-800 hover:bg-slate-700 text-white'
+                }`}
+              >
+                {joining ? 'Connecting...' : 'Join Class'}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </form>
+
+            {statusMessage && (
+              <div className={`p-3.5 rounded-lg text-sm flex items-start gap-2.5 border ${
+                statusMessage.type === 'success'
+                  ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                  : 'bg-rose-50 border-rose-300 text-rose-900'
+              }`}>
+                {statusMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 text-rose-700 shrink-0 mt-0.5" />
+                )}
+                <span className="font-semibold">{statusMessage.text}</span>
+              </div>
+            )}
           </div>
-        )}
-      </div>
-      </>
+
+          {/* Enrolled Classes List */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Users className="w-5 h-5 text-slate-700" />
+                <span>My Active Classes ({enrolledClasses.length})</span>
+              </h2>
+              <span className="text-xs font-semibold text-slate-600">
+                Syncs live with instructor gradebooks
+              </span>
+            </div>
+
+            {loadingClasses ? (
+              <div className="p-8 text-center text-slate-600 bg-white border border-slate-200 rounded-xl">
+                <p className="text-base font-semibold">Loading your enrolled classes...</p>
+              </div>
+            ) : enrolledClasses.length === 0 ? (
+              <div className="p-8 text-center bg-white border border-slate-200 rounded-xl space-y-2">
+                <GraduationCap className="w-10 h-10 text-slate-400 mx-auto" />
+                <h3 className="text-base font-bold text-slate-800">You have not joined any classes yet</h3>
+                <p className="text-sm text-slate-600 max-w-md mx-auto">
+                  Ask your science teacher for your class code to join your cohort and receive assignments.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {enrolledClasses.map(cls => (
+                  <div 
+                    key={cls.id} 
+                    className="bg-white border border-slate-200 hover:border-slate-400 rounded-xl p-5 transition shadow-xs space-y-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-[#EBF3F5] text-slate-800 border border-slate-300">
+                            {cls.classCode}
+                          </span>
+                          <span className="text-xs font-bold text-slate-600 capitalize">
+                            {cls.subject === 'all' ? 'All Sciences' : `${cls.subject} Focused`}
+                          </span>
+                        </div>
+                        <h3 className="text-base font-bold text-slate-800">{cls.name}</h3>
+                        {cls.description && (
+                          <p className="text-sm text-slate-600">{cls.description}</p>
+                        )}
+                      </div>
+
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 ring-4 ring-emerald-100" title="Active Connection" />
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 text-xs text-slate-600 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5 font-semibold">
+                          <User className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Instructor:</span>
+                        </span>
+                        <strong className="text-slate-800">{cls.instructorName}</strong>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Email:</span>
+                        <span className="font-mono text-slate-700">{cls.instructorEmail}</span>
+                      </div>
+                    </div>
+
+                    {/* Shared Progress Snapshot */}
+                    <div className="bg-[#FDFBF7] border border-slate-200 rounded-lg p-3 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-600 font-semibold">Shared Progress</span>
+                        <span className="text-emerald-700 font-bold flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Connected</span>
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="bg-white p-2 rounded-md border border-slate-200">
+                          <span className="text-slate-500 block text-[11px]">Completed Decks</span>
+                          <strong className="text-slate-800 text-sm">{completedCount} Lessons</strong>
+                        </div>
+                        <div className="bg-white p-2 rounded-md border border-slate-200">
+                          <span className="text-slate-500 block text-[11px]">Quiz Average</span>
+                          <strong className="text-slate-800 text-sm">{avgQuizScore}%</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <button
+                        onClick={() => setActiveSubTab('leaderboard')}
+                        className="w-full py-2 px-3 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-300 text-xs font-bold text-amber-900 transition flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Trophy className="w-3.5 h-3.5 text-amber-700" />
+                        <span>View Class Leaderboard</span>
+                      </button>
+                      {onNavigateToLessons && (
+                        <button
+                          onClick={() => onNavigateToLessons?.()}
+                          className="flex-1 py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-white transition text-center cursor-pointer flex items-center justify-center gap-1"
+                        >
+                          <BookOpen className="w-3.5 h-3.5" />
+                          <span>Study Slides</span>
+                        </button>
+                      )}
+                      {onNavigateToQuizzes && (
+                        <button
+                          onClick={() => onNavigateToQuizzes?.()}
+                          className="flex-1 py-2 px-3 rounded-lg bg-[#EBF3F5] hover:bg-[#d8e9ec] border border-slate-400 text-xs font-bold text-slate-800 transition text-center cursor-pointer flex items-center justify-center gap-1"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>Practice Quizzes</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

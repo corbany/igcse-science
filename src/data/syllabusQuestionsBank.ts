@@ -1,6 +1,8 @@
 import { QuizQuestion, ScienceSubject } from '../types';
 import { allSubtopicsData } from './subtopicSlidesData';
 import { getQuizForSubtopic } from './subtopicQuizzes';
+import { march2026Paper12Core } from './examPapers/march2026Paper12Core';
+import { march2026Paper22Extended } from './examPapers/march2026Paper22Extended';
 
 export interface DynamicTopicMeta {
   code: string;
@@ -1047,6 +1049,38 @@ export function generateDynamicSyllabusQuestions(
           options: shuffled,
           correctIndex: correctIndex >= 0 ? correctIndex : 0,
           explanation
+        });
+      }
+    }
+  }
+
+  // 1.5 Draw authentic MCQs directly from March 2026 Core Paper 12 & Extended Paper 22
+  const normTier = (tier || 'Extended').toLowerCase();
+  const candidateExamPapers = [
+    ...(normTier === 'extended' ? [march2026Paper22Extended] : 
+        normTier === 'foundation' || normTier === 'core' ? [march2026Paper12Core] : 
+        [march2026Paper12Core, march2026Paper22Extended])
+  ];
+
+  for (const paper of candidateExamPapers) {
+    for (const q of paper.questions) {
+      const qTopic = q.syllabusCode ? q.syllabusCode.split('.')[0] : '';
+      if (validTopics.includes(qTopic) && q.options && q.options.length === 4) {
+        const optTexts = q.options.map(opt => typeof opt === 'string' ? opt : (opt as any).text);
+        const letter = q.correctAnswer || 'A';
+        const correctIdx = ['A', 'B', 'C', 'D'].indexOf(letter);
+        const meta = SYLLABUS_TOPICS_META[qTopic] || { subject: q.subject, title: 'Cambridge IGCSE 0653', code: qTopic, syllabusRef: q.syllabusCode || `${qTopic}.1` };
+
+        addUnique({
+          id: `exam-drive-${q.id}-${uniqueToken}`,
+          subject: q.subject,
+          topicCode: qTopic,
+          topicTitle: meta.title,
+          syllabusRef: q.syllabusCode,
+          question: q.questionText,
+          options: optTexts,
+          correctIndex: correctIdx >= 0 ? correctIdx : 0,
+          explanation: q.explanation || `Correct answer is Option ${letter}. Sourced from official Cambridge IGCSE 0653 ${paper.tier} Multiple Choice examination.`
         });
       }
     }

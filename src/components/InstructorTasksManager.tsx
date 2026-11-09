@@ -703,11 +703,11 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
       {feedbackNotice && (
         <div className={`p-4 rounded-2xl flex items-center justify-between text-xs font-semibold ${
           feedbackNotice.type === 'success' 
-            ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-300' 
-            : 'bg-rose-950/60 border border-rose-500/40 text-rose-300'
+            ? 'bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-500/40 text-emerald-800 dark:text-emerald-300' 
+            : 'bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-500/40 text-rose-800 dark:text-rose-300'
         }`}>
           <div className="flex items-center gap-2">
-            {feedbackNotice.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <AlertTriangle className="w-4 h-4 text-rose-400" />}
+            {feedbackNotice.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> : <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400" />}
             <span>{feedbackNotice.text}</span>
           </div>
           <button onClick={() => setFeedbackNotice(null)} className="p-1 hover:opacity-75">
@@ -718,26 +718,26 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
       {/* Last Email Action Helper Card */}
       {lastEmailAction && (
-        <div className="bg-purple-950/40 border border-purple-500/40 rounded-2xl p-4 text-xs space-y-3 animate-in fade-in-50 duration-200">
+        <div className="bg-[#EBF3F5] dark:bg-zinc-900 border-2 border-black dark:border-white rounded-2xl p-4 text-xs space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-purple-500/20 text-purple-300">
-                <Mail className="w-4 h-4 text-purple-400" />
+              <div className="p-1.5 rounded-lg bg-white dark:bg-black text-[#1E293B] dark:text-white border border-black dark:border-white">
+                <Mail className="w-4 h-4" />
               </div>
               <div>
-                <span className="font-bold text-white text-sm">Student Email Dispatch: {lastEmailAction.taskTitle}</span>
-                <span className="text-purple-300 ml-2">({lastEmailAction.count} student{lastEmailAction.count !== 1 ? 's' : ''})</span>
+                <span className="font-bold text-[#1E293B] dark:text-white text-sm">Student Email Dispatch: {lastEmailAction.taskTitle}</span>
+                <span className="text-slate-600 dark:text-slate-400 ml-2">({lastEmailAction.count} student{lastEmailAction.count !== 1 ? 's' : ''})</span>
               </div>
             </div>
             <button 
               onClick={() => setLastEmailAction(null)}
-              className="text-slate-400 hover:text-white p-1"
+              className="text-slate-500 hover:text-black dark:hover:text-white p-1"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
-          <p className="text-slate-300 text-xs">
+          <p className="text-[#1E293B] dark:text-slate-300 text-xs">
             {lastEmailAction.smtpConfigured 
               ? 'Automated delivery is in progress via your verified SMTP mail server. You can also launch Gmail or copy the pre-formatted announcement below:'
               : 'Your students are ready to be notified! Click below to send directly through Gmail or your email app with all student addresses in BCC.'}
@@ -749,7 +749,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                 href={lastEmailAction.gmailComposeUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-sm"
+                className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-black dark:hover:bg-slate-200 border-2 border-black font-bold text-xs flex items-center gap-1.5 transition shadow-xs"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
                 <span>Open in Gmail (BCC {lastEmailAction.count} Students)</span>
@@ -759,7 +759,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
             {lastEmailAction.mailtoUrl && (
               <a
                 href={lastEmailAction.mailtoUrl}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center gap-1.5 border border-slate-700 transition"
+                className="px-3.5 py-1.5 rounded-xl bg-[#FDFBF7] dark:bg-black hover:bg-white dark:hover:bg-zinc-900 text-[#1E293B] dark:text-slate-200 font-semibold text-xs flex items-center gap-1.5 border-2 border-black dark:border-white transition"
               >
                 <Mail className="w-3.5 h-3.5" />
                 <span>Default Mail App</span>
@@ -774,7 +774,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     setFeedbackNotice({ type: 'success', text: '📋 Copied full email notification announcement to clipboard!' });
                   }
                 }}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center gap-1.5 border border-slate-700 transition"
+                className="px-3.5 py-1.5 rounded-xl bg-[#FDFBF7] dark:bg-black hover:bg-white dark:hover:bg-zinc-900 text-[#1E293B] dark:text-slate-200 font-semibold text-xs flex items-center gap-1.5 border-2 border-black dark:border-white transition"
               >
                 <Check className="w-3.5 h-3.5" />
                 <span>Copy Announcement Text</span>
@@ -790,7 +790,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     setFeedbackNotice({ type: 'success', text: `📋 Copied ${lastEmailAction.recipients!.length} student email addresses to clipboard!` });
                   }
                 }}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center gap-1.5 border border-slate-700 transition"
+                className="px-3.5 py-1.5 rounded-xl bg-[#FDFBF7] dark:bg-black hover:bg-white dark:hover:bg-zinc-900 text-[#1E293B] dark:text-slate-200 font-semibold text-xs flex items-center gap-1.5 border-2 border-black dark:border-white transition"
               >
                 <Copy className="w-3.5 h-3.5" />
                 <span>Copy Student Emails (BCC)</span>
@@ -802,9 +802,9 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                 setShowSmtpModal(true);
                 fetchEmailLogs();
               }}
-              className="px-3.5 py-1.5 rounded-xl bg-purple-900/60 hover:bg-purple-800 text-purple-200 font-semibold text-xs flex items-center gap-1.5 border border-purple-500/40 transition ml-auto"
+              className="px-3.5 py-1.5 rounded-xl bg-white dark:bg-black hover:bg-slate-50 dark:hover:bg-zinc-900 text-[#1E293B] dark:text-white font-semibold text-xs flex items-center gap-1.5 border-2 border-black dark:border-white transition ml-auto"
             >
-              <Settings className="w-3.5 h-3.5 text-purple-300" />
+              <Settings className="w-3.5 h-3.5" />
               <span>Email Server Settings & Logs</span>
             </button>
           </div>
@@ -812,22 +812,22 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
       )}
 
       {/* Header and Controls */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+      <div className="bg-white dark:bg-black border border-[#E2E8F0] dark:border-zinc-800 rounded-2xl p-6 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
+              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-[#EBF3F5] dark:bg-zinc-800 text-[#1E293B] dark:text-slate-200 border border-slate-300 dark:border-zinc-700">
                 Homework & Assignments Engine
               </span>
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
                 {tasks.length} Total Task{tasks.length !== 1 ? 's' : ''} Set
               </span>
             </div>
-            <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-purple-400" />
+            <h2 className="text-lg sm:text-xl font-bold text-[#1E293B] dark:text-white flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-slate-700 dark:text-slate-300" />
               <span>Class Tasks & Student Progress Tracking</span>
             </h2>
-            <p className="text-xs text-slate-400 max-w-2xl">
+            <p className="text-xs text-slate-600 dark:text-slate-400 max-w-2xl">
               Assign slide deck reading with the traffic light system (Red/Amber/Green), practice quizzes, or revision papers. Set deadlines and monitor live student completion.
             </p>
           </div>
@@ -838,19 +838,19 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                 setShowSmtpModal(true);
                 fetchEmailLogs();
               }}
-              className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition shadow-xs shrink-0"
+              className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#FDFBF7] dark:bg-black hover:bg-white dark:hover:bg-zinc-900 text-[#1E293B] dark:text-slate-200 border-2 border-black dark:border-white font-semibold text-xs transition shadow-xs shrink-0"
               title="Configure SMTP mail server or inspect email delivery logs"
             >
-              <Mail className="w-4 h-4 text-purple-400" />
+              <Mail className="w-4 h-4 text-slate-700 dark:text-slate-300" />
               <span>Email Delivery</span>
               {smtpStatus?.configured ? (
-                <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400"></span>
                   SMTP Active
                 </span>
               ) : (
-                <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-600 dark:bg-amber-400"></span>
                   1-Click Gmail
                 </span>
               )}
@@ -861,7 +861,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                 setNewClassId(classes[0]?.id || 'all');
                 setShowCreateModal(true);
               }}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md hover:shadow-purple-600/30 transition shrink-0"
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-black dark:hover:bg-slate-200 border-2 border-black font-bold text-xs shadow-xs transition shrink-0"
             >
               <Plus className="w-4 h-4" />
               <span>Set New Task</span>
@@ -870,13 +870,13 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
         </div>
 
         {/* Filters and search bar */}
-        <div className="pt-2 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
+        <div className="pt-3 border-t border-[#E2E8F0] dark:border-zinc-800 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
-            <span className="text-slate-400 font-medium">Class:</span>
+            <span className="text-slate-600 dark:text-slate-400 font-semibold">Class:</span>
             <select
               value={selectedClassId}
               onChange={e => setSelectedClassId(e.target.value)}
-              className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-purple-500 font-medium"
+              className="bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none font-medium"
             >
               <option value="all">All Classes ({classes.length} Available)</option>
               {classes.map(c => {
@@ -889,12 +889,14 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
               })}
             </select>
 
-            <span className="text-slate-400 font-medium ml-2">Status:</span>
-            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+            <span className="text-slate-600 dark:text-slate-400 font-semibold ml-2">Status:</span>
+            <div className="flex items-center gap-1 bg-[#FDFBF7] dark:bg-black p-1 rounded-lg border-2 border-black dark:border-white">
               <button
                 onClick={() => setStatusFilter('all')}
                 className={`px-2.5 py-1 rounded-md font-semibold transition ${
-                  statusFilter === 'all' ? 'bg-purple-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                  statusFilter === 'all' 
+                    ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-xs' 
+                    : 'text-slate-600 dark:text-slate-400 hover:text-black dark:hover:text-white'
                 }`}
               >
                 All ({tasks.length})
@@ -902,7 +904,9 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
               <button
                 onClick={() => setStatusFilter('active')}
                 className={`px-2.5 py-1 rounded-md font-semibold transition ${
-                  statusFilter === 'active' ? 'bg-purple-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                  statusFilter === 'active' 
+                    ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-xs' 
+                    : 'text-slate-600 dark:text-slate-400 hover:text-black dark:hover:text-white'
                 }`}
               >
                 Active ({tasks.filter(t => new Date(t.dueDate).getTime() >= now).length})
@@ -910,7 +914,9 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
               <button
                 onClick={() => setStatusFilter('overdue')}
                 className={`px-2.5 py-1 rounded-md font-semibold transition ${
-                  statusFilter === 'overdue' ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-400 hover:text-rose-400'
+                  statusFilter === 'overdue' 
+                    ? 'bg-rose-700 text-white shadow-xs' 
+                    : 'text-slate-600 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400'
                 }`}
               >
                 Past Due ({tasks.filter(t => new Date(t.dueDate).getTime() < now).length})
@@ -925,7 +931,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search tasks or subtopics..."
-              className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 placeholder-slate-400 text-xs focus:outline-none focus:ring-1 focus:ring-purple-500"
+              className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-200 placeholder-slate-400 text-xs focus:outline-none"
             />
           </div>
         </div>
@@ -933,22 +939,22 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
       {/* Task List */}
       {loading ? (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-400">
-          <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+        <div className="bg-white dark:bg-black border border-[#E2E8F0] dark:border-zinc-800 rounded-2xl p-12 text-center text-slate-500 dark:text-slate-400 shadow-xs">
+          <div className="w-8 h-8 border-2 border-black dark:border-white border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
           <p className="text-xs font-semibold">Loading assignments and tracking data...</p>
         </div>
       ) : filteredTasks.length === 0 ? (
-        <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-3xl p-12 text-center space-y-3">
-          <Calendar className="w-12 h-12 text-slate-600 mx-auto" />
-          <h3 className="text-base font-bold text-slate-300">No tasks found</h3>
-          <p className="text-xs text-slate-400 max-w-md mx-auto">
+        <div className="bg-[#FDFBF7] dark:bg-black border-2 border-dashed border-slate-300 dark:border-zinc-800 rounded-2xl p-12 text-center space-y-3">
+          <Calendar className="w-12 h-12 text-slate-400 mx-auto" />
+          <h3 className="text-base font-bold text-[#1E293B] dark:text-white">No tasks found</h3>
+          <p className="text-xs text-slate-600 dark:text-slate-400 max-w-md mx-auto">
             {searchQuery 
               ? `No assignments match your search query "${searchQuery}".`
               : 'You have not set any tasks for this class yet. Click "Set New Task" above to assign lesson slide reading or quizzes to your students.'}
           </p>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs transition"
+            className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-black dark:hover:bg-slate-200 border-2 border-black font-semibold text-xs transition shadow-xs"
           >
             <Plus className="w-4 h-4" />
             <span>Create First Task</span>
@@ -980,7 +986,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
             return (
               <div 
                 key={task.id}
-                className="bg-slate-900 border border-slate-800 hover:border-purple-500/40 rounded-3xl transition shadow-sm overflow-hidden"
+                className="bg-white dark:bg-black border border-[#E2E8F0] dark:border-zinc-800 hover:border-black dark:hover:border-white rounded-2xl transition shadow-xs overflow-hidden"
               >
                 {/* Main Task Header Card */}
                 <div 
@@ -993,28 +999,28 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         {/* Task Type Badge */}
                         <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1.5 ${
                           task.type === 'both'
-                            ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                            ? 'bg-[#EBF3F5] dark:bg-zinc-800 text-[#1E293B] dark:text-white border-slate-300 dark:border-zinc-700'
                             : task.type === 'slides_traffic_light'
-                              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                              ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
                               : task.type === 'practice_quiz'
-                                ? 'bg-sky-500/15 text-sky-400 border-sky-500/30'
-                                : 'bg-purple-500/15 text-purple-300 border-purple-500/30'
+                                ? 'bg-sky-50 dark:bg-sky-950/50 text-sky-800 dark:text-sky-300 border-sky-300 dark:border-sky-700'
+                                : 'bg-[#FDFBF7] dark:bg-zinc-800 text-[#1E293B] dark:text-white border-slate-300 dark:border-zinc-700'
                         }`}>
                           {task.type === 'both' && (
                             <>
-                              <Sparkles className="w-3 h-3 text-purple-400" />
+                              <Sparkles className="w-3 h-3 text-slate-700 dark:text-slate-300" />
                               <span>Both: Slides & Quiz</span>
                             </>
                           )}
                           {task.type === 'slides_traffic_light' && (
                             <>
-                              <BookOpen className="w-3 h-3 text-emerald-400" />
+                              <BookOpen className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                               <span>Slides & Traffic Lights</span>
                             </>
                           )}
                           {task.type === 'practice_quiz' && (
                             <>
-                              <Award className="w-3 h-3 text-sky-400" />
+                              <Award className="w-3 h-3 text-sky-600 dark:text-sky-400" />
                               <span>Practice Quiz</span>
                             </>
                           )}
@@ -1027,36 +1033,36 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         </span>
 
                         {/* Class Identifier */}
-                        <span className="text-[11px] font-semibold text-slate-400 bg-slate-800 px-2.5 py-0.5 rounded-md">
+                        <span className="text-[11px] font-semibold text-[#1E293B] dark:text-slate-300 bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 px-2.5 py-0.5 rounded-md">
                           {task.className}
                         </span>
 
                         {/* Audience scope */}
                         {task.targetStudentIds && task.targetStudentIds.length > 0 ? (
-                          <span className="text-[11px] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md flex items-center gap-1">
+                          <span className="text-[11px] font-semibold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 px-2 py-0.5 rounded-md flex items-center gap-1">
                             <User className="w-3 h-3" />
                             <span>{task.targetStudentIds.length} Specific Student{task.targetStudentIds.length > 1 ? 's' : ''}</span>
                           </span>
                         ) : (
-                          <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                          <span className="text-[11px] text-slate-600 dark:text-slate-400 flex items-center gap-1">
                             <Users className="w-3 h-3" />
                             <span>Whole Class</span>
                           </span>
                         )}
 
                         {/* Instructor who created the task */}
-                        <span className="text-[11px] font-medium text-slate-300 bg-slate-800/80 border border-slate-700/60 px-2 py-0.5 rounded-md flex items-center gap-1">
-                          <UserCheck className="w-3 h-3 text-purple-400" />
+                        <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 px-2 py-0.5 rounded-md flex items-center gap-1">
+                          <UserCheck className="w-3 h-3 text-slate-700 dark:text-slate-300" />
                           <span>By {task.instructorName || task.instructorEmail || 'Instructor'}</span>
                         </span>
                       </div>
 
-                      <h3 className="text-base sm:text-lg font-bold text-white hover:text-purple-300 transition">
+                      <h3 className="text-base sm:text-lg font-bold text-[#1E293B] dark:text-white hover:underline transition">
                         {task.title}
                       </h3>
 
                       {task.description && (
-                        <p className="text-xs text-slate-400 line-clamp-2">
+                        <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
                           {task.description}
                         </p>
                       )}
@@ -1066,10 +1072,10 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 shrink-0">
                       <div className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 ${
                         isOverdue
-                          ? 'bg-rose-950/60 border-rose-500/40 text-rose-300 animate-pulse'
+                          ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-500/40 text-rose-800 dark:text-rose-300 animate-pulse'
                           : diffDays <= 1
-                            ? 'bg-amber-950/50 border-amber-500/40 text-amber-300'
-                            : 'bg-slate-800 border-slate-700 text-slate-300'
+                            ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-300 dark:border-amber-500/40 text-amber-800 dark:text-amber-300'
+                            : 'bg-[#FDFBF7] dark:bg-zinc-900 border-slate-300 dark:border-zinc-700 text-[#1E293B] dark:text-slate-300'
                       }`}>
                         <Clock className="w-3.5 h-3.5" />
                         <span>
@@ -1083,9 +1089,9 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                      <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
                         <span>Due:</span>
-                        <span className="text-slate-200 font-mono font-medium">
+                        <span className="text-[#1E293B] dark:text-slate-200 font-mono font-medium">
                           {dueDateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
@@ -1095,11 +1101,11 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                   {/* Target Subtopics Chips */}
                   {task.targetSubtopics && task.targetSubtopics.length > 0 && (
                     <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                      <span className="text-[11px] text-slate-400 font-medium">Target Subtopics:</span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">Target Subtopics:</span>
                       {task.targetSubtopics.map(code => (
                         <span 
                           key={code}
-                          className="px-2 py-0.5 rounded-md bg-slate-800 text-purple-300 border border-slate-700 text-xs font-mono font-bold"
+                          className="px-2 py-0.5 rounded-md bg-[#FDFBF7] dark:bg-zinc-900 text-[#1E293B] dark:text-slate-200 border-2 border-black dark:border-zinc-700 text-xs font-mono font-bold"
                         >
                           {code}
                         </span>
@@ -1108,34 +1114,34 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                   )}
 
                   {/* Real-time Progress Bar & Summary */}
-                  <div className="space-y-2 pt-2 border-t border-slate-800/80">
+                  <div className="space-y-2 pt-2 border-t border-[#E2E8F0] dark:border-zinc-800">
                     <div className="flex items-center justify-between text-xs">
                       <div className="flex items-center gap-3">
-                        <span className="font-semibold text-slate-300">Student Progress:</span>
-                        <span className="text-emerald-400 font-bold flex items-center gap-1">
-                          <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">Student Progress:</span>
+                        <span className="text-emerald-700 dark:text-emerald-400 font-bold flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-emerald-600 dark:bg-emerald-400"></span>
                           {completedCount} Completed ({completedPct}%)
                         </span>
-                        <span className="text-amber-400 font-bold flex items-center gap-1">
-                          <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                        <span className="text-amber-700 dark:text-amber-400 font-bold flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-amber-600 dark:bg-amber-400"></span>
                           {inProgressCount} In Progress
                         </span>
-                        <span className="text-slate-400 font-medium flex items-center gap-1">
-                          <span className="w-2 h-2 rounded-full bg-slate-500"></span>
+                        <span className="text-slate-500 dark:text-slate-400 font-medium flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-slate-400"></span>
                           {notStartedCount} Not Started
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-1 text-purple-400 font-semibold">
+                      <div className="flex items-center gap-1 text-[#1E293B] dark:text-slate-200 font-semibold">
                         <span>{isExpanded ? 'Hide Student Roster' : 'View Student Roster'}</span>
                         {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                       </div>
                     </div>
 
                     {/* Progress Track */}
-                    <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden flex">
+                    <div className="w-full h-2.5 bg-slate-100 dark:bg-zinc-800 rounded-full overflow-hidden flex border border-slate-200 dark:border-zinc-700">
                       <div 
-                        className="bg-emerald-500 transition-all duration-300" 
+                        className="bg-emerald-600 dark:bg-emerald-500 transition-all duration-300" 
                         style={{ width: `${completedPct}%` }}
                         title={`${completedCount} Completed (${completedPct}%)`}
                       ></div>
@@ -1150,14 +1156,14 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
                 {/* Expanded Student Drilldown Roster */}
                 {isExpanded && (
-                  <div className="bg-slate-950 border-t border-slate-800 p-5 sm:p-6 space-y-4 animate-in fade-in-50 duration-200">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+                  <div className="bg-[#FDFBF7] dark:bg-black border-t-2 border-black dark:border-zinc-800 p-5 sm:p-6 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E2E8F0] dark:border-zinc-800">
                       <div>
-                        <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                          <Users className="w-4 h-4 text-purple-400" />
+                        <h4 className="text-sm font-bold text-[#1E293B] dark:text-white flex items-center gap-2">
+                          <Users className="w-4 h-4 text-slate-700 dark:text-slate-300" />
                           <span>Student Submission Roster & Verification</span>
                         </h4>
-                        <p className="text-xs text-slate-400">
+                        <p className="text-xs text-slate-600 dark:text-slate-400">
                           Live tracking of student engagement, completion status, and quiz/traffic-light submissions.
                         </p>
                       </div>
@@ -1168,12 +1174,12 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                           onClick={e => handleSendEmailReminder(task, e)}
                           disabled={sendingEmailTaskId === task.id}
                           title="Dispatch email notification or reminder to students"
-                          className="px-3 py-1.5 rounded-xl bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 border border-purple-500/40 text-xs font-semibold transition flex items-center gap-1.5 disabled:opacity-50"
+                          className="px-3 py-1.5 rounded-xl bg-white dark:bg-black hover:bg-slate-50 dark:hover:bg-zinc-900 text-[#1E293B] dark:text-white border-2 border-black dark:border-white text-xs font-semibold transition flex items-center gap-1.5 disabled:opacity-50"
                         >
                           {sendingEmailTaskId === task.id ? (
-                            <div className="w-3.5 h-3.5 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
+                            <div className="w-3.5 h-3.5 border-2 border-black dark:border-white border-t-transparent rounded-full animate-spin"></div>
                           ) : (
-                            <Mail className="w-3.5 h-3.5 text-purple-400" />
+                            <Mail className="w-3.5 h-3.5" />
                           )}
                           <span>{sendingEmailTaskId === task.id ? 'Sending...' : 'Email Students'}</span>
                         </button>
@@ -1181,16 +1187,16 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         <button
                           onClick={e => handleCopyStudentLink(task, e)}
                           title="Copy direct link for students to access this task in the portal"
-                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-semibold transition flex items-center gap-1.5"
+                          className="px-3 py-1.5 rounded-xl bg-white dark:bg-black hover:bg-slate-50 dark:hover:bg-zinc-900 text-[#1E293B] dark:text-white border-2 border-black dark:border-white text-xs font-semibold transition flex items-center gap-1.5"
                         >
                           {copiedLinkTaskId === task.id ? (
                             <>
-                              <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              <span className="text-emerald-300">Link Copied!</span>
+                              <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                              <span className="text-emerald-700 dark:text-emerald-300">Link Copied!</span>
                             </>
                           ) : (
                             <>
-                              <Copy className="w-3.5 h-3.5 text-slate-400" />
+                              <Copy className="w-3.5 h-3.5 text-slate-500" />
                               <span>Copy Student Link</span>
                             </>
                           )}
@@ -1199,7 +1205,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         <button
                           onClick={e => handleQuickExtendDueDate(task.id, 2, e)}
                           title="Extend due date by 2 days"
-                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition"
+                          className="px-3 py-1.5 rounded-xl bg-white dark:bg-black hover:bg-slate-50 dark:hover:bg-zinc-900 text-[#1E293B] dark:text-white text-xs font-semibold border-2 border-black dark:border-white transition"
                         >
                           +2 Days Deadline
                         </button>
@@ -1207,7 +1213,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         <button
                           onClick={e => handleDeleteTask(task.id, e)}
                           title="Permanently delete this task"
-                          className="px-3 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-500/30 text-xs font-semibold transition flex items-center gap-1.5"
+                          className="px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-700 text-xs font-semibold transition flex items-center gap-1.5"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>Delete</span>
@@ -1216,19 +1222,19 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     </div>
 
                     {isSubsLoading ? (
-                      <div className="p-8 text-center text-slate-400">
-                        <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                      <div className="p-8 text-center text-slate-500 dark:text-slate-400">
+                        <div className="w-6 h-6 border-2 border-black dark:border-white border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
                         <span className="text-xs">Fetching student progress records...</span>
                       </div>
                     ) : subs.length === 0 ? (
-                      <div className="p-6 text-center text-xs text-slate-400 bg-slate-900/40 rounded-2xl border border-slate-800">
+                      <div className="p-6 text-center text-xs text-slate-600 dark:text-slate-400 bg-white dark:bg-zinc-900 rounded-xl border border-slate-300 dark:border-zinc-800">
                         No students enrolled yet or waiting for initial activity.
                       </div>
                     ) : (
                       <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs">
                           <thead>
-                            <tr className="border-b border-slate-800 text-slate-400 font-semibold">
+                            <tr className="border-b border-slate-300 dark:border-zinc-800 text-slate-600 dark:text-slate-400 font-semibold">
                               <th className="pb-2.5">Student</th>
                               <th className="pb-2.5">Status</th>
                               <th className="pb-2.5">Deadline State</th>
@@ -1236,28 +1242,28 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                               <th className="pb-2.5 text-right">Completed On</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-slate-800/60">
+                          <tbody className="divide-y divide-[#E2E8F0] dark:divide-zinc-800">
                             {subs.map(sub => {
                               const isSubOverdue = isOverdue && sub.status !== 'completed';
 
                               return (
-                                <tr key={sub.studentId} className="hover:bg-slate-900/50 transition">
-                                  <td className="py-2.5 font-medium text-slate-200">
+                                <tr key={sub.studentId} className="hover:bg-white dark:hover:bg-zinc-900/60 transition">
+                                  <td className="py-2.5 font-medium text-[#1E293B] dark:text-slate-200">
                                     <div className="font-semibold">{sub.studentName}</div>
-                                    <div className="text-[10px] text-slate-400 font-mono">{sub.studentEmail}</div>
+                                    <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{sub.studentEmail}</div>
                                   </td>
 
                                   <td className="py-2.5">
                                     <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold inline-flex items-center gap-1 ${
                                       sub.status === 'completed'
-                                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                        ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
                                         : sub.status === 'incomplete'
-                                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                                          : 'bg-slate-800 text-slate-400 border border-slate-700'
+                                          ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
+                                          : 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-zinc-700'
                                     }`}>
-                                      {sub.status === 'completed' && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
-                                      {sub.status === 'incomplete' && <Clock className="w-3 h-3 text-amber-400" />}
-                                      {sub.status === 'not_started' && <span className="w-2 h-2 rounded-full bg-slate-500"></span>}
+                                      {sub.status === 'completed' && <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />}
+                                      {sub.status === 'incomplete' && <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400" />}
+                                      {sub.status === 'not_started' && <span className="w-2 h-2 rounded-full bg-slate-400"></span>}
                                       <span>
                                         {sub.status === 'completed' ? 'Completed' :
                                          sub.status === 'incomplete' ? 'In Progress' : 'Not Started'}
@@ -1267,71 +1273,71 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
                                   <td className="py-2.5">
                                     {sub.status === 'completed' ? (
-                                      <span className="text-[11px] font-semibold text-emerald-400">On Time</span>
+                                      <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">On Time</span>
                                     ) : isSubOverdue ? (
-                                      <span className="text-[11px] font-bold text-rose-400 flex items-center gap-1">
+                                      <span className="text-[11px] font-bold text-rose-700 dark:text-rose-400 flex items-center gap-1">
                                         <AlertTriangle className="w-3 h-3" />
                                         <span>Overdue</span>
                                       </span>
                                     ) : (
-                                      <span className="text-[11px] text-slate-400">Pending</span>
+                                      <span className="text-[11px] text-slate-500 dark:text-slate-400">Pending</span>
                                     )}
                                   </td>
 
-                                  <td className="py-2.5 text-slate-300">
+                                  <td className="py-2.5 text-[#1E293B] dark:text-slate-300">
                                     {task.type === 'both' ? (
                                       <div className="flex flex-col gap-1">
                                         <div className="flex items-center gap-1.5">
-                                          <span className="text-[10px] text-slate-400 font-medium">Slides:</span>
+                                          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Slides:</span>
                                           {sub.trafficLight ? (
-                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-800">
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700">
                                               <span className={`w-2 h-2 rounded-full ${
-                                                sub.trafficLight === 'green' ? 'bg-emerald-400' :
-                                                sub.trafficLight === 'orange' ? 'bg-amber-400' : 'bg-rose-500'
+                                                sub.trafficLight === 'green' ? 'bg-emerald-500' :
+                                                sub.trafficLight === 'orange' ? 'bg-amber-500' : 'bg-rose-500'
                                               }`}></span>
                                               <span>{sub.trafficLight === 'orange' ? 'Amber/Orange' : sub.trafficLight === 'green' ? 'Green' : 'Red'} Grade</span>
                                             </span>
                                           ) : sub.slidesCompleted ? (
-                                            <span className="text-[10px] text-emerald-400 font-medium">✓ Completed</span>
+                                            <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-medium">✓ Completed</span>
                                           ) : (
-                                            <span className="text-[10px] text-slate-500 italic">Pending rating</span>
+                                            <span className="text-[10px] text-slate-500">Pending rating</span>
                                           )}
                                         </div>
                                         <div className="flex items-center gap-1.5">
-                                          <span className="text-[10px] text-slate-400 font-medium">Quiz:</span>
+                                          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Quiz:</span>
                                           {sub.quizScore !== undefined ? (
-                                            <span className="font-bold text-sky-400 text-[10px] bg-sky-950/40 px-1.5 py-0.5 rounded border border-sky-500/30">
+                                            <span className="font-bold text-sky-800 dark:text-sky-300 text-[10px] bg-sky-50 dark:bg-sky-950/40 px-1.5 py-0.5 rounded border border-sky-300 dark:border-sky-700">
                                               {sub.quizScore}% Score
                                             </span>
                                           ) : (
-                                            <span className="text-[10px] text-slate-500 italic">Pending quiz</span>
+                                            <span className="text-[10px] text-slate-500">Pending quiz</span>
                                           )}
                                         </div>
                                       </div>
                                     ) : (
                                       <div>
                                         {sub.trafficLight && (
-                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-800">
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700">
                                             <span className={`w-2.5 h-2.5 rounded-full ${
-                                              sub.trafficLight === 'green' ? 'bg-emerald-400' :
-                                              sub.trafficLight === 'orange' ? 'bg-amber-400' : 'bg-rose-500'
+                                              sub.trafficLight === 'green' ? 'bg-emerald-500' :
+                                              sub.trafficLight === 'orange' ? 'bg-amber-500' : 'bg-rose-500'
                                             }`}></span>
                                             <span>{sub.trafficLight === 'orange' ? 'Amber/Orange' : sub.trafficLight === 'green' ? 'Green' : 'Red'} Grade</span>
                                           </span>
                                         )}
                                         {sub.quizScore !== undefined && (
-                                          <span className="font-bold text-sky-400 text-xs">
+                                          <span className="font-bold text-sky-800 dark:text-sky-400 text-xs">
                                             Quiz Score: {sub.quizScore}%
                                           </span>
                                         )}
                                         {!sub.trafficLight && sub.quizScore === undefined && (
-                                          <span className="text-slate-400 italic">No submissions yet</span>
+                                          <span className="text-slate-500 italic">No submissions yet</span>
                                         )}
                                       </div>
                                     )}
                                   </td>
 
-                                  <td className="py-2.5 text-right text-slate-400 font-mono text-[11px]">
+                                  <td className="py-2.5 text-right text-slate-500 dark:text-slate-400 font-mono text-[11px]">
                                     {sub.completedAt 
                                       ? new Date(sub.completedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
                                       : '—'}
@@ -1353,21 +1359,21 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
       {/* Create Task Modal - Viewport constrained, always visible header & options */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
-          <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl flex flex-col shadow-2xl my-2 sm:my-auto max-h-[86vh] sm:max-h-[82vh] overflow-hidden animate-in zoom-in-95 duration-150 shrink-0">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto">
+          <div className="relative w-full max-w-2xl bg-white dark:bg-black border-2 border-black dark:border-white rounded-2xl sm:rounded-3xl flex flex-col shadow-2xl my-2 sm:my-auto max-h-[86vh] sm:max-h-[82vh] overflow-hidden shrink-0">
             {/* Fixed Modal Header */}
-            <div className="px-5 sm:px-6 py-3 sm:py-3.5 border-b border-slate-800/90 flex items-center justify-between shrink-0 bg-slate-900/95 backdrop-blur-sm z-10">
+            <div className="px-5 sm:px-6 py-3 sm:py-3.5 border-b border-[#E2E8F0] dark:border-zinc-800 flex items-center justify-between shrink-0 bg-[#FDFBF7] dark:bg-black z-10">
               <div className="space-y-0.5">
-                <span className="text-[10px] sm:text-[11px] font-bold text-purple-400 uppercase tracking-wider">Class Task Generator</span>
-                <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-purple-400" />
+                <span className="text-[10px] sm:text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Class Task Generator</span>
+                <h3 className="text-sm sm:text-base font-bold text-[#1E293B] dark:text-white flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-slate-700 dark:text-slate-300" />
                   <span>Assign Task to Students</span>
                 </h3>
               </div>
               <button 
                 type="button"
                 onClick={() => setShowCreateModal(false)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                className="p-1.5 rounded-xl text-slate-500 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition"
                 title="Close modal"
               >
                 <X className="w-5 h-5" />
@@ -1375,29 +1381,29 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
             </div>
 
             <form onSubmit={handleCreateTask} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-              {/* Scrollable Form Body - Smooth scrolling, never pushed above viewport */}
-              <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-3.5 sm:py-4 space-y-3 sm:space-y-3.5 text-xs scrollbar-thin scrollbar-thumb-slate-700">
+              {/* Scrollable Form Body */}
+              <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-3.5 sm:py-4 space-y-3 sm:space-y-3.5 text-xs bg-white dark:bg-black">
               {/* Task Title */}
               <div className="space-y-1.5">
-                <label className="font-semibold text-slate-300">Task Title *</label>
+                <label className="font-semibold text-[#1E293B] dark:text-slate-200">Task Title *</label>
                 <input
                   type="text"
                   required
                   value={newTitle}
                   onChange={e => setNewTitle(e.target.value)}
                   placeholder="e.g. Read B1.1 Characteristics of Living Organisms & Set Traffic Light"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500 font-medium"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 focus:outline-none font-medium"
                 />
               </div>
 
               {/* Task Activity Type Selection: Both, Slides, or Quiz */}
               <div className="space-y-2">
-                <label className="font-semibold text-slate-300 flex items-center justify-between">
+                <label className="font-semibold text-[#1E293B] dark:text-slate-200 flex items-center justify-between">
                   <span>Task Activity Type *</span>
-                  <span className="text-[11px] text-purple-400 font-normal">Choose slides, quiz, or both</span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 font-normal">Choose slides, quiz, or both</span>
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  {/* Option 1: Both Slides & Quiz (Comprehensive) */}
+                  {/* Option 1: Both Slides & Quiz */}
                   <div
                     onClick={() => {
                       setNewType('both');
@@ -1407,33 +1413,33 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     }}
                     className={`p-2.5 sm:p-3 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
                       newType === 'both'
-                        ? 'bg-purple-950/50 border-purple-500 text-white shadow-md ring-1 ring-purple-500/40'
-                        : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:border-slate-600'
+                        ? 'bg-[#EBF3F5] dark:bg-zinc-900 border-2 border-black dark:border-white text-[#1E293B] dark:text-white shadow-xs'
+                        : 'bg-[#FDFBF7] dark:bg-black border border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-slate-300 hover:border-black dark:hover:border-zinc-600'
                     }`}
                   >
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
-                          <BookOpen className="w-4 h-4 text-emerald-400" />
-                          <span className="text-slate-500 text-xs font-bold">+</span>
-                          <Award className="w-4 h-4 text-sky-400" />
+                          <BookOpen className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                          <span className="text-slate-400 text-xs font-bold">+</span>
+                          <Award className="w-4 h-4 text-sky-600 dark:text-sky-400" />
                         </div>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-zinc-800 text-[#1E293B] dark:text-slate-300 border border-slate-400 dark:border-zinc-700">
                           Both Tasks
                         </span>
                       </div>
                       <div>
-                        <div className="font-bold text-sm text-white flex items-center gap-1.5">
+                        <div className="font-bold text-sm text-[#1E293B] dark:text-white flex items-center gap-1.5">
                           <span>Both: Slides & Quiz</span>
                         </div>
-                        <div className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                          Students read the slide deck, mark their traffic light confidence, <strong className="text-purple-300 font-semibold">and</strong> take the practice quiz.
+                        <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                          Students read the slide deck, mark their traffic light confidence, <strong className="font-semibold text-black dark:text-white">and</strong> take the practice quiz.
                         </div>
                       </div>
                     </div>
                     {newType === 'both' && (
-                      <div className="mt-2.5 pt-2 border-t border-purple-500/30 flex items-center gap-1 text-[11px] text-purple-300 font-medium">
-                        <Check className="w-3.5 h-3.5 text-purple-400" />
+                      <div className="mt-2.5 pt-2 border-t border-black/20 dark:border-white/20 flex items-center gap-1 text-[11px] font-bold text-black dark:text-white">
+                        <Check className="w-3.5 h-3.5" />
                         <span>Selected (Comprehensive)</span>
                       </div>
                     )}
@@ -1449,27 +1455,27 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     }}
                     className={`p-2.5 sm:p-3 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
                       newType === 'slides_traffic_light'
-                        ? 'bg-purple-950/50 border-purple-500 text-white shadow-md ring-1 ring-purple-500/40'
-                        : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:border-slate-600'
+                        ? 'bg-[#EBF3F5] dark:bg-zinc-900 border-2 border-black dark:border-white text-[#1E293B] dark:text-white shadow-xs'
+                        : 'bg-[#FDFBF7] dark:bg-black border border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-slate-300 hover:border-black dark:hover:border-zinc-600'
                     }`}
                   >
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
-                        <BookOpen className="w-4 h-4 text-emerald-400" />
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                        <BookOpen className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
                           Slides Only
                         </span>
                       </div>
                       <div>
-                        <div className="font-bold text-sm text-white">Slides & Traffic Light</div>
-                        <div className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                        <div className="font-bold text-sm text-[#1E293B] dark:text-white">Slides & Traffic Light</div>
+                        <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
                           Student reads presentation slides and sets Red / Amber / Green confidence rating to reflect understanding.
                         </div>
                       </div>
                     </div>
                     {newType === 'slides_traffic_light' && (
-                      <div className="mt-2.5 pt-2 border-t border-purple-500/30 flex items-center gap-1 text-[11px] text-emerald-300 font-medium">
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <div className="mt-2.5 pt-2 border-t border-black/20 dark:border-white/20 flex items-center gap-1 text-[11px] font-bold text-black dark:text-white">
+                        <Check className="w-3.5 h-3.5" />
                         <span>Selected</span>
                       </div>
                     )}
@@ -1485,27 +1491,27 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     }}
                     className={`p-2.5 sm:p-3 rounded-2xl border cursor-pointer transition flex flex-col justify-between ${
                       newType === 'practice_quiz'
-                        ? 'bg-purple-950/50 border-purple-500 text-white shadow-md ring-1 ring-purple-500/40'
-                        : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:border-slate-600'
+                        ? 'bg-[#EBF3F5] dark:bg-zinc-900 border-2 border-black dark:border-white text-[#1E293B] dark:text-white shadow-xs'
+                        : 'bg-[#FDFBF7] dark:bg-black border border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-slate-300 hover:border-black dark:hover:border-zinc-600'
                     }`}
                   >
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
-                        <Award className="w-4 h-4 text-sky-400" />
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30">
+                        <Award className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950/60 text-sky-800 dark:text-sky-300 border border-sky-300 dark:border-sky-700">
                           Quiz Only
                         </span>
                       </div>
                       <div>
-                        <div className="font-bold text-sm text-white">Practice Quiz Challenge</div>
-                        <div className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                        <div className="font-bold text-sm text-[#1E293B] dark:text-white">Practice Quiz Challenge</div>
+                        <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
                           Student completes the 10-question Cambridge syllabus quiz to test retention and exam skills.
                         </div>
                       </div>
                     </div>
                     {newType === 'practice_quiz' && (
-                      <div className="mt-2.5 pt-2 border-t border-purple-500/30 flex items-center gap-1 text-[11px] text-sky-300 font-medium">
-                        <Check className="w-3.5 h-3.5 text-sky-400" />
+                      <div className="mt-2.5 pt-2 border-t border-black/20 dark:border-white/20 flex items-center gap-1 text-[11px] font-bold text-black dark:text-white">
+                        <Check className="w-3.5 h-3.5" />
                         <span>Selected</span>
                       </div>
                     )}
@@ -1516,11 +1522,11 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
               {/* Class Target */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className="font-semibold text-slate-300">Target Class *</label>
+                  <label className="font-semibold text-[#1E293B] dark:text-slate-200">Target Class *</label>
                   <select
                     value={newClassId}
                     onChange={e => setNewClassId(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-purple-500 font-medium"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 focus:outline-none font-medium"
                   >
                     <option value="all">All Available Classes (Owned & Shared)</option>
                     {classes.map(c => {
@@ -1535,27 +1541,29 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="font-semibold text-slate-300">Due Date & Time *</label>
+                  <label className="font-semibold text-[#1E293B] dark:text-slate-200">Due Date & Time *</label>
                   <input
                     type="datetime-local"
                     required
                     value={newDueDate}
                     onChange={e => setNewDueDate(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white focus:outline-none focus:ring-2 focus:ring-purple-500 font-medium"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 focus:outline-none font-medium"
                   />
                 </div>
               </div>
 
               {/* Student Audience Selector: Whole Class vs Specific Students */}
-              <div className="space-y-2 pt-2 border-t border-slate-800">
-                <label className="font-semibold text-slate-300 flex items-center justify-between">
+              <div className="space-y-2 pt-2 border-t border-[#E2E8F0] dark:border-zinc-800">
+                <label className="font-semibold text-[#1E293B] dark:text-slate-200 flex items-center justify-between">
                   <span>Student Audience Scope:</span>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setTargetAudienceType('entire_class')}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                        targetAudienceType === 'entire_class' ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-400'
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border ${
+                        targetAudienceType === 'entire_class' 
+                          ? 'bg-slate-900 text-white dark:bg-white dark:text-black border-black' 
+                          : 'bg-[#FDFBF7] dark:bg-black text-slate-700 dark:text-slate-300 border-slate-300 dark:border-zinc-700'
                       }`}
                     >
                       Entire Class
@@ -1563,8 +1571,10 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     <button
                       type="button"
                       onClick={() => setTargetAudienceType('specific_students')}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                        targetAudienceType === 'specific_students' ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-400'
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border ${
+                        targetAudienceType === 'specific_students' 
+                          ? 'bg-slate-900 text-white dark:bg-white dark:text-black border-black' 
+                          : 'bg-[#FDFBF7] dark:bg-black text-slate-700 dark:text-slate-300 border-slate-300 dark:border-zinc-700'
                       }`}
                     >
                       Specific Students ({selectedStudentIds.length})
@@ -1573,22 +1583,22 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                 </label>
 
                 {targetAudienceType === 'specific_students' && (
-                  <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-2.5">
-                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <div className="bg-[#FDFBF7] dark:bg-black p-4 rounded-2xl border-2 border-black dark:border-white space-y-2.5">
+                    <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400">
                       <span>Select individual students for tailored revision:</span>
                       <button
                         type="button"
                         onClick={handleSelectAllStudents}
-                        className="text-purple-400 hover:underline font-semibold"
+                        className="text-black dark:text-white hover:underline font-bold"
                       >
                         {selectedStudentIds.length === classStudents.length ? 'Deselect All' : 'Select All'}
                       </button>
                     </div>
 
                     {loadingStudents ? (
-                      <div className="p-4 text-center text-slate-400">Loading student roster...</div>
+                      <div className="p-4 text-center text-slate-500">Loading student roster...</div>
                     ) : classStudents.length === 0 ? (
-                      <div className="p-3 text-center text-slate-400">
+                      <div className="p-3 text-center text-slate-500">
                         {newClassId === 'all' 
                           ? 'Please select a specific class above to pick individual students.' 
                           : 'No students enrolled in this class yet.'}
@@ -1603,20 +1613,20 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                               onClick={() => handleToggleStudentSelection(student.studentId)}
                               className={`p-2 rounded-xl border flex items-center justify-between cursor-pointer transition ${
                                 isSelected 
-                                  ? 'bg-purple-950/40 border-purple-500/50 text-white' 
-                                  : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                                  ? 'bg-[#EBF3F5] dark:bg-zinc-900 border-2 border-black dark:border-white text-[#1E293B] dark:text-white font-bold' 
+                                  : 'bg-white dark:bg-black border border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-slate-300 hover:border-black'
                               }`}
                             >
                               <div className="flex items-center gap-2">
                                 <div className={`w-4 h-4 rounded flex items-center justify-center border ${
-                                  isSelected ? 'bg-purple-600 border-purple-500 text-white' : 'border-slate-700'
+                                  isSelected ? 'bg-black text-white dark:bg-white dark:text-black border-black' : 'border-slate-400'
                                 }`}>
                                   {isSelected && <Check className="w-3 h-3" />}
                                 </div>
                                 <span className="font-semibold">{student.name}</span>
-                                <span className="text-[10px] text-slate-400 font-mono">({student.email})</span>
+                                <span className="text-[10px] text-slate-500 font-mono">({student.email})</span>
                               </div>
-                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-zinc-700">
                                 {student.tier}
                               </span>
                             </div>
@@ -1629,16 +1639,16 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
               </div>
 
               {/* Interactive Cambridge Subtopic Selector */}
-              <div className="space-y-3 pt-2 border-t border-slate-800">
+              <div className="space-y-3 pt-2 border-t border-[#E2E8F0] dark:border-zinc-800">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
-                    <label className="font-semibold text-slate-300 flex items-center gap-1.5">
+                    <label className="font-semibold text-[#1E293B] dark:text-slate-200 flex items-center gap-1.5">
                       <span>Target Cambridge Subtopic(s) *</span>
-                      <span className="text-[10px] font-bold px-2 py-0.2 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#EBF3F5] dark:bg-zinc-800 text-[#1E293B] dark:text-white border border-slate-300 dark:border-zinc-700">
                         {selectedSubtopics.length} Selected
                       </span>
                     </label>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400">
                       Search by keyword, filter by subject/topic, or click any subtopic below to assign.
                     </p>
                   </div>
@@ -1647,24 +1657,24 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     <button
                       type="button"
                       onClick={() => autoFillTitleAndDescription(newType, selectedSubtopics)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 border border-purple-500/40 text-[11px] font-bold transition shrink-0"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-black hover:bg-slate-50 dark:hover:bg-zinc-900 text-[#1E293B] dark:text-white border-2 border-black dark:border-white text-[11px] font-bold transition shrink-0"
                       title="Auto-generate title and instructions from the selected subtopics"
                     >
-                      <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                      <Sparkles className="w-3.5 h-3.5" />
                       <span>✨ Auto-Fill Title & Guidance</span>
                     </button>
                   )}
                 </div>
 
                 {/* Selected Subtopic Chips Tray */}
-                <div className="p-2.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <div className="p-2.5 rounded-2xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white space-y-2">
+                  <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400">
                     <span className="font-medium">Currently Selected Subtopic(s):</span>
                     {selectedSubtopics.length > 0 && (
                       <button
                         type="button"
                         onClick={() => setSelectedSubtopics([])}
-                        className="text-slate-400 hover:text-rose-400 transition"
+                        className="text-rose-600 hover:underline font-semibold transition"
                       >
                         Clear All
                       </button>
@@ -1672,26 +1682,20 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                   </div>
 
                   {selectedSubtopics.length === 0 ? (
-                    <div className="p-3 text-center text-xs text-amber-300/80 bg-amber-950/20 border border-amber-500/30 rounded-xl flex items-center justify-center gap-2">
-                      <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div className="p-3 text-center text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-700 rounded-xl flex items-center justify-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                       <span>Please select at least one subtopic from the browser below.</span>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 flex-wrap">
                       {selectedSubtopics.map(code => {
                         const info = allSubtopicsData.find(s => s.subtopicCode.toUpperCase() === code.toUpperCase());
-                        const subjectColor = 
-                          info?.subject === 'biology' ? 'text-emerald-400 border-emerald-500/40 bg-emerald-950/40' :
-                          info?.subject === 'chemistry' ? 'text-sky-400 border-sky-500/40 bg-sky-950/40' :
-                          info?.subject === 'physics' ? 'text-amber-400 border-amber-500/40 bg-amber-950/40' :
-                          'text-purple-300 border-purple-500/40 bg-purple-950/40';
-
                         return (
                           <div 
                             key={code}
-                            className={`px-3 py-1.5 rounded-xl border flex items-center gap-2 text-xs font-medium shadow-xs ${subjectColor}`}
+                            className="px-3 py-1.5 rounded-xl border-2 border-black dark:border-white bg-white dark:bg-zinc-900 text-[#1E293B] dark:text-white flex items-center gap-2 text-xs font-medium shadow-xs"
                           >
-                            <span className="font-mono font-bold text-white bg-slate-900/80 px-1.5 py-0.5 rounded border border-white/10">
+                            <span className="font-mono font-bold bg-[#EBF3F5] dark:bg-black px-1.5 py-0.5 rounded border border-slate-300 dark:border-zinc-700">
                               {code}
                             </span>
                             <span className="truncate max-w-[200px] sm:max-w-[260px]">
@@ -1700,7 +1704,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                             <button
                               type="button"
                               onClick={() => handleRemoveSubtopic(code)}
-                              className="p-0.5 rounded-full hover:bg-white/20 transition text-white/70 hover:text-white"
+                              className="p-0.5 rounded-full hover:bg-slate-200 dark:hover:bg-zinc-700 transition"
                               title={`Remove ${code}`}
                             >
                               <X className="w-3.5 h-3.5" />
@@ -1713,7 +1717,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                 </div>
 
                 {/* Subtopic Browser Container */}
-                <div className="bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800 space-y-3">
+                <div className="bg-[#FDFBF7] dark:bg-black p-3.5 rounded-2xl border border-slate-300 dark:border-zinc-800 space-y-3">
                   {/* Search and Filters Bar */}
                   <div className="space-y-2.5">
                     {/* Live Search Input */}
@@ -1724,13 +1728,13 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         value={subtopicSearchQuery}
                         onChange={e => setSubtopicSearchQuery(e.target.value)}
                         placeholder="Search by keyword, topic, or code (e.g. photosynthesis, acids, waves, B1.1, heart, cells)..."
-                        className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-400 text-xs focus:outline-none focus:ring-1 focus:ring-purple-500 font-medium"
+                        className="w-full pl-9 pr-8 py-2 rounded-xl bg-white dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 text-xs focus:outline-none font-medium"
                       />
                       {subtopicSearchQuery && (
                         <button
                           type="button"
                           onClick={() => setSubtopicSearchQuery('')}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-black dark:hover:text-white p-1"
                         >
                           <X className="w-3.5 h-3.5" />
                         </button>
@@ -1740,7 +1744,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     {/* Subject Tabs & Topic Select */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                       {/* Subject Filter Tabs */}
-                      <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 overflow-x-auto text-[11px]">
+                      <div className="flex items-center gap-1 bg-white dark:bg-black p-1 rounded-xl border-2 border-black dark:border-white overflow-x-auto text-[11px]">
                         <button
                           type="button"
                           onClick={() => {
@@ -1749,8 +1753,8 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                           }}
                           className={`px-2.5 py-1 rounded-lg font-bold transition shrink-0 ${
                             subtopicFilterSubject === 'all'
-                              ? 'bg-purple-600 text-white shadow-xs'
-                              : 'text-slate-400 hover:text-white'
+                              ? 'bg-slate-900 text-white dark:bg-white dark:text-black'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-black dark:hover:text-white'
                           }`}
                         >
                           All (106)
@@ -1763,8 +1767,8 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                           }}
                           className={`px-2.5 py-1 rounded-lg font-bold transition shrink-0 flex items-center gap-1 ${
                             subtopicFilterSubject === 'biology'
-                              ? 'bg-emerald-600 text-white shadow-xs'
-                              : 'text-slate-400 hover:text-emerald-400'
+                              ? 'bg-emerald-700 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-emerald-700'
                           }`}
                         >
                           <span>🧬 Biology</span>
@@ -1777,8 +1781,8 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                           }}
                           className={`px-2.5 py-1 rounded-lg font-bold transition shrink-0 flex items-center gap-1 ${
                             subtopicFilterSubject === 'chemistry'
-                              ? 'bg-sky-600 text-white shadow-xs'
-                              : 'text-slate-400 hover:text-sky-400'
+                              ? 'bg-sky-700 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-sky-700'
                           }`}
                         >
                           <span>🧪 Chemistry</span>
@@ -1791,8 +1795,8 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                           }}
                           className={`px-2.5 py-1 rounded-lg font-bold transition shrink-0 flex items-center gap-1 ${
                             subtopicFilterSubject === 'physics'
-                              ? 'bg-amber-600 text-white shadow-xs'
-                              : 'text-slate-400 hover:text-amber-400'
+                              ? 'bg-amber-700 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-amber-700'
                           }`}
                         >
                           <span>⚡ Physics</span>
@@ -1804,7 +1808,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         <select
                           value={subtopicFilterTopic}
                           onChange={e => setSubtopicFilterTopic(e.target.value)}
-                          className="bg-slate-900 border border-slate-700 text-slate-200 rounded-xl px-3 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-purple-500 font-medium w-full sm:w-56 truncate"
+                          className="bg-white dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-200 rounded-xl px-3 py-1.5 text-[11px] focus:outline-none font-medium w-full sm:w-56 truncate"
                         >
                           <option value="all">All Topics in {subtopicFilterSubject === 'all' ? 'Science' : subtopicFilterSubject}</option>
                           {uniqueTopics
@@ -1822,49 +1826,46 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
                   {/* Subtopics Scrollable Grid */}
                   <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
+                    <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400 px-1">
                       <span>Showing {filteredSubtopicsList.length} Cambridge Subtopic{filteredSubtopicsList.length !== 1 ? 's' : ''}:</span>
                       <span className="italic">Click any row to select or deselect</span>
                     </div>
 
                     <div className="max-h-40 sm:max-h-44 overflow-y-auto space-y-1.5 pr-1 rounded-xl">
                       {filteredSubtopicsList.length === 0 ? (
-                        <div className="p-6 text-center text-xs text-slate-400 bg-slate-900/60 rounded-xl border border-slate-800">
+                        <div className="p-6 text-center text-xs text-slate-500 bg-white dark:bg-zinc-900 rounded-xl border border-slate-300 dark:border-zinc-800">
                           No subtopics match your current search/filters. Try clearing your search keyword.
                         </div>
                       ) : (
                         filteredSubtopicsList.map(item => {
                           const isSelected = selectedSubtopics.includes(item.subtopicCode);
-                          const subjectBadgeColor = 
-                            item.subject === 'biology' ? 'text-emerald-400 bg-emerald-950/40 border-emerald-500/30' :
-                            item.subject === 'chemistry' ? 'text-sky-400 bg-sky-950/40 border-sky-500/30' :
-                            'text-amber-400 bg-amber-950/40 border-amber-500/30';
-
                           return (
                             <div
                               key={item.subtopicCode}
                               onClick={() => handleToggleSubtopic(item.subtopicCode)}
                               className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition select-none ${
                                 isSelected
-                                  ? 'bg-purple-950/50 border-purple-500/70 shadow-xs ring-1 ring-purple-500/30'
-                                  : 'bg-slate-900/90 border-slate-800 hover:border-slate-700 hover:bg-slate-800/80 text-slate-300'
+                                  ? 'bg-[#EBF3F5] dark:bg-zinc-900 border-2 border-black dark:border-white shadow-xs font-semibold'
+                                  : 'bg-white dark:bg-black border border-slate-300 dark:border-zinc-800 hover:border-black text-[#1E293B] dark:text-slate-300'
                               }`}
                             >
                               <div className="flex items-start gap-2.5 min-w-0 pr-2">
                                 <span className={`px-2 py-0.5 rounded-md font-mono font-bold text-xs border shrink-0 mt-0.5 ${
-                                  isSelected ? 'bg-purple-600 text-white border-purple-500' : subjectBadgeColor
+                                  isSelected 
+                                    ? 'bg-slate-900 text-white dark:bg-white dark:text-black border-black' 
+                                    : 'bg-[#FDFBF7] dark:bg-zinc-900 text-[#1E293B] dark:text-slate-300 border-slate-300 dark:border-zinc-700'
                                 }`}>
                                   {item.subtopicCode}
                                 </span>
 
                                 <div className="min-w-0 space-y-0.5">
-                                  <div className="font-semibold text-xs text-white truncate flex items-center gap-1.5">
+                                  <div className="font-semibold text-xs text-[#1E293B] dark:text-white truncate flex items-center gap-1.5">
                                     <span>{item.title}</span>
-                                    <span className="text-[10px] font-normal px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                                    <span className="text-[10px] font-normal px-1.5 py-0.2 rounded bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-zinc-700">
                                       {item.tier}
                                     </span>
                                   </div>
-                                  <div className="text-[10px] text-slate-400 truncate">
+                                  <div className="text-[10px] text-slate-500 truncate">
                                     Topic {item.topicCode}: {item.topicName}
                                   </div>
                                 </div>
@@ -1872,12 +1873,12 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
                               <div className="shrink-0">
                                 {isSelected ? (
-                                  <span className="px-2.5 py-1 rounded-lg bg-purple-600 text-white text-[11px] font-bold flex items-center gap-1">
+                                  <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white dark:bg-white dark:text-black text-[11px] font-bold flex items-center gap-1">
                                     <Check className="w-3 h-3" />
                                     <span>Selected</span>
                                   </span>
                                 ) : (
-                                  <span className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold border border-slate-700 transition">
+                                  <span className="px-2.5 py-1 rounded-lg bg-[#FDFBF7] dark:bg-zinc-900 hover:bg-slate-100 text-slate-700 dark:text-slate-300 text-[11px] font-semibold border border-slate-300 dark:border-zinc-700 transition">
                                     + Add
                                   </span>
                                 )}
@@ -1890,9 +1891,9 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                   </div>
 
                   {/* Manual Code Input Bar (Fallback) */}
-                  <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="pt-2 border-t border-[#E2E8F0] dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="flex items-center gap-2 flex-1">
-                      <span className="text-[11px] text-slate-400 shrink-0">Or type code:</span>
+                      <span className="text-[11px] text-slate-600 dark:text-slate-400 shrink-0">Or type code:</span>
                       <input
                         type="text"
                         value={newSubtopicInput}
@@ -1904,12 +1905,12 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                           }
                         }}
                         placeholder="e.g. B1.1, C2.3, P4.1..."
-                        className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-white placeholder-slate-500 font-mono text-xs w-32 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        className="px-2.5 py-1 rounded-lg bg-white dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 font-mono text-xs w-32 focus:outline-none"
                       />
                       <button
                         type="button"
                         onClick={() => handleAddSubtopic(newSubtopicInput)}
-                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs border border-slate-700"
+                        className="px-2.5 py-1 rounded-lg bg-[#FDFBF7] dark:bg-black hover:bg-white text-[#1E293B] dark:text-slate-200 font-semibold text-xs border-2 border-black dark:border-white"
                       >
                         + Add
                       </button>
@@ -1923,10 +1924,10 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                           key={code}
                           type="button"
                           onClick={() => handleAddSubtopic(code)}
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition ${
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition border ${
                             selectedSubtopics.includes(code)
-                              ? 'bg-purple-600 text-white font-bold'
-                              : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                              ? 'bg-slate-900 text-white dark:bg-white dark:text-black border-black font-bold'
+                              : 'bg-white dark:bg-black text-slate-600 dark:text-slate-400 hover:text-black border-slate-300 dark:border-zinc-700'
                           }`}
                         >
                           +{code}
@@ -1938,38 +1939,38 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
               </div>
 
               {/* Instructions / Description */}
-              <div className="space-y-1.5 pt-2 border-t border-slate-800">
-                <label className="font-semibold text-slate-300">Teacher Guidance & Instructions (Optional)</label>
+              <div className="space-y-1.5 pt-2 border-t border-[#E2E8F0] dark:border-zinc-800">
+                <label className="font-semibold text-[#1E293B] dark:text-slate-200">Teacher Guidance & Instructions (Optional)</label>
                 <textarea
                   rows={2}
                   value={newDescription}
                   onChange={e => setNewDescription(e.target.value)}
                   placeholder="e.g. Review key terms on slides 4-8. Once you understand the concepts, update your traffic light to Green and attempt the practice quiz."
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500 font-normal"
+                  className="w-full px-3.5 py-2 rounded-xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 focus:outline-none font-normal"
                 ></textarea>
               </div>
 
               {/* Student Email Notification Option Card */}
-              <div className="p-4 rounded-2xl bg-slate-950/90 border border-purple-500/30 space-y-3 shadow-xs">
+              <div className="p-4 rounded-2xl bg-[#EBF3F5] dark:bg-zinc-900 border-2 border-black dark:border-white space-y-3 shadow-xs">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-xl bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
-                      <Mail className="w-4 h-4 text-purple-400" />
+                    <div className="p-2 rounded-xl bg-white dark:bg-black text-[#1E293B] dark:text-white border-2 border-black dark:border-white shrink-0">
+                      <Mail className="w-4 h-4" />
                     </div>
                     <div className="space-y-0.5">
-                      <div className="font-bold text-white flex items-center gap-1.5 flex-wrap">
+                      <div className="font-bold text-[#1E293B] dark:text-white flex items-center gap-1.5 flex-wrap">
                         <span>Notify Students by Email</span>
                         {smtpStatus?.configured ? (
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
                             🟢 SMTP Background Auto-Send
                           </span>
                         ) : (
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
                             🟡 1-Click Gmail / Mail App
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] text-slate-400">
+                      <div className="text-[11px] text-slate-600 dark:text-slate-400">
                         Dispatches assignment details (title, due date, syllabus subtopics, and direct portal link) to each assigned student.
                       </div>
                     </div>
@@ -1982,16 +1983,16 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                       onChange={e => setSendEmailNotification(e.target.checked)}
                       className="sr-only peer"
                     />
-                    <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                    <div className="w-9 h-5 bg-slate-300 dark:bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-slate-900 dark:peer-checked:bg-white"></div>
                   </label>
                 </div>
 
                 {sendEmailNotification && (
-                  <div className="pt-2 border-t border-slate-800/80 space-y-2 text-xs">
+                  <div className="pt-2 border-t border-black/15 dark:border-white/15 space-y-2 text-xs">
                     {!smtpStatus?.configured && (
-                      <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-2 text-amber-200">
+                      <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-700 flex items-center justify-between gap-2 text-amber-900 dark:text-amber-200">
                         <div className="flex items-center gap-2">
-                          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                           <span className="text-[11px]">
                             SMTP mail server is not configured yet. <strong>1-Click Gmail & Email App launcher</strong> will open right after creation so you can notify students immediately.
                           </span>
@@ -2002,7 +2003,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                             setShowSmtpModal(true);
                             fetchEmailLogs();
                           }}
-                          className="px-2.5 py-1 rounded-lg bg-amber-600/30 hover:bg-amber-600/50 text-amber-200 font-bold text-[11px] border border-amber-500/30 transition shrink-0"
+                          className="px-2.5 py-1 rounded-lg bg-white dark:bg-black text-[#1E293B] dark:text-slate-200 font-bold text-[11px] border border-black dark:border-white transition shrink-0"
                         >
                           Setup SMTP
                         </button>
@@ -2010,18 +2011,18 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     )}
 
                     <div className="space-y-1">
-                      <label className="font-semibold text-slate-300 text-[11px] flex items-center justify-between">
+                      <label className="font-semibold text-[#1E293B] dark:text-slate-200 text-[11px] flex items-center justify-between">
                         <span>Additional Notification Emails (Optional)</span>
-                        <span className="text-[10px] text-slate-400">Your email ({currentUser.email || 'corbanb@gisboyshigh.net'}) is included by default</span>
+                        <span className="text-[10px] text-slate-500">Your email ({currentUser.email || 'corbanb@gisboyshigh.net'}) is included by default</span>
                       </label>
                       <input
                         type="text"
                         value={additionalEmailsInput}
                         onChange={e => setAdditionalEmailsInput(e.target.value)}
                         placeholder="e.g. corbanb@gisboyshigh.net, co-teacher@gisboyshigh.net, test@email.com"
-                        className="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 placeholder-slate-500 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 font-mono text-xs focus:outline-none"
                       />
-                      <p className="text-[10px] text-slate-400">
+                      <p className="text-[10px] text-slate-500">
                         Separate multiple emails with commas. All recipients will receive the assignment details and direct portal link.
                       </p>
                     </div>
@@ -2031,29 +2032,29 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
               </div>
 
-              {/* Fixed Modal Footer - Always in view */}
-              <div className="px-5 sm:px-6 py-3.5 border-t border-slate-800/90 bg-slate-900/95 backdrop-blur-sm flex items-center justify-between gap-3 shrink-0">
-                <div className="text-[11px] text-slate-400 hidden sm:block">
+              {/* Fixed Modal Footer */}
+              <div className="px-5 sm:px-6 py-3.5 border-t border-[#E2E8F0] dark:border-zinc-800 bg-[#FDFBF7] dark:bg-black flex items-center justify-between gap-3 shrink-0">
+                <div className="text-[11px] text-slate-600 dark:text-slate-400 hidden sm:block">
                   {selectedSubtopics.length > 0 ? (
-                    <span>Assigned to <strong className="text-purple-300 font-semibold">{selectedSubtopics.length}</strong> subtopic{selectedSubtopics.length !== 1 ? 's' : ''}</span>
+                    <span>Assigned to <strong className="text-black dark:text-white font-bold">{selectedSubtopics.length}</strong> subtopic{selectedSubtopics.length !== 1 ? 's' : ''}</span>
                   ) : (
-                    <span className="text-amber-400 font-medium">Please select at least 1 subtopic</span>
+                    <span className="text-amber-700 dark:text-amber-400 font-medium">Please select at least 1 subtopic</span>
                   )}
                 </div>
                 <div className="flex items-center gap-2.5 ml-auto">
                   <button
                     type="button"
                     onClick={() => setShowCreateModal(false)}
-                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition text-xs"
+                    className="px-4 py-2 rounded-xl bg-[#FDFBF7] dark:bg-black hover:bg-white dark:hover:bg-zinc-900 text-[#1E293B] dark:text-slate-200 font-semibold transition text-xs border-2 border-black dark:border-white"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={creating}
-                    className="flex items-center gap-2 px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold transition shadow-md disabled:opacity-50 text-xs"
+                    className="flex items-center gap-2 px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-black dark:hover:bg-slate-200 border-2 border-black font-bold transition shadow-xs disabled:opacity-50 text-xs"
                   >
-                    {creating && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>}
+                    {creating && <div className="w-3.5 h-3.5 border-2 border-white dark:border-black border-t-transparent rounded-full animate-spin"></div>}
                     <span>Publish Task to Class</span>
                   </button>
                 </div>
@@ -2065,19 +2066,19 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
       {/* SMTP Configuration & Delivery Logs Modal */}
       {showSmtpModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in-50 duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-black border-2 border-black dark:border-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
             {/* Modal Header */}
-            <div className="p-5 sm:p-6 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
+            <div className="p-5 sm:p-6 border-b border-[#E2E8F0] dark:border-zinc-800 flex items-center justify-between bg-[#FDFBF7] dark:bg-black">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-2xl bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                <div className="p-2.5 rounded-xl bg-[#EBF3F5] dark:bg-zinc-900 text-[#1E293B] dark:text-white border-2 border-black dark:border-white">
                   <Mail className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                  <h3 className="text-base sm:text-lg font-bold text-[#1E293B] dark:text-white flex items-center gap-2">
                     <span>Task Email Dispatch & Server Settings</span>
                   </h3>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
                     Ensure student task emails deliver reliably via SMTP or 1-Click Gmail.
                   </p>
                 </div>
@@ -2087,21 +2088,21 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                   setShowSmtpModal(false);
                   setSmtpTestResult(null);
                 }}
-                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                className="p-2 rounded-xl text-slate-500 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Modal Navigation Tabs */}
-            <div className="flex items-center gap-1 px-5 pt-3 border-b border-slate-800/80 bg-slate-950/50 text-xs">
+            <div className="flex items-center gap-1 px-5 pt-3 border-b border-[#E2E8F0] dark:border-zinc-800 bg-[#FDFBF7] dark:bg-black text-xs">
               <button
                 type="button"
                 onClick={() => setSmtpModalTab('config')}
                 className={`px-4 py-2.5 rounded-t-xl font-bold transition flex items-center gap-2 border-b-2 ${
                   smtpModalTab === 'config'
-                    ? 'border-purple-500 text-purple-300 bg-slate-900/90'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                    ? 'border-black dark:border-white text-[#1E293B] dark:text-white bg-white dark:bg-black'
+                    : 'border-transparent text-slate-500 hover:text-black dark:hover:text-white'
                 }`}
               >
                 <Settings className="w-3.5 h-3.5" />
@@ -2116,14 +2117,14 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                 }}
                 className={`px-4 py-2.5 rounded-t-xl font-bold transition flex items-center gap-2 border-b-2 ${
                   smtpModalTab === 'logs'
-                    ? 'border-purple-500 text-purple-300 bg-slate-900/90'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                    ? 'border-black dark:border-white text-[#1E293B] dark:text-white bg-white dark:bg-black'
+                    : 'border-transparent text-slate-500 hover:text-black dark:hover:text-white'
                 }`}
               >
                 <FileText className="w-3.5 h-3.5" />
                 <span>Delivery Logs</span>
                 {emailLogs.length > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 font-mono">
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-200 dark:bg-zinc-800 text-black dark:text-white font-mono">
                     {emailLogs.length}
                   </span>
                 )}
@@ -2134,8 +2135,8 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                 onClick={() => setSmtpModalTab('guide')}
                 className={`px-4 py-2.5 rounded-t-xl font-bold transition flex items-center gap-2 border-b-2 ${
                   smtpModalTab === 'guide'
-                    ? 'border-purple-500 text-purple-300 bg-slate-900/90'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                    ? 'border-black dark:border-white text-[#1E293B] dark:text-white bg-white dark:bg-black'
+                    : 'border-transparent text-slate-500 hover:text-black dark:hover:text-white'
                 }`}
               >
                 <BookOpen className="w-3.5 h-3.5" />
@@ -2144,23 +2145,23 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
             </div>
 
             {/* Modal Body */}
-            <div className="p-5 sm:p-6 overflow-y-auto space-y-4 text-xs">
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-4 text-xs bg-white dark:bg-black">
               {smtpModalTab === 'config' && (
                 <form onSubmit={handleSaveSmtp} className="space-y-4">
                   {/* Status Banner */}
                   <div className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 ${
                     smtpStatus?.configured
-                      ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
-                      : 'bg-amber-950/40 border-amber-500/40 text-amber-300'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300'
+                      : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300'
                   }`}>
                     <div className="flex items-center gap-2.5">
                       {smtpStatus?.configured ? (
-                        <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                        <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                       ) : (
-                        <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                        <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
                       )}
                       <div>
-                        <div className="font-bold text-white text-xs">
+                        <div className="font-bold text-xs">
                           {smtpStatus?.configured 
                             ? `Active SMTP Server: ${smtpStatus.host}:${smtpStatus.port}`
                             : 'SMTP Mail Server Not Configured'}
@@ -2176,7 +2177,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
                   {/* Preset quick buttons */}
                   <div className="space-y-1">
-                    <span className="text-[11px] text-slate-400 font-semibold">Quick Presets:</span>
+                    <span className="text-[11px] text-slate-600 dark:text-slate-400 font-semibold">Quick Presets:</span>
                     <div className="flex items-center gap-2 flex-wrap">
                       <button
                         type="button"
@@ -2190,7 +2191,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                             from: `"Mr. Corban" <${currentUser.email || 'corbanb@gisboyshigh.net'}>`
                           });
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs transition"
+                        className="px-3 py-1.5 rounded-xl bg-[#FDFBF7] dark:bg-black hover:bg-white text-[#1E293B] dark:text-slate-200 border-2 border-black dark:border-white font-medium text-xs transition"
                       >
                         ⚡ Google Workspace / Gmail (587 TLS)
                       </button>
@@ -2206,7 +2207,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                             from: `"Mr. Corban" <${currentUser.email || 'corbanb@gisboyshigh.net'}>`
                           });
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs transition"
+                        className="px-3 py-1.5 rounded-xl bg-[#FDFBF7] dark:bg-black hover:bg-white text-[#1E293B] dark:text-slate-200 border-2 border-black dark:border-white font-medium text-xs transition"
                       >
                         🔒 Google SSL (465 SSL)
                       </button>
@@ -2215,26 +2216,26 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="font-semibold text-slate-300">SMTP Host Server</label>
+                      <label className="font-semibold text-[#1E293B] dark:text-slate-200">SMTP Host Server</label>
                       <input
                         type="text"
                         required
                         value={smtpForm.host}
                         onChange={e => setSmtpForm({ ...smtpForm, host: e.target.value })}
                         placeholder="smtp.gmail.com"
-                        className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        className="w-full px-3 py-2 rounded-xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 font-mono text-xs focus:outline-none"
                       />
                     </div>
 
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <label className="font-semibold text-slate-300">Port & Security</label>
-                        <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer">
+                        <label className="font-semibold text-[#1E293B] dark:text-slate-200">Port & Security</label>
+                        <label className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400 cursor-pointer">
                           <input
                             type="checkbox"
                             checked={smtpForm.secure}
                             onChange={e => setSmtpForm({ ...smtpForm, secure: e.target.checked })}
-                            className="rounded bg-slate-800 border-slate-700 text-purple-600 focus:ring-0"
+                            className="rounded bg-white border-black text-black focus:ring-0"
                           />
                           <span>SSL (Port 465)</span>
                         </label>
@@ -2245,33 +2246,33 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         value={smtpForm.port}
                         onChange={e => setSmtpForm({ ...smtpForm, port: parseInt(e.target.value, 10) || 587 })}
                         placeholder="587"
-                        className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        className="w-full px-3 py-2 rounded-xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 font-mono text-xs focus:outline-none"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="font-semibold text-slate-300">User / Sender Email Address</label>
+                      <label className="font-semibold text-[#1E293B] dark:text-slate-200">User / Sender Email Address</label>
                       <input
                         type="email"
                         required
                         value={smtpForm.user}
                         onChange={e => setSmtpForm({ ...smtpForm, user: e.target.value })}
                         placeholder="corbanb@gisboyshigh.net"
-                        className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        className="w-full px-3 py-2 rounded-xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 font-mono text-xs focus:outline-none"
                       />
                     </div>
 
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <label className="font-semibold text-slate-300">
+                        <label className="font-semibold text-[#1E293B] dark:text-slate-200">
                           Password / Google App Password
                         </label>
                         <button
                           type="button"
                           onClick={() => setShowPassword(!showPassword)}
-                          className="text-[10px] text-purple-400 hover:text-purple-300 underline"
+                          className="text-[10px] text-black dark:text-white underline font-semibold"
                         >
                           {showPassword ? 'Hide' : 'Show'}
                         </button>
@@ -2281,24 +2282,24 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         value={smtpForm.pass}
                         onChange={e => setSmtpForm({ ...smtpForm, pass: e.target.value })}
                         placeholder={smtpStatus?.hasPassword ? '(Password configured — leave empty to keep)' : '16-character Google App Password'}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        className="w-full px-3 py-2 rounded-xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 font-mono text-xs focus:outline-none"
                       />
                     </div>
                   </div>
 
                   {/* Important Google Workspace notice */}
-                  <div className="p-3 rounded-xl bg-purple-950/30 border border-purple-500/30 text-purple-200 text-[11px] space-y-1">
-                    <div className="font-bold flex items-center gap-1.5 text-white">
-                      <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                  <div className="p-3.5 rounded-xl bg-[#EBF3F5] dark:bg-zinc-900 border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-200 text-[11px] space-y-1">
+                    <div className="font-bold flex items-center gap-1.5 text-black dark:text-white">
+                      <Sparkles className="w-3.5 h-3.5" />
                       <span>Note for Google Workspace / Gmail Accounts:</span>
                     </div>
-                    <p className="text-slate-300 leading-relaxed">
+                    <p className="leading-relaxed text-slate-700 dark:text-slate-300">
                       Google blocks regular account passwords for SMTP. You must use a <strong>16-character Google App Password</strong> generated at{' '}
                       <a
                         href="https://myaccount.google.com/apppasswords"
                         target="_blank"
                         rel="noreferrer"
-                        className="text-purple-300 underline font-semibold hover:text-white"
+                        className="text-black dark:text-white underline font-bold"
                       >
                         myaccount.google.com/apppasswords
                       </a>{' '}
@@ -2307,13 +2308,13 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                   </div>
 
                   <div className="space-y-1">
-                    <label className="font-semibold text-slate-300">From Header Display Name</label>
+                    <label className="font-semibold text-[#1E293B] dark:text-slate-200">From Header Display Name</label>
                     <input
                       type="text"
                       value={smtpForm.from}
                       onChange={e => setSmtpForm({ ...smtpForm, from: e.target.value })}
                       placeholder={`"Mr. Corban" <${currentUser.email || 'corbanb@gisboyshigh.net'}>`}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      className="w-full px-3 py-2 rounded-xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 font-mono text-xs focus:outline-none"
                     />
                   </div>
 
@@ -2321,13 +2322,13 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                   {smtpTestResult && (
                     <div className={`p-3.5 rounded-xl border flex items-start gap-2.5 ${
                       smtpTestResult.type === 'success'
-                        ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200'
-                        : 'bg-rose-950/50 border-rose-500/40 text-rose-200'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200'
+                        : 'bg-rose-50 dark:bg-rose-950/50 border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-200'
                     }`}>
                       {smtpTestResult.type === 'success' ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                       ) : (
-                        <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                       )}
                       <div className="space-y-1">
                         <div className="font-bold">{smtpTestResult.type === 'success' ? 'Connection Successful' : 'Connection Failed'}</div>
@@ -2337,24 +2338,24 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                   )}
 
                   {/* Buttons */}
-                  <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-3">
+                  <div className="pt-2 border-t border-[#E2E8F0] dark:border-zinc-800 flex items-center justify-between gap-3">
                     <button
                       type="button"
                       disabled={smtpTesting}
                       onClick={handleTestSmtp}
-                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs flex items-center gap-2 transition disabled:opacity-50"
+                      className="px-4 py-2 rounded-xl bg-[#FDFBF7] dark:bg-black hover:bg-white text-[#1E293B] dark:text-slate-200 border-2 border-black dark:border-white font-semibold text-xs flex items-center gap-2 transition disabled:opacity-50"
                     >
                       {smtpTesting ? (
-                        <div className="w-3.5 h-3.5 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
+                        <div className="w-3.5 h-3.5 border-2 border-black dark:border-white border-t-transparent rounded-full animate-spin"></div>
                       ) : (
-                        <Send className="w-3.5 h-3.5 text-purple-400" />
+                        <Send className="w-3.5 h-3.5" />
                       )}
                       <span>Test Connection ({currentUser.email || 'corbanb@gisboyshigh.net'})</span>
                     </button>
 
                     <button
                       type="submit"
-                      className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md transition"
+                      className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-black border-2 border-black font-bold text-xs shadow-xs transition"
                     >
                       Save & Activate SMTP
                     </button>
@@ -2365,7 +2366,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
               {smtpModalTab === 'logs' && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-300">
+                    <span className="font-semibold text-[#1E293B] dark:text-slate-200">
                       Recent Task Email Delivery Logs ({emailLogs.length})
                     </span>
                     <div className="flex items-center gap-2">
@@ -2373,7 +2374,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         type="button"
                         onClick={fetchEmailLogs}
                         disabled={loadingEmailLogs}
-                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs flex items-center gap-1 border border-slate-700"
+                        className="px-2.5 py-1 rounded-lg bg-[#FDFBF7] dark:bg-black hover:bg-white text-[#1E293B] dark:text-slate-200 font-medium text-xs flex items-center gap-1 border border-black dark:border-white"
                       >
                         <RefreshCw className={`w-3 h-3 ${loadingEmailLogs ? 'animate-spin' : ''}`} />
                         <span>Refresh</span>
@@ -2382,7 +2383,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         <button
                           type="button"
                           onClick={handleClearEmailLogs}
-                          className="px-2.5 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 font-medium text-xs border border-rose-800/40"
+                          className="px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 text-rose-800 dark:text-rose-300 font-medium text-xs border border-rose-300"
                         >
                           Clear
                         </button>
@@ -2391,15 +2392,15 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                   </div>
 
                   {loadingEmailLogs ? (
-                    <div className="p-8 text-center text-slate-400">
-                      <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                    <div className="p-8 text-center text-slate-500">
+                      <div className="w-6 h-6 border-2 border-black dark:border-white border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
                       <span>Loading delivery logs...</span>
                     </div>
                   ) : emailLogs.length === 0 ? (
-                    <div className="p-8 rounded-2xl bg-slate-950/60 border border-slate-800/80 text-center space-y-2">
-                      <Mail className="w-8 h-8 text-slate-600 mx-auto" />
-                      <div className="font-semibold text-slate-300 text-sm">No delivery logs recorded yet</div>
-                      <p className="text-slate-400 text-xs max-w-sm mx-auto">
+                    <div className="p-8 rounded-2xl bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-800 text-center space-y-2">
+                      <Mail className="w-8 h-8 text-slate-400 mx-auto" />
+                      <div className="font-semibold text-[#1E293B] dark:text-white text-sm">No delivery logs recorded yet</div>
+                      <p className="text-slate-600 dark:text-slate-400 text-xs max-w-sm mx-auto">
                         When you assign a task or click &quot;Send Email Reminder&quot;, delivery records and server responses will appear here in real-time.
                       </p>
                     </div>
@@ -2410,36 +2411,36 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                           key={log.id}
                           className={`p-3 rounded-xl border space-y-1 ${
                             log.status === 'sent'
-                              ? 'bg-emerald-950/20 border-emerald-500/30'
+                              ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-700'
                               : log.status === 'failed'
-                              ? 'bg-rose-950/30 border-rose-500/40'
-                              : 'bg-slate-950/70 border-slate-800'
+                              ? 'bg-rose-50 dark:bg-rose-950/30 border-rose-300 dark:border-rose-700'
+                              : 'bg-[#FDFBF7] dark:bg-zinc-900 border-slate-300 dark:border-zinc-800'
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <span className="font-bold text-white text-xs">{log.taskTitle}</span>
+                            <span className="font-bold text-[#1E293B] dark:text-white text-xs">{log.taskTitle}</span>
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                               log.status === 'sent'
-                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                                ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
                                 : log.status === 'failed'
-                                ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
-                                : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                                ? 'bg-rose-100 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 border-rose-300 dark:border-rose-700'
+                                : 'bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700'
                             }`}>
                               {log.status === 'sent' ? '✓ Delivered via SMTP' : log.status === 'failed' ? '✕ Failed' : 'Ready for 1-Click Send'}
                             </span>
                           </div>
 
-                          <div className="flex items-center justify-between text-[11px] text-slate-400">
-                            <span>To: <strong className="text-slate-200">{log.recipientName}</strong> ({log.recipientEmail})</span>
+                          <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400">
+                            <span>To: <strong className="text-black dark:text-white">{log.recipientName}</strong> ({log.recipientEmail})</span>
                             <span className="font-mono text-[10px]">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
                           </div>
 
                           {log.info && (
-                            <div className="text-[10px] text-slate-400 font-mono">{log.info}</div>
+                            <div className="text-[10px] text-slate-600 dark:text-slate-400 font-mono">{log.info}</div>
                           )}
 
                           {log.error && (
-                            <div className="text-[11px] text-rose-300 bg-rose-950/40 p-2 rounded-lg border border-rose-900/50 mt-1">
+                            <div className="text-[11px] text-rose-800 dark:text-rose-300 bg-rose-100 dark:bg-rose-950/60 p-2 rounded-lg border border-rose-300 dark:border-rose-800 mt-1">
                               <strong>Error:</strong> {log.error}
                             </div>
                           )}
@@ -2451,30 +2452,30 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
               )}
 
               {smtpModalTab === 'guide' && (
-                <div className="space-y-4 text-xs leading-relaxed">
-                  <div className="p-4 rounded-2xl bg-purple-950/30 border border-purple-500/30 space-y-2">
-                    <h4 className="font-bold text-sm text-white flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-purple-400" />
+                <div className="space-y-4 text-xs leading-relaxed text-[#1E293B] dark:text-slate-200">
+                  <div className="p-4 rounded-2xl bg-[#EBF3F5] dark:bg-zinc-900 border-2 border-black dark:border-white space-y-2">
+                    <h4 className="font-bold text-sm text-black dark:text-white flex items-center gap-2">
+                      <Sparkles className="w-4 h-4" />
                       <span>Why Were Task Emails Not Going Through?</span>
                     </h4>
-                    <p className="text-slate-300">
+                    <p className="text-slate-700 dark:text-slate-300">
                       Standard automated email dispatch requires an authenticated SMTP server. For Google accounts (including <strong>@gisboyshigh.net</strong> and personal Gmail), Google enforces 2-Step Verification and requires a dedicated <strong>Google App Password</strong>. Using your normal Google login password causes Google to reject the connection with code <strong>535 Authentication Failed</strong>.
                     </p>
                   </div>
 
                   <div className="space-y-3">
-                    <h4 className="font-bold text-white text-sm">Two Easy Ways to Notify Students:</h4>
+                    <h4 className="font-bold text-black dark:text-white text-sm">Two Easy Ways to Notify Students:</h4>
 
                     {/* Option 1: 1-Click Gmail */}
-                    <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/80 space-y-2">
-                      <div className="flex items-center gap-2 font-bold text-white text-xs">
-                        <span className="w-5 h-5 rounded-full bg-purple-600 text-white flex items-center justify-center text-[11px]">1</span>
+                    <div className="p-4 rounded-2xl bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-800 space-y-2">
+                      <div className="flex items-center gap-2 font-bold text-black dark:text-white text-xs">
+                        <span className="w-5 h-5 rounded-full bg-slate-900 text-white dark:bg-white dark:text-black flex items-center justify-center text-[11px]">1</span>
                         <span>Zero-Configuration: 1-Click Gmail & Mail App (Fastest)</span>
                       </div>
-                      <p className="text-slate-300 text-xs pl-7">
+                      <p className="text-slate-700 dark:text-slate-300 text-xs pl-7">
                         When you create a task or click &quot;Send Email Reminder&quot;, the system automatically prepares a <strong>1-Click Open in Gmail</strong> button. Clicking it instantly launches your Gmail compose window with:
                       </p>
-                      <ul className="list-disc pl-11 text-slate-400 space-y-1 text-xs">
+                      <ul className="list-disc pl-11 text-slate-600 dark:text-slate-400 space-y-1 text-xs">
                         <li>All assigned students pre-populated into <strong>BCC</strong> for privacy.</li>
                         <li>Formatted assignment title, subtopics, due date, and direct portal link.</li>
                         <li>You simply review and click Send in Gmail! No server configuration needed.</li>
@@ -2482,15 +2483,15 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     </div>
 
                     {/* Option 2: Automated SMTP */}
-                    <div className="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/80 space-y-2">
-                      <div className="flex items-center gap-2 font-bold text-white text-xs">
-                        <span className="w-5 h-5 rounded-full bg-purple-600 text-white flex items-center justify-center text-[11px]">2</span>
+                    <div className="p-4 rounded-2xl bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-800 space-y-2">
+                      <div className="flex items-center gap-2 font-bold text-black dark:text-white text-xs">
+                        <span className="w-5 h-5 rounded-full bg-slate-900 text-white dark:bg-white dark:text-black flex items-center justify-center text-[11px]">2</span>
                         <span>Automated Background Delivery via Google App Password</span>
                       </div>
-                      <p className="text-slate-300 text-xs pl-7">
+                      <p className="text-slate-700 dark:text-slate-300 text-xs pl-7">
                         To enable seamless background auto-delivery straight from your email address:
                       </p>
-                      <ol className="list-decimal pl-11 text-slate-300 space-y-1 text-xs">
+                      <ol className="list-decimal pl-11 text-slate-700 dark:text-slate-300 space-y-1 text-xs">
                         <li>Make sure 2-Step Verification is active on your Google / GIS Boys High account.</li>
                         <li>
                           Visit{' '}
@@ -2498,7 +2499,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                             href="https://myaccount.google.com/apppasswords"
                             target="_blank"
                             rel="noreferrer"
-                            className="text-purple-300 underline font-semibold hover:text-white"
+                            className="text-black dark:text-white underline font-bold"
                           >
                             myaccount.google.com/apppasswords
                           </a>
@@ -2514,8 +2515,8 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 border-t border-slate-800 bg-slate-900/90 flex items-center justify-between">
-              <span className="text-[11px] text-slate-400">
+            <div className="p-4 border-t border-[#E2E8F0] dark:border-zinc-800 bg-[#FDFBF7] dark:bg-black flex items-center justify-between">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
                 Cambridge 0653 Science Revision Hub • Instructor Notification System
               </span>
               <button
@@ -2524,7 +2525,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                   setShowSmtpModal(false);
                   setSmtpTestResult(null);
                 }}
-                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-slate-700 transition"
+                className="px-4 py-1.5 rounded-xl bg-white dark:bg-black hover:bg-slate-50 text-[#1E293B] dark:text-slate-200 font-semibold text-xs border-2 border-black dark:border-white transition"
               >
                 Close
               </button>

@@ -188,25 +188,25 @@ export const AIChatTutor: React.FC<AIChatTutorProps> = ({ user, initialTopicQuer
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-5">
+    <div className="max-w-4xl mx-auto space-y-5 text-left">
       {/* Header with Title and Mode Controls */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-md flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-500 flex items-center justify-center text-slate-950 font-bold shadow-md shadow-emerald-500/20">
-              <Bot className="w-5 h-5 text-slate-950" />
+            <div className="w-10 h-10 rounded-xl bg-emerald-100 border border-emerald-300 flex items-center justify-center text-emerald-800 font-bold">
+              <Bot className="w-5 h-5 text-emerald-800" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                <h1 className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">
                   Cambridge 0653 AI Science Tutor
                 </h1>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
                   Full AI Active
                 </span>
               </div>
-              <p className="text-xs text-slate-400">
-                Grounded in the official 2025–2027 CAIE syllabus, mark schemes & examiner reports
+              <p className="text-xs text-slate-600 font-medium">
+                Grounded in the official 2025–2027 CAIE syllabus, mark schemes and examiner reports
               </p>
             </div>
           </div>
@@ -214,14 +214,14 @@ export const AIChatTutor: React.FC<AIChatTutorProps> = ({ user, initialTopicQuer
 
         {/* Action Controls & Tier Selector */}
         <div className="flex flex-wrap items-center gap-2.5">
-          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-semibold">
-            <span className="px-2 text-slate-400 text-[11px]">Tier:</span>
+          <div className="flex items-center bg-[#FDFBF7] p-1 rounded-xl border border-black text-xs font-semibold">
+            <span className="px-2 text-slate-600 text-[11px]">Tier:</span>
             <button
               onClick={() => setActiveTier('Core')}
               className={`px-2.5 py-1 rounded-lg transition ${
                 activeTier === 'Core'
-                  ? 'bg-amber-500 text-slate-950 font-bold shadow-xs'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-amber-600 text-white font-bold shadow-xs'
+                  : 'text-slate-700 hover:text-black'
               }`}
             >
               Core (C–G)
@@ -230,8 +230,8 @@ export const AIChatTutor: React.FC<AIChatTutorProps> = ({ user, initialTopicQuer
               onClick={() => setActiveTier('Extended')}
               className={`px-2.5 py-1 rounded-lg transition ${
                 activeTier === 'Extended'
-                  ? 'bg-emerald-500 text-slate-950 font-bold shadow-xs'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-emerald-600 text-white font-bold shadow-xs'
+                  : 'text-slate-700 hover:text-black'
               }`}
             >
               Extended (A*–C)
@@ -240,30 +240,30 @@ export const AIChatTutor: React.FC<AIChatTutorProps> = ({ user, initialTopicQuer
 
           <button
             onClick={handleClear}
-            className="text-xs px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/80 font-medium flex items-center gap-1.5 transition"
+            className="text-xs px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-black font-semibold flex items-center gap-1.5 transition shadow-xs"
             title="Clear Chat History"
           >
-            <Trash2 className="w-3.5 h-3.5 text-slate-400" />
+            <Trash2 className="w-3.5 h-3.5 text-slate-600" />
             <span>Clear</span>
           </button>
         </div>
       </div>
 
       {/* Subject Filter Pills */}
-      <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+      <div className="bg-white border border-[#E2E8F0] rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs shadow-xs">
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mr-1">
-            <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
+          <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1 mr-1">
+            <BookOpen className="w-3.5 h-3.5 text-emerald-700" />
             Focus Subject:
           </span>
           {(['All', 'Biology', 'Chemistry', 'Physics', 'Practical'] as SubjectFilter[]).map(subj => (
             <button
               key={subj}
               onClick={() => setSelectedSubject(subj)}
-              className={`px-3 py-1 rounded-lg font-medium transition ${
+              className={`px-3 py-1 rounded-lg font-semibold transition ${
                 selectedSubject === subj
-                  ? 'bg-indigo-600 text-white font-bold shadow-xs'
-                  : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white'
+                  ? 'bg-emerald-600 text-white font-bold shadow-xs'
+                  : 'bg-[#FDFBF7] text-slate-700 border border-slate-300 hover:border-black hover:text-black'
               }`}
             >
               {subj}
@@ -273,28 +273,28 @@ export const AIChatTutor: React.FC<AIChatTutorProps> = ({ user, initialTopicQuer
 
         {/* Prompt Templates */}
         <div className="flex items-center gap-1 flex-wrap">
-          <span className="text-[10px] text-slate-500 font-medium mr-1">Templates:</span>
+          <span className="text-[10px] text-slate-600 font-semibold mr-1">Templates:</span>
           <button
             onClick={() => applyTemplate('explain')}
-            className="px-2 py-0.5 rounded text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+            className="px-2 py-0.5 rounded text-[11px] bg-[#FDFBF7] border border-black text-slate-800 hover:bg-slate-100 font-semibold transition"
           >
             Explain
           </button>
           <button
             onClick={() => applyTemplate('model')}
-            className="px-2 py-0.5 rounded text-[11px] bg-slate-800 hover:bg-slate-700 text-emerald-300 transition"
+            className="px-2 py-0.5 rounded text-[11px] bg-[#FDFBF7] border border-black text-slate-800 hover:bg-slate-100 font-semibold transition"
           >
             Model Answer
           </button>
           <button
             onClick={() => applyTemplate('calc')}
-            className="px-2 py-0.5 rounded text-[11px] bg-slate-800 hover:bg-slate-700 text-amber-300 transition"
+            className="px-2 py-0.5 rounded text-[11px] bg-[#FDFBF7] border border-black text-slate-800 hover:bg-slate-100 font-semibold transition"
           >
             Calculation
           </button>
           <button
             onClick={() => applyTemplate('pitfalls')}
-            className="px-2 py-0.5 rounded text-[11px] bg-slate-800 hover:bg-slate-700 text-rose-300 transition"
+            className="px-2 py-0.5 rounded text-[11px] bg-[#FDFBF7] border border-black text-slate-800 hover:bg-slate-100 font-semibold transition"
           >
             Examiner Traps
           </button>
@@ -302,9 +302,9 @@ export const AIChatTutor: React.FC<AIChatTutorProps> = ({ user, initialTopicQuer
       </div>
 
       {/* Suggested Quick Questions */}
-      <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-2">
-        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-          <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
+      <div className="bg-[#FDFBF7] border border-[#E2E8F0] rounded-xl p-3.5 space-y-2">
+        <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+          <Lightbulb className="w-3.5 h-3.5 text-amber-600" />
           Suggested {selectedSubject === 'All' ? 'Cambridge 0653' : selectedSubject} Questions
         </span>
         <div className="flex flex-wrap gap-1.5">
@@ -313,7 +313,7 @@ export const AIChatTutor: React.FC<AIChatTutorProps> = ({ user, initialTopicQuer
               key={i}
               onClick={() => handleSend(p)}
               disabled={isLoading}
-              className="text-xs text-left px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 hover:border-slate-600 border border-slate-700/80 text-slate-200 transition"
+              className="text-xs text-left px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 hover:border-black border border-slate-300 text-slate-800 font-medium transition shadow-xs"
             >
               {p}
             </button>
@@ -322,9 +322,9 @@ export const AIChatTutor: React.FC<AIChatTutorProps> = ({ user, initialTopicQuer
       </div>
 
       {/* Chat Conversation Box */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl flex flex-col min-h-[520px] max-h-[700px]">
+      <div className="bg-white border border-[#E2E8F0] rounded-2xl overflow-hidden shadow-xs flex flex-col min-h-[520px] max-h-[700px]">
         {/* Messages Stream */}
-        <div className="flex-1 p-4 sm:p-6 overflow-y-auto space-y-4">
+        <div className="flex-1 p-4 sm:p-6 overflow-y-auto space-y-4 bg-slate-50/50">
           {messages.map(msg => {
             const isUser = msg.role === 'user';
             return (
@@ -332,18 +332,18 @@ export const AIChatTutor: React.FC<AIChatTutorProps> = ({ user, initialTopicQuer
                 key={msg.id}
                 className={`flex items-start gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
               >
-                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 font-bold ${
                   isUser 
-                    ? 'bg-emerald-600 text-white' 
-                    : 'bg-gradient-to-tr from-indigo-600 to-purple-600 text-white shadow-md'
+                    ? 'bg-slate-800 text-white shadow-xs' 
+                    : 'bg-emerald-600 text-white shadow-xs'
                 }`}>
                   {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
                 </div>
 
-                <div className={`group relative max-w-[85%] sm:max-w-[78%] rounded-2xl p-4 text-xs sm:text-sm space-y-2 shadow-sm leading-relaxed ${
+                <div className={`group relative max-w-[85%] sm:max-w-[78%] rounded-2xl p-4 text-xs sm:text-sm space-y-2 shadow-xs leading-relaxed ${
                   isUser
-                    ? 'bg-emerald-600 text-white rounded-tr-none'
-                    : 'bg-slate-800/90 border border-slate-700/70 text-slate-100 rounded-tl-none'
+                    ? 'bg-[#EBF3F5] text-slate-900 border border-teal-200 rounded-tr-none font-medium'
+                    : 'bg-[#FDFBF7] border border-[#E2E8F0] text-slate-900 rounded-tl-none'
                 }`}>
                   {/* Rich Formatted Message Body */}
                   <div className="space-y-2">
@@ -351,12 +351,12 @@ export const AIChatTutor: React.FC<AIChatTutorProps> = ({ user, initialTopicQuer
                   </div>
 
                   <div className={`flex items-center justify-between text-[10px] pt-1.5 border-t ${
-                    isUser ? 'border-emerald-500/40 text-emerald-200' : 'border-slate-700/60 text-slate-400'
+                    isUser ? 'border-teal-200/80 text-slate-600 font-medium' : 'border-slate-200 text-slate-600 font-medium'
                   }`}>
                     <div className="flex items-center gap-1.5">
                       <span>{msg.timestamp}</span>
                       {!isUser && (
-                        <span className="px-1.5 py-0.2 rounded bg-indigo-950/60 text-indigo-300 font-mono text-[9px] border border-indigo-800/40">
+                        <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 font-mono text-[9px] border border-emerald-300 font-bold">
                           0653 AI Tutor
                         </span>
                       )}
@@ -365,13 +365,13 @@ export const AIChatTutor: React.FC<AIChatTutorProps> = ({ user, initialTopicQuer
                     {!isUser && (
                       <button
                         onClick={() => handleCopy(msg.id, msg.content)}
-                        className="opacity-60 hover:opacity-100 transition flex items-center gap-1 text-[10px] text-slate-400 hover:text-white"
+                        className="opacity-80 hover:opacity-100 transition flex items-center gap-1 text-[10px] text-slate-600 hover:text-black font-semibold"
                         title="Copy to clipboard"
                       >
                         {copiedMessageId === msg.id ? (
                           <>
-                            <Check className="w-3 h-3 text-emerald-400" />
-                            <span className="text-emerald-400">Copied</span>
+                            <Check className="w-3 h-3 text-emerald-700" />
+                            <span className="text-emerald-700 font-bold">Copied</span>
                           </>
                         ) : (
                           <>
@@ -389,28 +389,28 @@ export const AIChatTutor: React.FC<AIChatTutorProps> = ({ user, initialTopicQuer
 
           {isLoading && (
             <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 animate-pulse">
+              <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 animate-pulse">
                 <Bot className="w-4 h-4" />
               </div>
-              <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl rounded-tl-none p-4 text-xs text-slate-300 flex items-center gap-2.5">
-                <RefreshCw className="w-4 h-4 animate-spin text-indigo-400" />
+              <div className="bg-[#FDFBF7] border border-[#E2E8F0] rounded-2xl rounded-tl-none p-4 text-xs text-slate-800 flex items-center gap-2.5 shadow-xs">
+                <RefreshCw className="w-4 h-4 animate-spin text-emerald-700" />
                 <div className="space-y-0.5">
-                  <p className="font-semibold text-white">Consulting Cambridge 0653 Syllabus & Mark Scheme Database...</p>
-                  <p className="text-[11px] text-slate-400">Verifying syllabus requirements for {activeTier} tier</p>
+                  <p className="font-bold text-slate-900">Consulting Cambridge 0653 syllabus and mark schemes...</p>
+                  <p className="text-[11px] text-slate-600 font-medium">Verifying syllabus requirements for {activeTier} tier</p>
                 </div>
               </div>
             </div>
           )}
 
           {lastQueryFailed && (
-            <div className="p-3 bg-amber-950/30 border border-amber-500/30 rounded-xl text-xs text-amber-300 flex items-center justify-between gap-2">
+            <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 flex items-center justify-between gap-2 shadow-xs">
               <div className="flex items-center gap-2">
-                <RotateCcw className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>Offline syllabus archive provided for your query. Click retry to query live AI again.</span>
+                <RotateCcw className="w-4 h-4 text-amber-700 shrink-0" />
+                <span className="font-medium">Offline syllabus archive provided for your query. Click retry to query live AI again.</span>
               </div>
               <button
                 onClick={() => handleSend(lastQueryFailed)}
-                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs shrink-0 transition"
+                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs shrink-0 transition"
               >
                 Retry Live AI
               </button>
@@ -421,7 +421,7 @@ export const AIChatTutor: React.FC<AIChatTutorProps> = ({ user, initialTopicQuer
         </div>
 
         {/* Input Bar */}
-        <div className="p-4 bg-slate-950/80 border-t border-slate-800">
+        <div className="p-4 bg-white border-t border-[#E2E8F0]">
           <form
             onSubmit={e => {
               e.preventDefault();
@@ -433,20 +433,20 @@ export const AIChatTutor: React.FC<AIChatTutorProps> = ({ user, initialTopicQuer
               type="text"
               value={input}
               onChange={e => setInput(e.target.value)}
-              placeholder={`Ask any 0653 question (e.g. "Explain electrolysis of aqueous NaCl", "What are the 4 food tests?", "Calculate acceleration when F=12N, m=3kg")...`}
-              className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
+              placeholder="Ask any 0653 question (e.g. explain electrolysis of aqueous NaCl, calculate acceleration when F=12N)..."
+              className="flex-1 bg-[#FDFBF7] border-2 border-black rounded-xl px-4 py-3 text-sm text-slate-900 font-medium placeholder-slate-500 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 transition"
             />
             <button
               type="submit"
               disabled={!input.trim() || isLoading}
-              className="p-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl shadow-md transition shrink-0"
+              className="p-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl shadow-xs transition shrink-0 font-bold"
             >
               <Send className="w-4 h-4" />
             </button>
           </form>
-          <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Cambridge 0653 Core & Extended Syllabus Coverage</span>
-            <span className="font-mono text-[10px] text-emerald-400">● Live AI Tutor Connected</span>
+          <div className="mt-2 flex items-center justify-between text-[11px] text-slate-600 font-medium">
+            <span>Cambridge 0653 Core and Extended syllabus coverage</span>
+            <span className="font-semibold text-[11px] text-emerald-700">● Live AI Tutor Connected</span>
           </div>
         </div>
       </div>
@@ -468,8 +468,8 @@ function renderFormattedText(text: string) {
     // Headers
     if (trimmed.startsWith('### ')) {
       return (
-        <h3 key={idx} className="text-sm sm:text-base font-bold text-emerald-300 mt-2 mb-1 flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+        <h3 key={idx} className="text-sm sm:text-base font-bold text-emerald-800 mt-2 mb-1 flex items-center gap-1.5">
+          <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
           <span>{trimmed.replace('### ', '')}</span>
         </h3>
       );
@@ -477,7 +477,7 @@ function renderFormattedText(text: string) {
 
     if (trimmed.startsWith('## ')) {
       return (
-        <h2 key={idx} className="text-base font-bold text-white mt-2 mb-1">
+        <h2 key={idx} className="text-base font-bold text-slate-900 mt-2 mb-1">
           {trimmed.replace('## ', '')}
         </h2>
       );
@@ -486,8 +486,8 @@ function renderFormattedText(text: string) {
     // Exam Tips & Mark Scheme Notes
     if (trimmed.toLowerCase().includes('exam tip:') || trimmed.toLowerCase().includes('examiner tip:')) {
       return (
-        <div key={idx} className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-emerald-200 text-xs my-1.5 flex items-start gap-2">
-          <Award className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+        <div key={idx} className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs my-1.5 flex items-start gap-2 font-medium">
+          <Award className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
           <div>{formatBoldText(trimmed)}</div>
         </div>
       );
@@ -498,8 +498,8 @@ function renderFormattedText(text: string) {
       const content = trimmed.substring(2);
       return (
         <div key={idx} className="flex items-start gap-2 pl-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
-          <div className="flex-1">{formatBoldText(content)}</div>
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 mt-1.5 shrink-0" />
+          <div className="flex-1 text-slate-800">{formatBoldText(content)}</div>
         </div>
       );
     }
@@ -509,20 +509,20 @@ function renderFormattedText(text: string) {
     if (numMatch) {
       return (
         <div key={idx} className="flex items-start gap-2 pl-2">
-          <span className="font-bold text-indigo-400 shrink-0 text-xs">{numMatch[1]}.</span>
-          <div className="flex-1">{formatBoldText(numMatch[2])}</div>
+          <span className="font-bold text-slate-900 shrink-0 text-xs">{numMatch[1]}.</span>
+          <div className="flex-1 text-slate-800">{formatBoldText(numMatch[2])}</div>
         </div>
       );
     }
 
     // Horizontal Rule
     if (trimmed === '---' || trimmed === '***') {
-      return <hr key={idx} className="border-slate-700/60 my-2" />;
+      return <hr key={idx} className="border-[#E2E8F0] my-2" />;
     }
 
     // Regular line with bold formatting
     return (
-      <div key={idx} className="leading-relaxed">
+      <div key={idx} className="leading-relaxed text-slate-800">
         {formatBoldText(trimmed)}
       </div>
     );
@@ -536,14 +536,14 @@ function formatBoldText(str: string) {
   return parts.map((part, index) => {
     if (part.startsWith('**') && part.endsWith('**')) {
       return (
-        <strong key={index} className="font-bold text-white tracking-wide">
+        <strong key={index} className="font-bold text-slate-900 tracking-wide">
           {part.slice(2, -2)}
         </strong>
       );
     }
     if (part.startsWith('`') && part.endsWith('`')) {
       return (
-        <code key={index} className="px-1.5 py-0.5 rounded bg-slate-900 text-indigo-300 font-mono text-[11px] border border-slate-700">
+        <code key={index} className="px-1.5 py-0.5 rounded bg-[#FDFBF7] text-slate-900 font-mono text-[11px] border border-slate-300 font-bold">
           {part.slice(1, -1)}
         </code>
       );

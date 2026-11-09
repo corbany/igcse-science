@@ -89,80 +89,55 @@ export const Navbar: React.FC<NavbarProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const toggleTier = () => {
-    setUser(prev => ({
-      ...prev,
-      tier: prev.tier === 'Extended' ? 'Core' : 'Extended'
-    }));
-  };
-
   const isStudent = user.role === 'student' || isPreviewingAsStudent;
   const isExtraStudentTab = currentTab === 'schedule' || currentTab === 'recommendations' || currentTab === 'guidelines';
 
   return (
-    <header className={`sticky top-0 z-50 border-b shadow-sm transition-colors duration-200 ${
-      theme === 'dark' ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
-    }`}>
+    <header className={`sticky top-0 z-50 border-b shadow-xs transition-colors duration-150 ${theme === 'dark' ? 'border-zinc-800 bg-black text-slate-100' : 'border-slate-200 bg-[#FDFBF7] text-slate-800'}`}>
       {/* Top Banner with branding & role distinction */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 gap-3">
           {/* Logo & Syllabus identifier */}
-          <div className="flex items-center gap-3 cursor-pointer shrink-0" onClick={() => setCurrentTab(isStudent ? 'lessons' : 'instructor')}>
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-md transition ${
-              isStudent 
-                ? 'bg-gradient-to-tr from-emerald-500 to-teal-400 shadow-emerald-500/20' 
-                : 'bg-gradient-to-tr from-purple-600 to-indigo-500 shadow-purple-500/20'
-            }`}>
+          <div className="flex items-center gap-3 cursor-pointer shrink-0" onClick={() => setCurrentTab('dashboard')}>
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-[#EBF3F5] border border-slate-300 text-slate-800">
               {isStudent ? (
-                <GraduationCap className="w-6 h-6 text-slate-950 font-bold" />
+                <GraduationCap className="w-6 h-6 text-slate-800" />
               ) : (
-                <LayoutDashboard className="w-5 h-5 text-white font-bold" />
+                <LayoutDashboard className="w-5 h-5 text-slate-800" />
               )}
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className={`font-black text-base sm:text-lg tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                <span className="font-bold text-base sm:text-lg text-slate-800 tracking-tight">
                   IGCSE Science 0653
                 </span>
-                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
-                  isStudent
-                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                    : 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30'
-                }`}>
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-white text-slate-700 border border-slate-300">
                   {isPreviewingAsStudent 
-                    ? 'Student Space (Preview)' 
-                    : isStudent ? 'Student Space' : 'Instructor Space'}
+                    ? 'Student Mode (Preview)' 
+                    : isStudent ? 'Student Mode' : 'Instructor Mode'}
                 </span>
               </div>
-              <p className={`text-[11px] hidden sm:block ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
-                {isStudent ? 'Interactive Slide Decks, Practice Quizzes & Class Progress' : 'Teaching Hub, Drive Sync & Class Tracking'}
+              <p className="text-xs text-slate-600 hidden sm:block">
+                {isStudent ? 'Slide Decks, Practice Quizzes and Tasks' : 'Class Teaching Hub and Progress Tracker'}
               </p>
             </div>
           </div>
 
-          {/* Search bar */}
+          {/* Search bar with crisp black border */}
           <div className="flex-1 max-w-md mx-2 hidden md:block">
             <div className="relative">
-              <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`} />
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder={isStudent ? "Search topics, slides, or keywords (e.g. B1, B2 Cells, C2)..." : "Search topics, syllabus codes, slides..."}
-                className={`w-full pl-9 pr-4 py-1.5 rounded-lg text-sm transition focus:outline-none focus:ring-2 ${
-                  isStudent ? 'focus:ring-emerald-500' : 'focus:ring-purple-500'
-                } ${
-                  theme === 'dark'
-                    ? 'bg-slate-800 border border-slate-700 text-slate-200 placeholder-slate-400'
-                    : 'bg-slate-100 border border-slate-300 text-slate-900 placeholder-slate-500'
-                }`}
+                placeholder={isStudent ? "Search topics or slides (e.g. B1, Cells, C2)..." : "Search topics, codes, slides..."}
+                className="w-full pl-9 pr-4 py-1.5 text-sm"
               />
               {searchQuery && (
                 <button 
                   onClick={() => setSearchQuery('')}
-                  className={`absolute right-2.5 top-1/2 -translate-y-1/2 text-xs ${
-                    theme === 'dark' ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'
-                  }`}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-600 hover:text-black font-bold"
                 >
                   Clear
                 </button>
@@ -171,32 +146,22 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Right Action Bar */}
-          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             {/* Role Indicator / Mode Controls */}
             {isStudent ? (
-              /* STUDENT (or INSTRUCTOR PREVIEWING STUDENT) */
-              <div className="flex items-center gap-1.5">
-                <div className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold ${
-                  theme === 'dark' ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                }`}>
-                  <GraduationCap className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>{isPreviewingAsStudent ? 'Student Mode (Preview)' : 'Student Mode'}</span>
-                </div>
-
+              /* STUDENT */
+              <div className="flex items-center gap-2">
                 <button
                   onClick={() => setCurrentTab('leaderboard')}
-                  title="View Class Leaderboard & Compare Ranks"
-                  className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs ${
+                  title="View Class Leaderboard"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer ${
                     currentTab === 'leaderboard'
-                      ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-amber-500/20'
-                      : theme === 'dark'
-                        ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
-                        : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                      ? 'bg-slate-800 text-white border-slate-800 shadow-xs'
+                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
                   }`}
                 >
-                  <Trophy className={`w-3.5 h-3.5 ${currentTab === 'leaderboard' ? 'fill-slate-950 text-slate-950' : 'text-amber-400'}`} />
-                  <span className="hidden sm:inline">Leaderboard</span>
-                  <span className="sm:hidden">Ranks</span>
+                  <Trophy className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Leaderboard</span>
                 </button>
 
                 <button
@@ -229,17 +194,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             ) : (
               /* INSTRUCTOR: Mode switcher between Teaching Hub and Preview Student View */
-              <div className={`flex items-center p-1 rounded-xl border transition ${
-                theme === 'dark' ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-100 border-slate-300'
-              }`}>
+              <div className="flex items-center p-1 rounded-xl border-2 border-black dark:border-white bg-[#FDFBF7] dark:bg-black transition">
                 <button
                   onClick={() => setCurrentTab('instructor')}
                   className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-lg text-xs font-bold transition ${
                     currentTab === 'instructor'
-                      ? 'bg-purple-600 text-white shadow-xs'
-                      : theme === 'dark'
-                        ? 'text-purple-300 hover:text-white'
-                        : 'text-purple-700 hover:text-purple-950'
+                      ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-xs'
+                      : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white'
                   }`}
                   title="Teaching Hub with integrated Classes, Tasks & Cohort Progress"
                 >
@@ -251,12 +212,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={onEnterStudentPreview}
                   className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
                     theme === 'dark'
-                      ? 'text-emerald-400 hover:bg-emerald-950/40 hover:text-emerald-300'
-                      : 'text-emerald-700 hover:bg-emerald-50 hover:text-emerald-950'
+                      ? 'text-emerald-400 hover:bg-zinc-800 hover:text-emerald-300'
+                      : 'text-emerald-800 hover:bg-emerald-50 hover:text-emerald-950'
                   }`}
                   title="Preview exact page and tabs a student would see"
                 >
-                  <GraduationCap className="w-3.5 h-3.5 text-emerald-400" />
+                  <GraduationCap className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                   <span>Preview Student</span>
                 </button>
               </div>
@@ -338,27 +299,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* Curriculum Tier button */}
-            <button
-              onClick={toggleTier}
-              title="Toggle Core vs Extended curriculum tier"
-              className={`text-xs px-2.5 py-1.5 rounded-lg border font-semibold transition hidden sm:flex items-center gap-1.5 ${
-                user.tier === 'Extended' 
-                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-600 dark:text-amber-300 hover:bg-amber-500/25' 
-                  : 'bg-blue-500/15 border-blue-500/40 text-blue-600 dark:text-blue-300 hover:bg-blue-500/25'
-              }`}
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>{user.tier} Tier</span>
-            </button>
-
             {/* Global Light / Dark Mode toggle */}
             <button
               onClick={onToggleTheme}
               title={`Switch entire website to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
               className={`text-xs p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg border font-semibold transition flex items-center gap-1 shadow-xs ${
                 theme === 'dark'
-                  ? 'bg-slate-800 border-slate-700 text-amber-300 hover:bg-slate-700'
+                  ? 'bg-zinc-900 border-zinc-700 text-amber-300 hover:bg-zinc-800'
                   : 'bg-slate-100 border-slate-300 text-slate-800 hover:bg-slate-200'
               }`}
             >
@@ -382,7 +329,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 title={`Sign out (${user.email})`}
                 className={`text-xs p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg border font-semibold transition flex items-center gap-1.5 shadow-xs ${
                   theme === 'dark'
-                    ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-rose-400 hover:border-rose-500/40'
+                    ? 'bg-zinc-900 border-zinc-700 text-slate-300 hover:text-rose-400 hover:border-rose-500/40'
                     : 'bg-slate-100 border-slate-300 text-slate-700 hover:text-rose-600 hover:border-rose-400'
                 }`}
               >
@@ -409,137 +356,129 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Main Navigation Bar: Symmetrical, responsive, zero-horizontal-scroll */}
-      <nav className={`border-t px-2 sm:px-4 lg:px-8 py-2 transition-colors duration-200 ${
-        theme === 'dark' ? 'bg-slate-950/90 border-slate-800/80' : 'bg-slate-50 border-slate-200'
-      }`}>
+      <nav className={`border-t px-2 sm:px-4 lg:px-8 py-2 transition-colors duration-150 ${theme === 'dark' ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-[#FDFBF7]'}`}>
         <div className="max-w-7xl mx-auto">
-          {/* Navigation Grid: 8 columns for student mode (and preview), 7 columns for instructor */}
+          {/* Navigation Grid */}
           <div className={`grid ${isStudent ? 'grid-cols-4 lg:grid-cols-8' : 'grid-cols-3 sm:grid-cols-4 lg:grid-cols-7'} gap-1.5 sm:gap-2`}>
             {isStudent ? (
-              /* ============================================================== */
-              /* EXACT 8 STUDENT TABS (SHOWN TO STUDENTS & IN PREVIEW MODE)     */
-              /* ============================================================== */
+              /* EXACT 8 STUDENT TABS WITH DASHBOARD AND TASK VIEW */
               <>
-                {/* 1. Lesson Slides */}
+                {/* 1. Dashboard */}
                 <button
-                  onClick={() => setCurrentTab('lessons')}
-                  title="Lesson Slides & Cambridge Syllabus Objectives"
-                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
-                    currentTab === 'lessons'
-                      ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50'
-                      : theme === 'dark'
-                        ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
-                        : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                  onClick={() => setCurrentTab('dashboard')}
+                  title="Dashboard Overview"
+                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition select-none cursor-pointer ${
+                    currentTab === 'dashboard'
+                      ? 'bg-slate-800 text-white shadow-xs'
+                      : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
                   }`}
                 >
-                  <BookOpen className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                  <span className="truncate">Lesson Slides</span>
+                  <LayoutDashboard className="w-4 h-4 shrink-0" />
+                  <span className="truncate">Dashboard</span>
                 </button>
 
-                {/* 2. Practice Quizzes */}
+                {/* 2. Task View / Assignments */}
                 <button
-                  onClick={() => setCurrentTab('quizzes')}
-                  title="10-Question Green Light Practice Quizzes"
-                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
-                    currentTab === 'quizzes'
-                      ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50'
-                      : theme === 'dark'
-                        ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
-                        : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
-                  }`}
-                >
-                  <Award className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                  <span className="truncate">Practice Quizzes</span>
-                </button>
-
-                {/* 3. Past Exam Papers */}
-                <button
-                  onClick={() => setCurrentTab('exams')}
-                  title="Past Exam Papers Vault & Mark Schemes"
-                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
-                    currentTab === 'exams'
-                      ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50'
-                      : theme === 'dark'
-                        ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
-                        : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
-                  }`}
-                >
-                  <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                  <span className="truncate">Past Exam Papers</span>
-                </button>
-
-                {/* 4. Syllabus Notebook */}
-                <button
-                  onClick={() => setCurrentTab('notebook')}
-                  title="Syllabus Notebook & Personal Notes"
-                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
-                    currentTab === 'notebook'
-                      ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50'
-                      : theme === 'dark'
-                        ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
-                        : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
-                  }`}
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                  <span className="truncate">Syllabus Notebook</span>
-                </button>
-
-                {/* 5. Assignments */}
-                <button
-                  onClick={() => setCurrentTab('assignments')}
-                  title="Assignments, Class Tasks & Homework Set by Teacher"
-                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none relative ${
-                    currentTab === 'assignments'
-                      ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50'
+                  onClick={() => setCurrentTab('tasks')}
+                  title="Task View and Assigned Homework"
+                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition select-none cursor-pointer relative ${
+                    currentTab === 'tasks' || currentTab === 'assignments'
+                      ? 'bg-slate-800 text-white shadow-xs'
                       : (pendingTasksCount || 0) > 0
-                        ? theme === 'dark'
-                          ? 'text-amber-300 hover:text-white hover:bg-slate-800/80 bg-amber-950/30 border border-amber-500/40 shadow-xs'
-                          : 'text-amber-900 hover:text-slate-950 hover:bg-amber-100/80 bg-amber-50 border border-amber-300'
-                        : theme === 'dark'
-                          ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
-                          : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                        ? 'bg-[#EBF3F5] text-slate-800 border border-slate-400'
+                        : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
                   }`}
                 >
-                  <ClipboardCheck className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${
-                    (pendingTasksCount || 0) > 0 ? 'text-amber-400' : 'text-emerald-400'
-                  }`} />
-                  <span className="truncate font-semibold">Assignments</span>
+                  <ClipboardCheck className="w-4 h-4 shrink-0 text-slate-700" />
+                  <span className="truncate">Task View</span>
                   {(pendingTasksCount || 0) > 0 && (
-                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-amber-400 text-slate-950 shadow-xs animate-pulse shrink-0">
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-400 text-slate-900 shrink-0">
                       {pendingTasksCount}
                     </span>
                   )}
                 </button>
 
-                {/* 6. My Progress */}
+                {/* 3. Lesson Slides */}
+                <button
+                  onClick={() => setCurrentTab('lessons')}
+                  title="Lesson Slides & Cambridge Syllabus Objectives"
+                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition select-none cursor-pointer ${
+                    currentTab === 'lessons'
+                      ? 'bg-slate-800 text-white shadow-xs'
+                      : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
+                  }`}
+                >
+                  <BookOpen className="w-4 h-4 shrink-0" />
+                  <span className="truncate">Lesson Slides</span>
+                </button>
+
+                {/* 4. Practice Quizzes */}
+                <button
+                  onClick={() => setCurrentTab('quizzes')}
+                  title="10-Question Green Light Practice Quizzes"
+                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition select-none cursor-pointer ${
+                    currentTab === 'quizzes'
+                      ? 'bg-slate-800 text-white shadow-xs'
+                      : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
+                  }`}
+                >
+                  <Award className="w-4 h-4 shrink-0" />
+                  <span className="truncate">Practice Quizzes</span>
+                </button>
+
+                {/* 5. Past Exam Papers */}
+                <button
+                  onClick={() => setCurrentTab('exams')}
+                  title="Past Exam Papers Vault & Mark Schemes"
+                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition select-none cursor-pointer ${
+                    currentTab === 'exams'
+                      ? 'bg-slate-800 text-white shadow-xs'
+                      : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
+                  }`}
+                >
+                  <FileText className="w-4 h-4 shrink-0" />
+                  <span className="truncate">Past Papers</span>
+                </button>
+
+                {/* 6. Game Arena */}
+                <button
+                  onClick={() => setCurrentTab('royale')}
+                  title="Revision Royale & Battle Arena"
+                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition select-none cursor-pointer ${
+                    currentTab === 'royale'
+                      ? 'bg-slate-800 text-white shadow-xs'
+                      : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
+                  }`}
+                >
+                  <ShoppingBag className="w-4 h-4 shrink-0" />
+                  <span className="truncate">Game Arena</span>
+                </button>
+
+                {/* 7. My Progress */}
                 <button
                   onClick={() => setCurrentTab('tracker')}
                   title="My Progress, Traffic Lights & Confidence Ratings"
-                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition select-none cursor-pointer ${
                     currentTab === 'tracker'
-                      ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50'
-                      : theme === 'dark'
-                        ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
-                        : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                      ? 'bg-slate-800 text-white shadow-xs'
+                      : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
                   }`}
                 >
-                  <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                  <BarChart3 className="w-4 h-4 shrink-0" />
                   <span className="truncate">My Progress</span>
                 </button>
 
-                {/* 7. My Classes */}
+                {/* 8. My Classes */}
                 <button
                   onClick={() => setCurrentTab('classes')}
                   title="My Classes & Class Code Enrollment"
-                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition select-none cursor-pointer ${
                     currentTab === 'classes'
-                      ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50'
-                      : theme === 'dark'
-                        ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
-                        : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                      ? 'bg-slate-800 text-white shadow-xs'
+                      : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
                   }`}
                 >
-                  <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400 shrink-0" />
+                  <Users className="w-4 h-4 shrink-0" />
                   <span className="truncate">My Classes</span>
                 </button>
               </>
@@ -555,13 +494,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                   title="Teaching Hub: My Classes, Class Tasks & Cohort Progress"
                   className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
                     currentTab === 'instructor'
-                      ? 'bg-purple-600 text-white font-semibold shadow-xs ring-1 ring-purple-500/50'
-                      : theme === 'dark'
-                        ? 'text-purple-300 hover:text-white hover:bg-slate-800/80 bg-purple-950/30 border border-purple-500/20'
-                        : 'text-purple-800 hover:text-purple-950 hover:bg-purple-100/80 bg-purple-50 border border-purple-200'
+                      ? 'bg-slate-900 text-white dark:bg-white dark:text-black font-semibold shadow-xs border border-black'
+                      : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white hover:bg-slate-200 dark:hover:bg-zinc-800'
                   }`}
                 >
-                  <LayoutDashboard className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-400 shrink-0" />
+                  <LayoutDashboard className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
                   <span className="truncate">Teaching Hub</span>
                 </button>
 

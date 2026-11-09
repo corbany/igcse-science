@@ -706,38 +706,38 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
     if (active && payload && payload.length) {
       const data = payload[0].payload;
       return (
-        <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl p-3 shadow-2xl text-xs space-y-1.5 min-w-[170px]">
-          <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-1.5">
-            <span className="font-bold text-white">{data.day}</span>
+        <div className="bg-white border-2 border-black rounded-xl p-3 shadow-md text-xs space-y-1.5 min-w-[170px] text-slate-800">
+          <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-1.5">
+            <span className="font-bold text-slate-900">{data.day}</span>
             {data.topicCode && (
-              <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+              <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
                 {data.topicCode}
               </span>
             )}
           </div>
           {data.topicTitle && (
-            <p className="text-[11px] text-slate-300 line-clamp-1">{data.topicTitle}</p>
+            <p className="text-[11px] text-slate-600 line-clamp-1">{data.topicTitle}</p>
           )}
-          <div className="flex items-center justify-between text-slate-300 pt-0.5">
-            <span className="text-slate-400">Completed:</span>
-            <span className="font-mono font-bold text-emerald-400">
+          <div className="flex items-center justify-between text-slate-700 pt-0.5">
+            <span className="text-slate-500">Completed:</span>
+            <span className="font-mono font-bold text-emerald-700">
               {data.completed} / {data.total} tasks
             </span>
           </div>
-          <div className="flex items-center justify-between text-slate-400 text-[11px]">
+          <div className="flex items-center justify-between text-slate-500 text-[11px]">
             <span>Consistency Rate:</span>
-            <span className="font-mono font-semibold text-slate-200">
+            <span className="font-mono font-semibold text-slate-800">
               {data.percentage}%
             </span>
           </div>
-          <div className="pt-1 text-[10px] text-slate-400 flex items-center gap-1 font-medium">
+          <div className="pt-1 text-[10px] text-slate-600 flex items-center gap-1 font-medium">
             {data.isFull ? (
-              <span className="text-emerald-400 flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3" /> All tasks completed!
+              <span className="text-emerald-700 flex items-center gap-1 font-bold">
+                <CheckCircle2 className="w-3 h-3 text-emerald-600" /> All tasks completed!
               </span>
             ) : data.hasWork ? (
-              <span className="text-cyan-400 flex items-center gap-1">
-                <Sparkles className="w-3 h-3" /> In progress
+              <span className="text-teal-700 flex items-center gap-1 font-bold">
+                <Sparkles className="w-3 h-3 text-teal-600" /> In progress
               </span>
             ) : (
               <span className="text-slate-500">Target: {data.total} tasks</span>
@@ -876,22 +876,22 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-12">
       {/* Top Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-md flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+      <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col md:flex-row md:items-center md:justify-between gap-5 text-slate-800">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-[#EBF3F5] border border-slate-300 flex items-center justify-center text-teal-700 shrink-0">
               <Calendar className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
                   Multi-Week Revision Roadmap
                 </h1>
-                <span className="text-xs font-bold font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                <span className="text-xs font-bold font-mono px-2.5 py-0.5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800">
                   {weeksUntilExam} Weeks
                 </span>
               </div>
-              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+              <p className="text-xs sm:text-sm text-slate-600 mt-0.5">
                 Targeted Cambridge IGCSE 0653 schedule providing revision work for every single week leading to your exam.
               </p>
             </div>
@@ -900,37 +900,37 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
 
         <div className="flex items-center gap-3 shrink-0 flex-wrap">
           {daysUntilExam !== null && (
-            <div className="px-3.5 py-2 rounded-xl bg-slate-800/80 border border-slate-700/80 text-xs font-semibold text-slate-300 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-amber-400" />
+            <div className="px-3.5 py-2 rounded-xl bg-[#FDFBF7] border border-slate-300 text-xs font-semibold text-slate-700 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-amber-600" />
               <span>
-                <strong className="text-white font-mono text-sm">{daysUntilExam}</strong> days ({weeksUntilExam} weeks)
+                <strong className="text-slate-900 font-mono text-sm">{daysUntilExam}</strong> days ({weeksUntilExam} weeks)
               </span>
             </div>
           )}
 
           <button
             onClick={handleExportSchedule}
-            className="text-xs px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold flex items-center gap-2 transition shadow-sm active:scale-95"
+            className="text-xs px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border-2 border-black font-bold flex items-center gap-2 transition shadow-xs active:scale-95 cursor-pointer"
             title="Download full multi-week schedule as Markdown"
           >
-            <FileDown className="w-4 h-4 text-emerald-400" />
-            <span>Export Full Roadmap (.MD)</span>
+            <FileDown className="w-4 h-4 text-emerald-600" />
+            <span>Export Full Roadmap (.md)</span>
           </button>
         </div>
       </div>
 
       {/* Main Configuration Card */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-md space-y-6">
+      <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-xs space-y-6 text-slate-800">
         {/* Section 1: Weekly Study Target & Exam Timeline */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
           {/* Target Exam Date & Quick Presets */}
           <div className="md:col-span-5 space-y-2.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+              <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Target Exam Date</span>
               </label>
-              <span className="text-[11px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+              <span className="text-[11px] font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300">
                 {weeksUntilExam} weeks left
               </span>
             </div>
@@ -939,12 +939,12 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
               type="date"
               value={examDate}
               onChange={e => setExamDate(e.target.value)}
-              className="w-full bg-slate-800/90 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-medium text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-full bg-[#FDFBF7] border-2 border-black rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
 
             {/* Quick Timeline Presets */}
             <div className="space-y-1">
-              <span className="text-[11px] text-slate-400 font-medium">Quick timeline options:</span>
+              <span className="text-[11px] text-slate-600 font-medium">Quick timeline options:</span>
               <div className="flex flex-wrap gap-1.5">
                 {[
                   { label: '4 Wks', weeks: 4 },
@@ -957,7 +957,7 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                     key={p.weeks}
                     type="button"
                     onClick={() => handleSetExamPreset(p.weeks)}
-                    className="text-[10px] px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:text-white transition font-medium"
+                    className="text-[10px] px-2 py-1 rounded-lg bg-[#FDFBF7] hover:bg-[#EBF3F5] text-slate-800 border border-slate-300 transition font-bold cursor-pointer"
                   >
                     +{p.label}
                   </button>
@@ -966,28 +966,28 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
             </div>
 
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              Every single week until <strong className="text-slate-300 font-mono">{examDate}</strong> is assigned structured Cambridge 0653 daily sessions.
+              Every single week until <strong className="text-slate-800 font-mono">{examDate}</strong> is assigned structured Cambridge 0653 daily sessions.
             </p>
           </div>
 
           {/* Weekly Study Target Selector (Selectable between 1 and 20 hours) */}
           <div className="md:col-span-7 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                <Target className="w-3.5 h-3.5 text-emerald-400" />
+              <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                <Target className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Weekly Study Target</span>
-                <span className="text-[10px] font-normal text-slate-400 normal-case bg-slate-800 px-2 py-0.5 rounded-md border border-slate-700">
+                <span className="text-[10px] font-normal text-slate-600 normal-case bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
                   Select 1 – 20 hrs/week
                 </span>
               </label>
 
               {/* Direct Stepper and Input */}
-              <div className="flex items-center gap-1.5 bg-slate-800/90 border border-slate-700 rounded-xl px-2 py-1">
+              <div className="flex items-center gap-1.5 bg-[#FDFBF7] border-2 border-black rounded-xl px-2 py-1">
                 <button
                   type="button"
                   onClick={() => handleUpdateWeeklyHours(weeklyHours - 0.5)}
                   disabled={weeklyHours <= 1.0}
-                  className="w-6 h-6 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-30 disabled:hover:bg-slate-700 text-slate-200 flex items-center justify-center transition active:scale-95"
+                  className="w-6 h-6 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 disabled:opacity-30 text-slate-800 flex items-center justify-center transition active:scale-95 cursor-pointer"
                   title="Decrease by 0.5 hour"
                   aria-label="Decrease weekly study hours"
                 >
@@ -1001,16 +1001,16 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                     step="0.5"
                     value={weeklyHours}
                     onChange={e => handleUpdateWeeklyHours(parseFloat(e.target.value))}
-                    className="w-14 bg-transparent text-center font-mono text-xs font-bold text-emerald-400 focus:outline-none"
+                    className="w-14 bg-transparent text-center font-mono text-xs font-bold text-slate-900 focus:outline-none"
                     aria-label="Weekly study target hours"
                   />
-                  <span className="text-[11px] font-semibold text-slate-400 pr-1">hrs</span>
+                  <span className="text-[11px] font-semibold text-slate-600 pr-1">hrs</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => handleUpdateWeeklyHours(weeklyHours + 0.5)}
                   disabled={weeklyHours >= 20.0}
-                  className="w-6 h-6 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-30 disabled:hover:bg-slate-700 text-slate-200 flex items-center justify-center transition active:scale-95"
+                  className="w-6 h-6 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 disabled:opacity-30 text-slate-800 flex items-center justify-center transition active:scale-95 cursor-pointer"
                   title="Increase by 0.5 hour"
                   aria-label="Increase weekly study hours"
                 >
@@ -1020,7 +1020,7 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
             </div>
 
             {/* Continuous 1 to 20 Hours Range Slider */}
-            <div className="bg-slate-800/40 border border-slate-800 rounded-xl p-3 space-y-2">
+            <div className="bg-[#FDFBF7] border border-[#E2E8F0] rounded-xl p-3 space-y-2">
               <div className="relative pt-1 pb-1">
                 <input
                   type="range"
@@ -1029,45 +1029,45 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                   step="0.5"
                   value={weeklyHours}
                   onChange={e => handleUpdateWeeklyHours(parseFloat(e.target.value))}
-                  className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500 focus:outline-none"
+                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600 focus:outline-none"
                   aria-label="Weekly study target slider between 1 and 20 hours"
                 />
               </div>
 
               {/* Slider Scale Ticks */}
-              <div className="flex items-center justify-between text-[10px] text-slate-400 font-medium px-0.5">
+              <div className="flex items-center justify-between text-[10px] text-slate-600 font-medium px-0.5">
                 <button
                   type="button"
                   onClick={() => handleUpdateWeeklyHours(1)}
-                  className={`hover:text-emerald-400 transition ${weeklyHours === 1 ? 'text-emerald-400 font-bold' : ''}`}
+                  className={`hover:text-emerald-700 transition cursor-pointer ${weeklyHours === 1 ? 'text-emerald-700 font-bold' : ''}`}
                 >
                   1 hr (Min)
                 </button>
                 <button
                   type="button"
                   onClick={() => handleUpdateWeeklyHours(5)}
-                  className={`hover:text-emerald-400 transition ${weeklyHours === 5 ? 'text-emerald-400 font-bold' : ''}`}
+                  className={`hover:text-emerald-700 transition cursor-pointer ${weeklyHours === 5 ? 'text-emerald-700 font-bold' : ''}`}
                 >
                   5 hrs
                 </button>
                 <button
                   type="button"
                   onClick={() => handleUpdateWeeklyHours(10)}
-                  className={`hover:text-emerald-400 transition ${weeklyHours === 10 ? 'text-emerald-400 font-bold' : ''}`}
+                  className={`hover:text-emerald-700 transition cursor-pointer ${weeklyHours === 10 ? 'text-emerald-700 font-bold' : ''}`}
                 >
                   10 hrs (Recommended)
                 </button>
                 <button
                   type="button"
                   onClick={() => handleUpdateWeeklyHours(15)}
-                  className={`hover:text-emerald-400 transition ${weeklyHours === 15 ? 'text-emerald-400 font-bold' : ''}`}
+                  className={`hover:text-emerald-700 transition cursor-pointer ${weeklyHours === 15 ? 'text-emerald-700 font-bold' : ''}`}
                 >
                   15 hrs
                 </button>
                 <button
                   type="button"
                   onClick={() => handleUpdateWeeklyHours(20)}
-                  className={`hover:text-emerald-400 transition ${weeklyHours === 20 ? 'text-emerald-400 font-bold' : ''}`}
+                  className={`hover:text-emerald-700 transition cursor-pointer ${weeklyHours === 20 ? 'text-emerald-700 font-bold' : ''}`}
                 >
                   20 hrs (Max)
                 </button>
@@ -1087,30 +1087,30 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                   key={preset.val}
                   type="button"
                   onClick={() => handleUpdateWeeklyHours(preset.val)}
-                  className={`py-1.5 px-2 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition ${
+                  className={`py-1.5 px-2 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition cursor-pointer ${
                     weeklyHours === preset.val
-                      ? 'bg-emerald-600/20 border-emerald-500 text-white ring-1 ring-emerald-500 shadow-sm'
-                      : 'bg-slate-800/70 border-slate-700/80 text-slate-300 hover:bg-slate-800 hover:text-white'
+                      ? 'bg-emerald-50 border-2 border-emerald-600 text-emerald-900 shadow-xs'
+                      : 'bg-[#FDFBF7] border-slate-300 text-slate-700 hover:bg-[#EBF3F5]'
                   }`}
                 >
                   <span className="font-bold">{preset.label}</span>
-                  <span className="text-[10px] text-slate-400 font-normal">{preset.desc}</span>
+                  <span className="text-[10px] text-slate-500 font-normal">{preset.desc}</span>
                 </button>
               ))}
             </div>
 
             {/* Study Days & Daily Pace Breakdown */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 rounded-xl bg-slate-800/50 border border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 rounded-xl bg-[#FDFBF7] border border-[#E2E8F0]">
               <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-400 font-medium">Study Days:</span>
-                <div className="inline-flex rounded-lg border border-slate-700 bg-slate-900 p-0.5">
+                <span className="text-xs text-slate-700 font-medium">Study Days:</span>
+                <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5">
                   <button
                     type="button"
                     onClick={() => setStudyDaysPerWeek(5)}
-                    className={`px-2.5 py-1 text-xs rounded-md font-semibold transition ${
+                    className={`px-2.5 py-1 text-xs rounded-md font-semibold transition cursor-pointer ${
                       studyDaysPerWeek === 5
-                        ? 'bg-emerald-600 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-white'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     5 Days (Weekdays)
@@ -1118,10 +1118,10 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                   <button
                     type="button"
                     onClick={() => setStudyDaysPerWeek(7)}
-                    className={`px-2.5 py-1 text-xs rounded-md font-semibold transition ${
+                    className={`px-2.5 py-1 text-xs rounded-md font-semibold transition cursor-pointer ${
                       studyDaysPerWeek === 7
-                        ? 'bg-emerald-600 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-white'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     7 Days (Full Week)
@@ -1129,10 +1129,10 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 text-xs font-medium text-slate-300">
-                <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                 <span>
-                  Daily Target: <strong className="text-white font-mono">{calculatedDailyHours}h</strong> (~{calculatedSessionMinutes} mins/session)
+                  Daily Target: <strong className="text-slate-900 font-mono">{calculatedDailyHours}h</strong> (~{calculatedSessionMinutes} mins/session)
                 </span>
               </div>
             </div>
@@ -1140,14 +1140,14 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
         </div>
 
         {/* Section 2: Topic Selection Strategy Mode Switcher */}
-        <div className="pt-4 border-t border-slate-800/80 space-y-4">
+        <div className="pt-4 border-t border-slate-200 space-y-4">
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                <Brain className="w-4 h-4 text-emerald-400" />
+              <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                <Brain className="w-4 h-4 text-emerald-600" />
                 <span>Revision Topic Selection</span>
               </label>
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-slate-500">
                 Choose how your multi-week curriculum is populated
               </span>
             </div>
@@ -1157,27 +1157,27 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
               <button
                 type="button"
                 onClick={() => setSelectionMode('analysed_needs')}
-                className={`p-3.5 rounded-xl border text-left transition flex items-start gap-3 ${
+                className={`p-3.5 rounded-xl border text-left transition flex items-start gap-3 cursor-pointer ${
                   selectionMode === 'analysed_needs'
-                    ? 'bg-emerald-950/20 border-emerald-500/60 ring-1 ring-emerald-500/40 text-white'
-                    : 'bg-slate-800/50 border-slate-800 text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
+                    ? 'bg-emerald-50 border-2 border-emerald-600 text-slate-900 shadow-xs'
+                    : 'bg-[#FDFBF7] border-slate-200 text-slate-700 hover:bg-[#EBF3F5]'
                 }`}
               >
                 <div className={`w-5 h-5 rounded-full border mt-0.5 flex items-center justify-center shrink-0 ${
                   selectionMode === 'analysed_needs'
-                    ? 'border-emerald-500 bg-emerald-500 text-slate-950'
-                    : 'border-slate-600 bg-slate-900'
+                    ? 'border-emerald-600 bg-emerald-600 text-white'
+                    : 'border-slate-400 bg-white'
                 }`}>
                   {selectionMode === 'analysed_needs' && <Check className="w-3 h-3 stroke-[3]" />}
                 </div>
                 <div>
-                  <div className="font-bold text-sm text-white flex items-center gap-2">
+                  <div className="font-bold text-sm text-slate-900 flex items-center gap-2">
                     <span>Analysed Needs</span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
                       Recommended
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
                     Topics across all {weeksUntilExam} weeks are automatically sequenced based on your diagnosed weak areas, quiz accuracies, and Cambridge 0653 syllabus weighting.
                   </p>
                 </div>
@@ -1186,27 +1186,27 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
               <button
                 type="button"
                 onClick={() => setSelectionMode('custom_topics')}
-                className={`p-3.5 rounded-xl border text-left transition flex items-start gap-3 ${
+                className={`p-3.5 rounded-xl border text-left transition flex items-start gap-3 cursor-pointer ${
                   selectionMode === 'custom_topics'
-                    ? 'bg-emerald-950/20 border-emerald-500/60 ring-1 ring-emerald-500/40 text-white'
-                    : 'bg-slate-800/50 border-slate-800 text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
+                    ? 'bg-emerald-50 border-2 border-emerald-600 text-slate-900 shadow-xs'
+                    : 'bg-[#FDFBF7] border-slate-200 text-slate-700 hover:bg-[#EBF3F5]'
                 }`}
               >
                 <div className={`w-5 h-5 rounded-full border mt-0.5 flex items-center justify-center shrink-0 ${
                   selectionMode === 'custom_topics'
-                    ? 'border-emerald-500 bg-emerald-500 text-slate-950'
-                    : 'border-slate-600 bg-slate-900'
+                    ? 'border-emerald-600 bg-emerald-600 text-white'
+                    : 'border-slate-400 bg-white'
                 }`}>
                   {selectionMode === 'custom_topics' && <Check className="w-3 h-3 stroke-[3]" />}
                 </div>
                 <div>
-                  <div className="font-bold text-sm text-white flex items-center gap-2">
+                  <div className="font-bold text-sm text-slate-900 flex items-center gap-2">
                     <span>Choose Topics Myself</span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-300">
                       {selectedTopicCodes.length} Topics Selected
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
                     Hand-pick specific Cambridge 0653 Biology, Chemistry, or Physics modules. We space and rotate them across all {weeksUntilExam} weeks.
                   </p>
                 </div>
@@ -1216,13 +1216,13 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
 
           {/* Sub-view A: Analysed Needs Display */}
           {selectionMode === 'analysed_needs' && (
-            <div className="bg-slate-800/40 border border-slate-800 rounded-xl p-4 space-y-3">
+            <div className="bg-[#FDFBF7] border border-[#E2E8F0] rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                  <TrendingUp className="w-4 h-4 text-emerald-400" />
+                <span className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                  <TrendingUp className="w-4 h-4 text-emerald-600" />
                   <span>Diagnosed Priority Focus Areas ({analysedNeeds.length})</span>
                 </span>
-                <span className="text-[11px] text-slate-400">
+                <span className="text-[11px] text-slate-500">
                   Sequenced progressively across your {weeksUntilExam}-week plan
                 </span>
               </div>
@@ -1231,18 +1231,18 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                 {analysedNeeds.map(item => (
                   <div 
                     key={item.code}
-                    className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-start gap-2.5 text-xs shadow-sm"
+                    className="p-3 rounded-xl bg-white border border-slate-200 flex items-start gap-2.5 text-xs shadow-xs"
                   >
                     <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border shrink-0 ${
-                      item.subject === 'biology' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                      item.subject === 'chemistry' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                      'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
+                      item.subject === 'biology' ? 'bg-emerald-50 text-emerald-800 border-emerald-300' :
+                      item.subject === 'chemistry' ? 'bg-amber-50 text-amber-800 border-amber-300' :
+                      'bg-sky-50 text-sky-800 border-sky-300'
                     }`}>
                       {item.code}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <div className="font-bold text-white truncate">{item.title}</div>
-                      <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">{item.reason}</div>
+                      <div className="font-bold text-slate-900 truncate">{item.title}</div>
+                      <div className="text-[11px] text-slate-600 mt-0.5 leading-snug">{item.reason}</div>
                     </div>
                   </div>
                 ))}
@@ -1252,13 +1252,13 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
 
           {/* Sub-view B: Custom Topic Picker */}
           {selectionMode === 'custom_topics' && (
-            <div className="bg-slate-800/40 border border-slate-800 rounded-xl p-4 space-y-3">
+            <div className="bg-[#FDFBF7] border border-[#E2E8F0] rounded-xl p-4 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
-                  <span className="text-xs font-semibold text-slate-300">
+                  <span className="text-xs font-semibold text-slate-800">
                     Select Syllabus Topics ({selectedTopicCodes.length} selected)
                   </span>
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[11px] text-slate-500">
                     Click cards to select topics. These will be scheduled across your {weeksUntilExam} weeks.
                   </p>
                 </div>
@@ -1267,28 +1267,28 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                   <button
                     type="button"
                     onClick={() => handleSelectAllInSubject('biology')}
-                    className="text-[11px] px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 transition font-medium"
+                    className="text-[11px] px-2.5 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-900 border border-emerald-300 transition font-bold cursor-pointer"
                   >
                     + All Bio
                   </button>
                   <button
                     type="button"
                     onClick={() => handleSelectAllInSubject('chemistry')}
-                    className="text-[11px] px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 transition font-medium"
+                    className="text-[11px] px-2.5 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 transition font-bold cursor-pointer"
                   >
                     + All Chem
                   </button>
                   <button
                     type="button"
                     onClick={() => handleSelectAllInSubject('physics')}
-                    className="text-[11px] px-2.5 py-1 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 transition font-medium"
+                    className="text-[11px] px-2.5 py-1 rounded-lg bg-sky-100 hover:bg-sky-200 text-sky-900 border border-sky-300 transition font-bold cursor-pointer"
                   >
                     + All Phys
                   </button>
                   <button
                     type="button"
                     onClick={handleClearTopics}
-                    className="text-[11px] px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition"
+                    className="text-[11px] px-2 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 transition cursor-pointer"
                   >
                     Reset
                   </button>
@@ -1297,16 +1297,16 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
 
               {/* Filters & Search */}
               <div className="flex flex-col sm:flex-row items-center gap-3">
-                <div className="flex rounded-xl bg-slate-900 p-1 border border-slate-800 w-full sm:w-auto shrink-0">
+                <div className="flex rounded-xl bg-white p-1 border border-slate-300 w-full sm:w-auto shrink-0">
                   {(['all', 'biology', 'chemistry', 'physics'] as const).map(subj => (
                     <button
                       key={subj}
                       type="button"
                       onClick={() => setTopicFilterSubject(subj)}
-                      className={`px-3 py-1 text-xs rounded-lg font-semibold capitalize transition flex-1 sm:flex-none ${
+                      className={`px-3 py-1 text-xs rounded-lg font-semibold capitalize transition flex-1 sm:flex-none cursor-pointer ${
                         topicFilterSubject === subj
-                          ? 'bg-slate-800 text-white shadow-sm border border-slate-700'
-                          : 'text-slate-400 hover:text-white'
+                          ? 'bg-slate-800 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
                       {subj === 'all' ? 'All (33)' : subj}
@@ -1315,13 +1315,13 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                 </div>
 
                 <div className="relative w-full">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     placeholder="Search by topic name, code (e.g. B5, C4, P1), or concepts..."
                     value={topicSearchQuery}
                     onChange={e => setTopicSearchQuery(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="w-full bg-[#FDFBF7] border-2 border-black rounded-xl pl-9 pr-3.5 py-2 text-xs text-slate-800 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
               </div>
@@ -1336,12 +1336,12 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                       onClick={() => handleToggleTopic(topic.code)}
                       className={`p-3 rounded-xl border text-xs cursor-pointer transition flex items-start gap-2.5 select-none ${
                         isSelected
-                          ? 'bg-emerald-950/30 border-emerald-500/50 text-white ring-1 ring-emerald-500/30'
-                          : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:bg-slate-900 hover:border-slate-700'
+                          ? 'bg-emerald-50 border-2 border-emerald-600 text-slate-900 shadow-xs'
+                          : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
                       }`}
                     >
                       <div className={`w-4 h-4 rounded border mt-0.5 flex items-center justify-center shrink-0 ${
-                        isSelected ? 'bg-emerald-600 border-emerald-500 text-white' : 'border-slate-600 bg-slate-950'
+                        isSelected ? 'bg-emerald-600 border-emerald-700 text-white' : 'border-slate-400 bg-white'
                       }`}>
                         {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
                       </div>
@@ -1349,17 +1349,17 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 mb-1">
                           <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded border ${
-                            topic.subject === 'biology' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                            topic.subject === 'chemistry' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                            'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
+                            topic.subject === 'biology' ? 'bg-emerald-50 text-emerald-800 border-emerald-300' :
+                            topic.subject === 'chemistry' ? 'bg-amber-50 text-amber-800 border-amber-300' :
+                            'bg-sky-50 text-sky-800 border-sky-300'
                           }`}>
                             {topic.code}
                           </span>
-                          <span className="font-bold text-xs truncate text-white">
+                          <span className="font-bold text-xs truncate text-slate-900">
                             {topic.title}
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-400 line-clamp-1">
+                        <p className="text-[11px] text-slate-600 line-clamp-1">
                           {topic.keyConcepts}
                         </p>
                       </div>
@@ -1372,7 +1372,7 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
 
           {/* Action Button: Generate / Recalibrate Schedule */}
           <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="text-xs text-slate-400">
+            <div className="text-xs text-slate-600">
               {selectionMode === 'custom_topics' ? (
                 <span>Planning <strong>{selectedTopicCodes.length}</strong> topics across <strong>{weeksUntilExam} weeks</strong> at <strong>{weeklyHours}h/week</strong> ({weeksUntilExam * weeklyHours}h total)</span>
               ) : (
@@ -1383,7 +1383,7 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
             <button
               onClick={handleGenerateSchedule}
               disabled={isLoading}
-              className="w-full sm:w-auto py-2.5 px-6 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 active:scale-95 shrink-0"
+              className="w-full sm:w-auto py-2.5 px-6 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-2 active:scale-95 shrink-0 cursor-pointer"
             >
               {isLoading ? (
                 <>
@@ -1392,7 +1392,7 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                 </>
               ) : (
                 <>
-                  <Sparkles className="w-4 h-4 text-emerald-200" />
+                  <Sparkles className="w-4 h-4 text-emerald-100" />
                   <span>Generate Complete {weeksUntilExam}-Week Schedule ({weeklyHours}h/week)</span>
                 </>
               )}
@@ -1402,30 +1402,30 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
       </div>
 
       {/* Multi-Week Roadmap Overview Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-xs text-slate-800">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
               Roadmap Trajectory
             </span>
-            <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+            <span className="text-xs font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300">
               {weeksUntilExam} Weeks to Exam
             </span>
           </div>
-          <p className="text-xs sm:text-sm text-slate-200">
+          <p className="text-xs sm:text-sm text-slate-700">
             {scheduleSummary}
           </p>
         </div>
 
-        <div className="flex items-center gap-4 shrink-0 border-t sm:border-t-0 sm:border-l border-slate-800 pt-3 sm:pt-0 sm:pl-5">
+        <div className="flex items-center gap-4 shrink-0 border-t sm:border-t-0 sm:border-l border-slate-200 pt-3 sm:pt-0 sm:pl-5">
           <div className="space-y-1">
             <div className="flex items-center justify-between gap-3 text-xs">
-              <span className="text-slate-400 font-medium">Overall Progress</span>
-              <span className="font-bold font-mono text-emerald-400">{overallStats.done}/{overallStats.total} Tasks ({overallStats.pct}%)</span>
+              <span className="text-slate-600 font-medium">Overall Progress</span>
+              <span className="font-bold font-mono text-emerald-800">{overallStats.done}/{overallStats.total} Tasks ({overallStats.pct}%)</span>
             </div>
-            <div className="w-36 sm:w-48 h-2 bg-slate-800 rounded-full overflow-hidden">
+            <div className="w-36 sm:w-48 h-2 bg-slate-200 rounded-full overflow-hidden">
               <div 
-                className="h-full bg-emerald-500 transition-all duration-300 rounded-full"
+                className="h-full bg-emerald-600 transition-all duration-300 rounded-full"
                 style={{ width: `${overallStats.pct}%` }}
               />
             </div>
@@ -1434,25 +1434,25 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
       </div>
 
       {/* Daily Revision Consistency Tracker (Recharts Bar Chart) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4 shadow-md">
+      <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 sm:p-5 space-y-4 shadow-xs text-slate-800">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+            <div className="w-8 h-8 rounded-xl bg-[#EBF3F5] border border-slate-300 flex items-center justify-center text-teal-700 shrink-0">
               <BarChart3 className="w-4 h-4" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm sm:text-base font-bold text-white tracking-tight">
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
                   Daily Revision Consistency
                 </h3>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                   consistencyData.consistencyPct >= 75
-                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                     : consistencyData.consistencyPct >= 35
-                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                    ? 'bg-amber-50 text-amber-800 border-amber-300'
                     : consistencyData.totalCompleted > 0
-                    ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
-                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                    ? 'bg-teal-50 text-teal-800 border-teal-300'
+                    : 'bg-slate-100 text-slate-700 border-slate-300'
                 }`}>
                   {consistencyData.consistencyPct >= 75
                     ? '🔥 High Consistency'
@@ -1463,21 +1463,21 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                     : '🎯 Target Ready'}
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-600 mt-0.5">
                 Completed revision tasks by day — visual tracking to build study habits & pacing
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
-            <span className="text-[11px] text-slate-400 font-medium">Schedule Week:</span>
+            <span className="text-[11px] text-slate-600 font-medium">Schedule Week:</span>
             <select
               value={chartSelectedWeek}
               onChange={(e) => {
                 const val = e.target.value;
                 setChartSelectedWeek(val === 'aggregate' ? 'aggregate' : Number(val));
               }}
-              className="bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:ring-1 focus:ring-emerald-500 focus:outline-none transition cursor-pointer"
+              className="bg-[#FDFBF7] border-2 border-black text-slate-800 text-xs font-bold rounded-lg px-2.5 py-1.5 focus:ring-1 focus:ring-emerald-500 focus:outline-none transition cursor-pointer"
             >
               {Array.from({ length: weeksUntilExam }, (_, i) => i + 1).map((w) => (
                 <option key={w} value={w}>
@@ -1491,86 +1491,86 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
 
         {/* Consistency Mini Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl px-3 py-2">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
+          <div className="bg-[#FDFBF7] border border-[#E2E8F0] rounded-xl px-3 py-2">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 block">
               Active Days
             </span>
-            <span className="text-sm sm:text-base font-black font-mono text-white">
-              {consistencyData.activeDays} <span className="text-xs font-normal text-slate-400">/ {consistencyData.totalDays} days</span>
+            <span className="text-sm sm:text-base font-black font-mono text-slate-900">
+              {consistencyData.activeDays} <span className="text-xs font-normal text-slate-500">/ {consistencyData.totalDays} days</span>
             </span>
           </div>
 
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl px-3 py-2">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
+          <div className="bg-[#FDFBF7] border border-[#E2E8F0] rounded-xl px-3 py-2">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 block">
               100% Target Met
             </span>
-            <span className="text-sm sm:text-base font-black font-mono text-emerald-400">
-              {consistencyData.fullDays} <span className="text-xs font-normal text-slate-400">days</span>
+            <span className="text-sm sm:text-base font-black font-mono text-emerald-800">
+              {consistencyData.fullDays} <span className="text-xs font-normal text-slate-500">days</span>
             </span>
           </div>
 
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl px-3 py-2">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
+          <div className="bg-[#FDFBF7] border border-[#E2E8F0] rounded-xl px-3 py-2">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 block">
               Tasks Completed
             </span>
-            <span className="text-sm sm:text-base font-black font-mono text-cyan-400">
-              {consistencyData.totalCompleted} <span className="text-xs font-normal text-slate-400">/ {consistencyData.totalTasks}</span>
+            <span className="text-sm sm:text-base font-black font-mono text-teal-800">
+              {consistencyData.totalCompleted} <span className="text-xs font-normal text-slate-500">/ {consistencyData.totalTasks}</span>
             </span>
           </div>
 
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl px-3 py-2">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
+          <div className="bg-[#FDFBF7] border border-[#E2E8F0] rounded-xl px-3 py-2">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 block">
               Consistency Pace
             </span>
-            <span className="text-sm sm:text-base font-black font-mono text-amber-400">
+            <span className="text-sm sm:text-base font-black font-mono text-amber-800">
               {consistencyData.consistencyPct}%
             </span>
           </div>
         </div>
 
         {/* Small Recharts Bar Chart */}
-        <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3">
+        <div className="bg-[#FDFBF7] border border-[#E2E8F0] rounded-xl p-3">
           <div className="h-36 sm:h-40 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={consistencyData.points}
                 margin={{ top: 8, right: 8, left: -24, bottom: 0 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.35} vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#CBD5E1" opacity={0.6} vertical={false} />
                 <XAxis 
                   dataKey="shortDay" 
-                  stroke="#94a3b8" 
+                  stroke="#475569" 
                   fontSize={11} 
                   tickLine={false} 
-                  axisLine={{ stroke: '#334155' }} 
+                  axisLine={{ stroke: '#CBD5E1' }} 
                 />
                 <YAxis 
                   allowDecimals={false} 
                   domain={[0, consistencyData.maxTasks]} 
-                  stroke="#94a3b8" 
+                  stroke="#475569" 
                   fontSize={11} 
                   tickLine={false} 
-                  axisLine={{ stroke: '#334155' }} 
+                  axisLine={{ stroke: '#CBD5E1' }} 
                 />
                 <Tooltip 
                   content={<ConsistencyCustomTooltip />} 
-                  cursor={{ fill: 'rgba(51, 65, 85, 0.25)' }} 
+                  cursor={{ fill: 'rgba(226, 232, 240, 0.4)' }} 
                 />
                 <Bar 
                   dataKey="completed" 
                   radius={[4, 4, 0, 0]} 
                   maxBarSize={32}
-                  background={{ fill: 'rgba(30, 41, 59, 0.5)', radius: 4 }}
+                  background={{ fill: 'rgba(226, 232, 240, 0.5)', radius: 4 }}
                 >
                   {consistencyData.points.map((entry, index) => (
                     <Cell 
                       key={`consistency-bar-${index}`} 
                       fill={
                         entry.isFull 
-                          ? '#10b981' 
+                          ? '#059669' 
                           : entry.hasWork 
-                          ? '#06b6d4' 
-                          : '#475569'
+                          ? '#0d9488' 
+                          : '#94a3b8'
                       } 
                     />
                   ))}
@@ -1580,22 +1580,22 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
           </div>
 
           {/* Chart Legend & Context Helper */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-slate-800/80 text-[11px] text-slate-400">
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-slate-200 text-[11px] text-slate-600">
             <div className="flex items-center gap-3 flex-wrap">
               <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" />
+                <span className="w-2.5 h-2.5 rounded-xs bg-emerald-600 inline-block" />
                 <span>All tasks done (100%)</span>
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-cyan-500 inline-block" />
+                <span className="w-2.5 h-2.5 rounded-xs bg-teal-600 inline-block" />
                 <span>In progress</span>
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-slate-700 inline-block" />
+                <span className="w-2.5 h-2.5 rounded-xs bg-slate-400 inline-block" />
                 <span>Pending / Scheduled</span>
               </span>
             </div>
-            <span className="text-[10px] text-slate-500 italic">
+            <span className="text-[10px] text-slate-500 font-medium">
               Hover over bars to inspect daily tasks & topic codes
             </span>
           </div>
@@ -1606,11 +1606,11 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
       <div className="space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-emerald-400" />
-            <h2 className="text-base font-bold text-white tracking-tight">
+            <Layers className="w-4 h-4 text-emerald-600" />
+            <h2 className="text-base font-bold text-slate-900 tracking-tight">
               Weekly Revision Breakdown
             </h2>
-            <span className="text-xs text-slate-400">
+            <span className="text-xs text-slate-500">
               ({weeksGrouped.length} Weeks Scheduled)
             </span>
           </div>
@@ -1622,19 +1622,19 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                 type="button"
                 onClick={() => setActiveWeekTab(prev => (typeof prev === 'number' && prev > 1 ? prev - 1 : prev))}
                 disabled={activeWeekTab === 1}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-slate-300 text-xs flex items-center gap-1 border border-slate-700 transition"
+                className="p-1.5 rounded-lg bg-white hover:bg-slate-50 disabled:opacity-30 text-slate-700 text-xs flex items-center gap-1 border border-slate-300 transition cursor-pointer"
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
                 <span>Prev Week</span>
               </button>
-              <span className="text-xs font-mono font-bold text-slate-200 px-1">
+              <span className="text-xs font-mono font-bold text-slate-800 px-1">
                 Week {activeWeekTab} of {weeksGrouped.length}
               </span>
               <button
                 type="button"
                 onClick={() => setActiveWeekTab(prev => (typeof prev === 'number' && prev < weeksGrouped.length ? prev + 1 : prev))}
                 disabled={activeWeekTab === weeksGrouped.length}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 text-slate-300 text-xs flex items-center gap-1 border border-slate-700 transition"
+                className="p-1.5 rounded-lg bg-white hover:bg-slate-50 disabled:opacity-30 text-slate-700 text-xs flex items-center gap-1 border border-slate-300 transition cursor-pointer"
               >
                 <span>Next Week</span>
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -1648,10 +1648,10 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
           <button
             type="button"
             onClick={() => setActiveWeekTab('all')}
-            className={`px-3 py-1.5 text-xs rounded-xl font-bold whitespace-nowrap transition border ${
+            className={`px-3 py-1.5 text-xs rounded-xl font-bold whitespace-nowrap transition border cursor-pointer ${
               activeWeekTab === 'all'
-                ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
-                : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-white'
+                ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
             }`}
           >
             All Weeks ({weeksGrouped.length})
@@ -1666,17 +1666,17 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                 key={wg.week}
                 type="button"
                 onClick={() => setActiveWeekTab(wg.week)}
-                className={`px-3 py-1.5 text-xs rounded-xl font-bold whitespace-nowrap transition flex items-center gap-2 border ${
+                className={`px-3 py-1.5 text-xs rounded-xl font-bold whitespace-nowrap transition flex items-center gap-2 border cursor-pointer ${
                   isCurrent
-                    ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-white'
+                    ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
                 }`}
               >
                 <span>Week {wg.week}</span>
                 <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full border ${
                   isCurrent
-                    ? 'bg-emerald-700/80 text-emerald-100 border-emerald-400/40'
-                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                    ? 'bg-emerald-700 text-emerald-100 border-emerald-500'
+                    : 'bg-slate-100 text-slate-600 border-slate-300'
                 }`}>
                   {stats.done}/{stats.total}
                 </span>
@@ -1688,19 +1688,19 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
 
       {/* Week Focus & Goals Card (When Viewing a Specific Week) */}
       {currentWeekInfo && activeWeekTab !== 'all' && (
-        <div className="bg-slate-900/90 border border-emerald-500/30 rounded-2xl p-4 sm:p-5 space-y-3 shadow-md bg-gradient-to-r from-emerald-950/20 to-transparent">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-800/80 pb-3">
+        <div className="bg-[#FDFBF7] border border-emerald-300 rounded-2xl p-4 sm:p-5 space-y-3 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-200 pb-3">
             <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400 font-mono">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 font-mono">
                 Week {currentWeekInfo.week} Strategy & Focus
               </span>
-              <h3 className="text-sm sm:text-base font-bold text-white mt-0.5">
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 mt-0.5">
                 {currentWeekInfo.theme}
               </h3>
             </div>
 
-            <div className="flex items-center gap-2 text-xs font-mono font-medium text-slate-300">
-              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700">
+            <div className="flex items-center gap-2 text-xs font-mono font-medium text-slate-700">
+              <span className="bg-white px-2.5 py-1 rounded-lg border border-slate-300">
                 {weeklyHours}h target &bull; {currentWeekInfo.items.length} sessions
               </span>
             </div>
@@ -1708,16 +1708,16 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
 
           {currentWeekInfo.goals && currentWeekInfo.goals.length > 0 && (
             <div className="space-y-1.5">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
                 Key Cambridge Mastery Goals for Week {currentWeekInfo.week}:
               </span>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {currentWeekInfo.goals.map((goal, gIdx) => (
                   <div 
                     key={gIdx}
-                    className="p-2.5 rounded-xl bg-slate-800/50 border border-slate-800 text-xs text-slate-200 flex items-start gap-2"
+                    className="p-2.5 rounded-xl bg-white border border-slate-200 text-xs text-slate-800 flex items-start gap-2 shadow-xs"
                   >
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
                     <span className="leading-relaxed">{goal}</span>
                   </div>
                 ))}
@@ -1733,22 +1733,22 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
           <div key={wg.week} className="space-y-4">
             {/* Week Divider Header when in "All Weeks" View */}
             {activeWeekTab === 'all' && (
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3.5 rounded-xl bg-slate-900 border border-slate-800">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3.5 rounded-xl bg-white border border-[#E2E8F0] shadow-xs">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center font-mono font-bold text-xs">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-100 border border-emerald-300 text-emerald-800 flex items-center justify-center font-mono font-bold text-xs">
                     W{wg.week}
                   </div>
                   <div>
-                    <h3 className="font-bold text-sm text-white">
+                    <h3 className="font-bold text-sm text-slate-900">
                       Week {wg.week}: {wg.theme}
                     </h3>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-[11px] text-slate-500">
                       {wg.items.length} daily sessions &bull; {weeklyHours} hours planned this week
                     </p>
                   </div>
                 </div>
 
-                <div className="text-xs font-mono font-bold text-emerald-400">
+                <div className="text-xs font-mono font-bold text-emerald-800">
                   {weekStatsMap[wg.week]?.done || 0}/{weekStatsMap[wg.week]?.total || 0} tasks done
                 </div>
               </div>
@@ -1759,38 +1759,38 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
               {wg.items.map((item, idx) => (
                 <div
                   key={item.id || `${wg.week}-${idx}`}
-                  className="bg-slate-900 border border-slate-800 rounded-2xl p-5 hover:border-slate-700 transition space-y-4 shadow-sm"
+                  className="bg-white border border-[#E2E8F0] rounded-2xl p-5 hover:border-slate-300 transition space-y-4 shadow-xs"
                 >
                   {/* Session Card Header */}
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-800/80 pb-3.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-200 pb-3.5">
                     <div className="flex items-center gap-2.5 flex-wrap">
-                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 font-mono bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-800 font-mono bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-300">
                         Week {item.week || wg.week} &bull; {item.day || `Day ${idx + 1}`}
                       </span>
                       
                       <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded border ${
-                        item.subject === 'biology' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
-                        item.subject === 'chemistry' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
-                        item.subject === 'physics' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30' :
-                        'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                        item.subject === 'biology' ? 'bg-emerald-50 text-emerald-800 border-emerald-300' :
+                        item.subject === 'chemistry' ? 'bg-amber-50 text-amber-800 border-amber-300' :
+                        item.subject === 'physics' ? 'bg-sky-50 text-sky-800 border-sky-300' :
+                        'bg-purple-50 text-purple-800 border-purple-300'
                       }`}>
                         {item.topicCode || 'General'}
                       </span>
 
-                      <span className="font-bold text-sm text-white">
+                      <span className="font-bold text-sm text-slate-900">
                         {item.topicTitle}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-4 text-xs text-slate-400 shrink-0">
-                      <span className="flex items-center gap-1 font-mono bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60">
-                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                    <div className="flex items-center gap-4 text-xs text-slate-600 shrink-0">
+                      <span className="flex items-center gap-1 font-mono bg-[#FDFBF7] px-2.5 py-1 rounded-lg border border-slate-300">
+                        <Clock className="w-3.5 h-3.5 text-slate-500" />
                         <span>{item.estimatedMinutes || calculatedSessionMinutes} mins</span>
                       </span>
 
                       <button
                         onClick={() => onOpenLesson(item.topicCode || 'B2')}
-                        className="text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1.5 hover:underline transition"
+                        className="text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1.5 hover:underline transition cursor-pointer"
                       >
                         <BookOpen className="w-4 h-4" />
                         <span>Open Lesson Deck</span>
@@ -1799,13 +1799,13 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                   </div>
 
                   {/* Session Flow Header */}
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/40 border border-slate-800/80 text-[11px] text-slate-400 overflow-x-auto no-scrollbar">
-                    <span className="font-bold text-emerald-400 font-mono whitespace-nowrap">Session Sequence:</span>
-                    <span className="text-slate-300 font-medium whitespace-nowrap">1. Specific Slides Recap</span>
-                    <span className="text-slate-600">&rarr;</span>
-                    <span className="text-slate-300 font-medium whitespace-nowrap">2. Creative Application / Tool</span>
-                    <span className="text-slate-600">&rarr;</span>
-                    <span className="text-slate-300 font-medium whitespace-nowrap">3. Timed Synthesis & Audit</span>
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#FDFBF7] border border-slate-200 text-[11px] text-slate-600 overflow-x-auto no-scrollbar">
+                    <span className="font-bold text-emerald-800 font-mono whitespace-nowrap">Session Sequence:</span>
+                    <span className="text-slate-800 font-medium whitespace-nowrap">1. Specific Slides Recap</span>
+                    <span className="text-slate-400">&rarr;</span>
+                    <span className="text-slate-800 font-medium whitespace-nowrap">2. Creative Application / Tool</span>
+                    <span className="text-slate-400">&rarr;</span>
+                    <span className="text-slate-800 font-medium whitespace-nowrap">3. Timed Synthesis & Audit</span>
                   </div>
 
                   {/* Task Checklist for this Day */}
@@ -1822,8 +1822,8 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                           key={tIdx}
                           className={`p-3.5 rounded-xl border text-xs transition space-y-2.5 ${
                             isDone
-                              ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-300'
-                              : 'bg-slate-800/40 border-slate-800 hover:border-slate-700/80 text-slate-200'
+                              ? 'bg-emerald-50 border-emerald-300 text-slate-700'
+                              : 'bg-[#FDFBF7] border-slate-200 hover:border-slate-300 text-slate-800'
                           }`}
                         >
                           <div className="flex items-start gap-3">
@@ -1831,10 +1831,10 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                             <button
                               type="button"
                               onClick={() => handleToggleTask(item, tIdx, idx)}
-                              className={`w-5 h-5 rounded-lg border mt-0.5 flex items-center justify-center shrink-0 transition cursor-pointer active:scale-90 ${
+                              className={`w-5 h-5 rounded-lg border-2 mt-0.5 flex items-center justify-center shrink-0 transition cursor-pointer active:scale-90 ${
                                 isDone 
-                                  ? 'bg-emerald-600 border-emerald-500 text-white shadow-xs ring-2 ring-emerald-500/20' 
-                                  : 'border-slate-700 bg-slate-900 hover:border-slate-500 text-transparent'
+                                  ? 'bg-emerald-600 border-emerald-700 text-white shadow-xs' 
+                                  : 'border-black bg-white hover:border-slate-700 text-transparent'
                               }`}
                               title={isDone ? 'Mark as incomplete' : 'Mark as complete'}
                             >
@@ -1845,7 +1845,7 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                               <div className="flex items-center gap-2 flex-wrap">
                                 {/* Task Type Badge */}
                                 {tIdx === 0 ? (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono">
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-300 font-mono">
                                     📖 Task 1 &bull; Slides Recap
                                   </span>
                                 ) : (
@@ -1855,12 +1855,12 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                                 )}
 
                                 {isAutoDone ? (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
                                     <ShieldCheck className="w-3 h-3" />
                                     <span>Auto-Verified</span>
                                   </span>
                                 ) : isManualDone ? (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
                                     <Check className="w-3 h-3" />
                                     <span>Completed</span>
                                   </span>
@@ -1871,7 +1871,7 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                                 )}
                               </div>
 
-                              <div className={`leading-relaxed ${isDone ? 'line-through text-slate-400 font-medium' : 'text-slate-100 font-medium'}`}>
+                              <div className={`leading-relaxed ${isDone ? 'line-through text-slate-500 font-medium' : 'text-slate-800 font-medium'}`}>
                                 {task}
                               </div>
 
@@ -1881,7 +1881,7 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => onOpenLesson(item.topicCode || 'B2')}
-                                    className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs active:scale-95 cursor-pointer"
+                                    className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs active:scale-95 cursor-pointer"
                                   >
                                     <BookOpen className="w-3 h-3" />
                                     <span>Open {item.topicCode} Slide Deck</span>
@@ -1892,7 +1892,7 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => onAskAITutor(action.prompt || task, item.topicCode)}
-                                    className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs active:scale-95 cursor-pointer"
+                                    className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs active:scale-95 cursor-pointer"
                                   >
                                     <Sparkles className="w-3 h-3" />
                                     <span>Ask AI Tutor This Question</span>
@@ -1903,7 +1903,7 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => onNavigateToQuiz(item.topicCode)}
-                                    className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs active:scale-95 cursor-pointer"
+                                    className="px-2.5 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs active:scale-95 cursor-pointer"
                                   >
                                     <Target className="w-3 h-3" />
                                     <span>Launch Quiz Arena</span>
@@ -1914,7 +1914,7 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => onNavigateToExams()}
-                                    className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs active:scale-95 cursor-pointer"
+                                    className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs active:scale-95 cursor-pointer"
                                   >
                                     <FileText className="w-3 h-3" />
                                     <span>Open Past Exams Vault</span>
@@ -1925,7 +1925,7 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => onNavigateToNotebook()}
-                                    className="px-2.5 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs active:scale-95 cursor-pointer"
+                                    className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs active:scale-95 cursor-pointer"
                                   >
                                     <BookOpen className="w-3 h-3" />
                                     <span>Open Syllabus Notebook</span>
@@ -1936,7 +1936,7 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => onNavigateToGuidelines()}
-                                    className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs active:scale-95 cursor-pointer"
+                                    className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs active:scale-95 cursor-pointer"
                                   >
                                     <FileText className="w-3 h-3" />
                                     <span>View Exam Guidelines</span>
@@ -1949,8 +1949,8 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                                     onClick={() => handleToggleTask(item, tIdx, idx)}
                                     className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition active:scale-95 border cursor-pointer ${
                                       isDone
-                                        ? 'bg-emerald-600 text-white border-emerald-500'
-                                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                                        ? 'bg-emerald-600 text-white border-emerald-700'
+                                        : 'bg-white hover:bg-slate-100 text-slate-800 border-2 border-black'
                                     }`}
                                   >
                                     <Check className="w-3 h-3" />

@@ -700,7 +700,7 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
             <h3 className="text-lg font-bold text-white">No Students Found</h3>
             <p className="text-xs text-slate-400 max-w-md mx-auto">
               {allCohortStudents.length === 0
-                ? "No students have joined your classes yet. Share your Class Code (e.g. SCI-0653) with your students so they can join upon sign-in."
+                ? "No students have joined your classes yet. Share your Class Code (e.g. SCI-WA5U) with your students so they can join upon sign-in."
                 : "No students matched your search criteria."}
             </p>
           </div>
@@ -896,27 +896,27 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
       )}
 
       {/* Top Welcome & Milestone Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 shadow-sm">
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold font-mono px-2.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              <span className="text-xs font-bold px-2.5 py-0.5 rounded bg-[#EBF3F5] text-slate-800 border border-slate-300">
                 {isInstructor && selectedStudent ? selectedStudent.tier : user.tier} Tier Candidate
               </span>
               {(isInstructor && selectedStudent ? selectedStudent.joinedAt : user.examDate) && (
-                <span className="text-xs text-slate-400 font-medium">
+                <span className="text-xs text-slate-600 font-semibold">
                   {isInstructor && selectedStudent 
                     ? `Enrolled: ${new Date(selectedStudent.joinedAt).toLocaleDateString()}` 
                     : `Target Exam: ${user.examDate}`}
                 </span>
               )}
             </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">
-              {isInstructor && selectedStudent ? `${selectedStudent.name}'s` : `${user.name}'s`} Curriculum Mastery & Traffic Light Tracker
+            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
+              {isInstructor && selectedStudent ? `${selectedStudent.name}'s` : `${user.name}'s`} Curriculum Mastery and Progress
             </h1>
-            <p className="text-xs sm:text-sm text-slate-400 max-w-xl leading-relaxed">
+            <p className="text-base text-slate-600 max-w-xl leading-relaxed">
               Track traffic light rankings across all {stats.total} subtopics in Biology, Chemistry, and Physics. 
-              Earn <span className="text-emerald-400 font-bold">Green status</span> by scoring ≥80% on each subtopic's 10-Question Knowledge Check.
+              Earn <strong className="text-slate-800 font-bold">Green status</strong> by scoring 80% or higher on each subtopic's 10-question quiz.
             </p>
 
             {!isInstructor && (
@@ -924,9 +924,9 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
                 {onNavigateToProfile && (
                   <button
                     onClick={onNavigateToProfile}
-                    className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-bold text-xs transition shadow-xs"
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition cursor-pointer"
                   >
-                    <User className="w-3.5 h-3.5 text-emerald-400" />
+                    <User className="w-3.5 h-3.5" />
                     <span>My Profile & Recent Activity</span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>
@@ -935,10 +935,10 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
                 {onNavigateToLeaderboard && (
                   <button
                     onClick={onNavigateToLeaderboard}
-                    className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold text-xs transition shadow-xs"
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 font-bold text-xs transition cursor-pointer"
                   >
-                    <Trophy className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Compare Rank in Class Leaderboard</span>
+                    <Trophy className="w-3.5 h-3.5 text-amber-700" />
+                    <span>Class Leaderboard</span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 )}
@@ -946,225 +946,201 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
             )}
           </div>
 
-          {/* Live Progress Gauges: Slide Decks, Syllabus %, Green Mastery */}
+          {/* Live Progress Gauges */}
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             {/* Slide Deck Completion */}
-            <div className="flex items-center gap-3 bg-slate-950/70 px-4 py-3 rounded-xl border border-slate-800 min-w-[170px]">
-              <div className="p-2 rounded-lg bg-emerald-500/15 text-emerald-400 shrink-0">
+            <div className="flex items-center gap-3 bg-[#FDFBF7] px-4 py-3 rounded-lg border border-slate-200 min-w-[170px]">
+              <div className="p-2 rounded-lg bg-white border border-slate-200 text-slate-700 shrink-0">
                 <BookOpen className="w-4 h-4" />
               </div>
               <div>
-                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Slide Decks Read</div>
-                <div className="text-sm font-bold text-white font-mono mt-0.5">
-                  {completedDecksCount} / {stats.total} <span className="text-emerald-400 text-xs font-semibold">({slideDeckPct}%)</span>
+                <span className="text-xs font-semibold text-slate-600 block">Lesson Slides Read</span>
+                <div className="text-sm font-bold text-slate-800 font-mono mt-0.5">
+                  {completedDecksCount} / {stats.total} <span className="text-emerald-700 text-xs font-bold">({slideDeckPct}%)</span>
                 </div>
-                <div className="w-24 bg-slate-800 h-1.5 rounded-full mt-1 overflow-hidden">
-                  <div className="h-full bg-emerald-500 rounded-full transition-all duration-300" style={{ width: `${slideDeckPct}%` }} />
+                <div className="w-24 bg-slate-200 h-1.5 rounded-full mt-1 overflow-hidden">
+                  <div className="h-full bg-slate-800 rounded-full transition-all duration-300" style={{ width: `${slideDeckPct}%` }} />
                 </div>
               </div>
             </div>
 
             {/* Syllabus % Coverage */}
-            <div className="flex items-center gap-3 bg-slate-950/70 px-4 py-3 rounded-xl border border-slate-800 min-w-[170px]">
-              <div className="p-2 rounded-lg bg-sky-500/15 text-sky-400 shrink-0">
+            <div className="flex items-center gap-3 bg-[#FDFBF7] px-4 py-3 rounded-lg border border-slate-200 min-w-[170px]">
+              <div className="p-2 rounded-lg bg-white border border-slate-200 text-slate-700 shrink-0">
                 <GraduationCap className="w-4 h-4" />
               </div>
               <div>
-                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Syllabus Covered</div>
-                <div className="text-sm font-bold text-white font-mono mt-0.5">
-                  {syllabusPct}% <span className="text-slate-400 text-xs font-normal">({syllabusCoveredCount}/{stats.total})</span>
+                <span className="text-xs font-semibold text-slate-600 block">Syllabus Covered</span>
+                <div className="text-sm font-bold text-slate-800 font-mono mt-0.5">
+                  {syllabusPct}% <span className="text-slate-600 text-xs font-normal">({syllabusCoveredCount}/{stats.total})</span>
                 </div>
-                <div className="w-24 bg-slate-800 h-1.5 rounded-full mt-1 overflow-hidden">
-                  <div className="h-full bg-sky-500 rounded-full transition-all duration-300" style={{ width: `${syllabusPct}%` }} />
+                <div className="w-24 bg-slate-200 h-1.5 rounded-full mt-1 overflow-hidden">
+                  <div className="h-full bg-slate-800 rounded-full transition-all duration-300" style={{ width: `${syllabusPct}%` }} />
                 </div>
               </div>
             </div>
 
             {/* Traffic Light Mastery Circular Gauge */}
-            <div className="flex items-center gap-3 bg-slate-950/70 px-4 py-3 rounded-xl border border-slate-800 shrink-0">
+            <div className="flex items-center gap-3 bg-[#EBF3F5] px-4 py-3 rounded-lg border border-slate-300 shrink-0">
               <div className="relative w-12 h-12 flex items-center justify-center shrink-0">
-                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-                  <path
-                    className="text-slate-800"
-                    strokeWidth="3.5"
-                    stroke="currentColor"
-                    fill="none"
-                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                  />
-                  <path
-                    className="text-emerald-500 transition-all duration-500"
-                    strokeDasharray={`${stats.masteryPct}, 100`}
-                    strokeWidth="3.5"
-                    strokeLinecap="round"
-                    stroke="currentColor"
-                    fill="none"
-                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                  />
-                </svg>
-                <span className="absolute text-xs font-bold text-white font-mono">{stats.masteryPct}%</span>
+                <span className="text-base font-bold text-slate-800 font-mono">{stats.masteryPct}%</span>
               </div>
               <div>
-                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Green Mastery</div>
-                <div className="text-sm font-bold text-white mt-0.5">{stats.green} of {stats.total}</div>
-                <div className="text-[10px] text-emerald-400 font-medium mt-0.5 flex items-center gap-1">
-                  <Flame className="w-3 h-3" />
-                  <span>≥80% certified</span>
-                </div>
+                <span className="text-xs font-semibold text-slate-600 block">Green Mastery</span>
+                <strong className="text-sm font-bold text-slate-800 mt-0.5 block">{stats.green} of {stats.total}</strong>
+                <span className="text-xs text-emerald-800 font-bold mt-0.5 block">80%+ certified</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Traffic Light Summary Cards (Green, Orange, Red, Unranked) */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-slate-800/80">
+        {/* Traffic Light Summary Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-slate-200">
           {/* GREEN CARD */}
           <div 
             onClick={() => setTrafficFilter(trafficFilter === 'green' ? 'all' : 'green')}
-            className={`p-3.5 rounded-xl border cursor-pointer transition ${
+            className={`p-3.5 rounded-lg border cursor-pointer transition ${
               trafficFilter === 'green'
-                ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 ring-2 ring-emerald-500/30'
-                : 'bg-slate-950/60 border-slate-800 hover:border-emerald-500/50'
+                ? 'bg-emerald-100 border-2 border-emerald-700 text-emerald-900 font-bold'
+                : 'bg-emerald-50 border border-emerald-300 text-emerald-900 hover:bg-emerald-100'
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                <span>Green (≥80%)</span>
+              <span className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
+                <span>Green (80%+)</span>
               </span>
-              <span className="text-lg font-mono font-bold text-white">{stats.green}</span>
+              <span className="text-lg font-mono font-bold">{stats.green}</span>
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">Mastered & certified</p>
+            <p className="text-xs text-emerald-800 mt-1">Mastered & certified</p>
           </div>
 
           {/* ORANGE CARD */}
           <div 
             onClick={() => setTrafficFilter(trafficFilter === 'orange' ? 'all' : 'orange')}
-            className={`p-3.5 rounded-xl border cursor-pointer transition ${
+            className={`p-3.5 rounded-lg border cursor-pointer transition ${
               trafficFilter === 'orange'
-                ? 'bg-amber-500/20 border-amber-500 text-amber-300 ring-2 ring-amber-500/30'
-                : 'bg-slate-950/60 border-slate-800 hover:border-amber-500/50'
+                ? 'bg-amber-100 border-2 border-amber-700 text-amber-900 font-bold'
+                : 'bg-amber-50 border border-amber-300 text-amber-900 hover:bg-amber-100'
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-                <span>Amber / Orange (50%, 60%, 70%)</span>
+              <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-600"></span>
+                <span>Amber (50%–70%)</span>
               </span>
-              <span className="text-lg font-mono font-bold text-white">{stats.orange}</span>
+              <span className="text-lg font-mono font-bold">{stats.orange}</span>
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">Solid foundation · Review for Green</p>
+            <p className="text-xs text-amber-800 mt-1">Review for Green</p>
           </div>
 
           {/* RED CARD */}
           <div 
             onClick={() => setTrafficFilter(trafficFilter === 'red' ? 'all' : 'red')}
-            className={`p-3.5 rounded-xl border cursor-pointer transition ${
+            className={`p-3.5 rounded-lg border cursor-pointer transition ${
               trafficFilter === 'red'
-                ? 'bg-rose-500/20 border-rose-500 text-rose-300 ring-2 ring-rose-500/30'
-                : 'bg-slate-950/60 border-slate-800 hover:border-rose-500/50'
+                ? 'bg-rose-100 border-2 border-rose-700 text-rose-900 font-bold'
+                : 'bg-rose-50 border border-rose-300 text-rose-900 hover:bg-rose-100'
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
-                <span>Red (40% or less)</span>
+              <span className="text-xs font-bold text-rose-900 flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-600"></span>
+                <span>Red (under 50%)</span>
               </span>
-              <span className="text-lg font-mono font-bold text-white">{stats.red}</span>
+              <span className="text-lg font-mono font-bold">{stats.red}</span>
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">Priority focus · Review lesson slides</p>
+            <p className="text-xs text-rose-800 mt-1">Priority focus</p>
           </div>
 
-          {/* UNRANKED CARD */}
+          {/* ALL CARD */}
           <div 
             onClick={() => setTrafficFilter('all')}
-            className={`p-3.5 rounded-xl border cursor-pointer transition ${
+            className={`p-3.5 rounded-lg border cursor-pointer transition ${
               trafficFilter === 'all'
-                ? 'bg-slate-800 border-slate-600 ring-2 ring-slate-500/30'
-                : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                ? 'bg-[#EBF3F5] border-2 border-slate-800 text-slate-800 font-bold'
+                : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
                 <span>All Subtopics</span>
               </span>
-              <span className="text-lg font-mono font-bold text-white">{stats.total}</span>
+              <span className="text-lg font-mono font-bold text-slate-800">{stats.total}</span>
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">Complete syllabus</p>
+            <p className="text-xs text-slate-600 mt-1">Full curriculum</p>
           </div>
         </div>
       </div>
 
-      {/* View Mode Navigation Tabs: Trends | Curriculum Mastery | Confidence Matrix | All Views */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-2.5 rounded-2xl shadow-sm">
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+      {/* View Mode Navigation Tabs */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white border border-slate-200 p-2.5 rounded-xl shadow-xs">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
           <button
             onClick={() => setTrackerTab('trends')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shrink-0 ${
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer shrink-0 border ${
               trackerTab === 'trends'
-                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-950/40 ring-1 ring-emerald-400/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-slate-800 text-white border-slate-800'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
             }`}
           >
-            <TrendingUp className="w-4 h-4 text-emerald-300" />
+            <TrendingUp className="w-4 h-4" />
             <span>Performance Trends</span>
-            <span className="px-1.5 py-0.2 rounded text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-500/30 font-mono">
-              Recharts
-            </span>
           </button>
 
           <button
             onClick={() => setTrackerTab('curriculum')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shrink-0 ${
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer shrink-0 border ${
               trackerTab === 'curriculum'
-                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-950/40 ring-1 ring-emerald-400/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-slate-800 text-white border-slate-800'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
             }`}
           >
-            <BarChart3 className="w-4 h-4 text-sky-400" />
+            <BarChart3 className="w-4 h-4" />
             <span>Curriculum Mastery ({stats.total})</span>
           </button>
 
           <button
             onClick={() => setTrackerTab('confidence')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shrink-0 ${
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer shrink-0 border ${
               trackerTab === 'confidence'
-                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-950/40 ring-1 ring-emerald-400/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-slate-800 text-white border-slate-800'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
             }`}
           >
-            <Star className="w-4 h-4 text-amber-400" />
+            <Star className="w-4 h-4 text-amber-500" />
             <span>Confidence Matrix</span>
           </button>
 
           <button
             onClick={() => setTrackerTab('all')}
-            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shrink-0 ${
+            className={`px-3 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shrink-0 border ${
               trackerTab === 'all'
-                ? 'bg-slate-800 text-white border border-slate-700'
-                : 'text-slate-400 hover:text-white'
+                ? 'bg-slate-800 text-white border-slate-800'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
             }`}
           >
             <span>All Views</span>
           </button>
         </div>
 
-        <div className="flex items-center gap-3 text-xs text-slate-400 shrink-0 self-end sm:self-auto px-2">
+        <div className="flex items-center gap-3 text-xs text-slate-600 shrink-0 self-end sm:self-auto px-2">
           {studentQuizTrendData.length === 0 && (
             <button
               onClick={() => setShowBenchmarkComparison(prev => !prev)}
-              className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              className={`px-2.5 py-1 rounded-md border text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
                 showBenchmarkComparison 
-                  ? 'bg-purple-500/20 border-purple-500/40 text-purple-300' 
-                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  ? 'bg-[#EBF3F5] border-slate-400 text-slate-800' 
+                  : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'
               }`}
             >
-              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <Sparkles className="w-3.5 h-3.5" />
               <span>{showBenchmarkComparison ? 'Hide Benchmark Curve' : 'Preview Benchmark Curve'}</span>
             </button>
           )}
-          <div className="flex items-center gap-1.5">
-            <Activity className="w-3.5 h-3.5 text-emerald-400" />
+          <div className="flex items-center gap-1.5 font-bold text-slate-700">
+            <Activity className="w-3.5 h-3.5 text-emerald-700" />
             <span>{studentQuizTrendData.length} Real Quizzes</span>
           </div>
         </div>
@@ -1174,35 +1150,35 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
       {/* 1. PERFORMANCE TRENDS VIEW (Recharts Quiz Progression)         */}
       {/* ============================================================== */}
       {(trackerTab === 'trends' || trackerTab === 'all') && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 space-y-6 shadow-sm">
+        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 sm:p-7 space-y-6 shadow-xs">
           {/* Header & Subject Filter Tabs */}
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-800 pb-5">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200 pb-5">
             <div>
               <div className="flex items-center gap-2">
-                <span className={`text-[11px] uppercase font-bold px-2 py-0.5 rounded-full border ${subjectChartTheme.badgeClass}`}>
+                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${subjectChartTheme.badgeClass}`}>
                   {subjectChartTheme.name}
                 </span>
-                <span className="text-xs text-slate-400 font-mono">
+                <span className="text-xs text-slate-600 font-mono">
                   IGCSE 0653 Progression
                 </span>
               </div>
-              <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2 mt-1">
-                <TrendingUp className="w-5 h-5 text-emerald-400" />
+              <h2 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2 mt-1">
+                <TrendingUp className="w-5 h-5 text-emerald-700" />
                 <span>Performance Trends & Score Progression</span>
               </h2>
-              <p className="text-xs text-slate-400 mt-1 max-w-xl">
+              <p className="text-sm text-slate-600 mt-1 max-w-xl leading-relaxed">
                 Plotting quiz score trajectories across revision sessions. The dashed green line indicates the Cambridge 80% Green Mastery benchmark.
               </p>
             </div>
 
             {/* Subject Selector Tabs */}
-            <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800 shrink-0 overflow-x-auto">
+            <div className="flex items-center gap-1.5 bg-[#FDFBF7] p-1.5 rounded-xl border border-slate-200 shrink-0 overflow-x-auto">
               <button
                 onClick={() => setTrendsSubject('all')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer shrink-0 ${
                   trendsSubject === 'all'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-400 hover:text-white'
+                    ? 'bg-slate-800 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                 }`}
               >
                 All Sciences
@@ -1211,33 +1187,33 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
                 onClick={() => setTrendsSubject('biology')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer shrink-0 flex items-center gap-1.5 ${
                   trendsSubject === 'biology'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-400 hover:text-white'
+                    ? 'bg-emerald-700 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                 }`}
               >
-                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
                 <span>Biology</span>
               </button>
               <button
                 onClick={() => setTrendsSubject('chemistry')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer shrink-0 flex items-center gap-1.5 ${
                   trendsSubject === 'chemistry'
-                    ? 'bg-cyan-600 text-white shadow-xs'
-                    : 'text-slate-400 hover:text-white'
+                    ? 'bg-cyan-700 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                 }`}
               >
-                <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
+                <span className="w-2 h-2 rounded-full bg-cyan-600"></span>
                 <span>Chemistry</span>
               </button>
               <button
                 onClick={() => setTrendsSubject('physics')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer shrink-0 flex items-center gap-1.5 ${
                   trendsSubject === 'physics'
-                    ? 'bg-purple-600 text-white shadow-xs'
-                    : 'text-slate-400 hover:text-white'
+                    ? 'bg-purple-700 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                 }`}
               >
-                <span className="w-2 h-2 rounded-full bg-purple-400"></span>
+                <span className="w-2 h-2 rounded-full bg-purple-600"></span>
                 <span>Physics</span>
               </button>
             </div>
@@ -1246,100 +1222,100 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
           {/* 5 KPI Metric Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
             {/* 1. Average Score */}
-            <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col justify-between">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Average Score</span>
+            <div className="p-4 rounded-xl bg-[#FDFBF7] border border-slate-200 flex flex-col justify-between">
+              <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">Average Score</span>
               <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-2xl font-black font-mono text-white">
+                <span className="text-2xl font-bold font-mono text-slate-800">
                   {trendStats.count > 0 ? `${trendStats.avg}%` : '—'}
                 </span>
                 {trendStats.count > 0 && (
                   <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${
                     trendStats.avg >= 80 
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' 
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300' 
                       : trendStats.avg >= 50
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                      : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                      ? 'bg-amber-50 text-amber-800 border-amber-300'
+                      : 'bg-rose-50 text-rose-800 border-rose-300'
                   }`}>
                     {trendStats.avg >= 80 ? 'Mastery' : trendStats.avg >= 50 ? 'Solid' : 'Focus'}
                   </span>
                 )}
               </div>
-              <p className="text-[10px] text-slate-500 mt-1 truncate">Mean across {trendStats.count} attempts</p>
+              <p className="text-xs text-slate-500 mt-1 truncate">Mean across {trendStats.count} attempts</p>
             </div>
 
             {/* 2. Latest Score */}
-            <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col justify-between">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Latest Score</span>
+            <div className="p-4 rounded-xl bg-[#FDFBF7] border border-slate-200 flex flex-col justify-between">
+              <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">Latest Score</span>
               <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-2xl font-black font-mono text-white">
+                <span className="text-2xl font-bold font-mono text-slate-800">
                   {trendStats.count > 0 ? `${trendStats.latest}%` : '—'}
                 </span>
-                <span className="text-[10px] text-slate-400 font-mono">
+                <span className="text-xs text-slate-600 font-mono">
                   {trendStats.count > 0 ? `(${Math.round(trendStats.latest / 10)}/10)` : ''}
                 </span>
               </div>
-              <p className="text-[10px] text-slate-500 mt-1 truncate">Most recent subtopic quiz</p>
+              <p className="text-xs text-slate-500 mt-1 truncate">Most recent subtopic quiz</p>
             </div>
 
             {/* 3. Highest Score */}
-            <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col justify-between">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Highest Score</span>
+            <div className="p-4 rounded-xl bg-[#FDFBF7] border border-slate-200 flex flex-col justify-between">
+              <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">Highest Score</span>
               <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-2xl font-black font-mono text-amber-400 flex items-center gap-1">
+                <span className="text-2xl font-bold font-mono text-amber-700 flex items-center gap-1">
                   <span>{trendStats.count > 0 ? `${trendStats.highest}%` : '—'}</span>
-                  {trendStats.highest === 100 && <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />}
+                  {trendStats.highest === 100 && <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />}
                 </span>
               </div>
-              <p className="text-[10px] text-slate-500 mt-1 truncate">Peak knowledge check</p>
+              <p className="text-xs text-slate-500 mt-1 truncate">Peak knowledge check</p>
             </div>
 
             {/* 4. Green Mastery Certified */}
-            <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col justify-between">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">≥80% Green Passed</span>
+            <div className="p-4 rounded-xl bg-[#FDFBF7] border border-slate-200 flex flex-col justify-between">
+              <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">≥80% Green Passed</span>
               <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-2xl font-black font-mono text-emerald-400">
+                <span className="text-2xl font-bold font-mono text-emerald-700">
                   {trendStats.masteryCount}
                 </span>
-                <span className="text-xs text-slate-400 font-mono">/ {trendStats.count} ({trendStats.masteryRate}%)</span>
+                <span className="text-xs text-slate-600 font-mono">/ {trendStats.count} ({trendStats.masteryRate}%)</span>
               </div>
-              <p className="text-[10px] text-slate-500 mt-1 truncate">Certified green subtopics</p>
+              <p className="text-xs text-slate-500 mt-1 truncate">Certified green subtopics</p>
             </div>
 
             {/* 5. Score Progression Delta */}
-            <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col justify-between col-span-2 sm:col-span-1">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Progression Delta</span>
+            <div className="p-4 rounded-xl bg-[#FDFBF7] border border-slate-200 flex flex-col justify-between col-span-2 sm:col-span-1">
+              <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">Progression Delta</span>
               <div className="mt-2 flex items-center gap-1.5">
                 {trendStats.count >= 2 ? (
                   <>
                     {trendStats.isImproving ? (
-                      <TrendingUp className="w-5 h-5 text-emerald-400 shrink-0" />
+                      <TrendingUp className="w-5 h-5 text-emerald-700 shrink-0" />
                     ) : (
-                      <TrendingDown className="w-5 h-5 text-rose-400 shrink-0" />
+                      <TrendingDown className="w-5 h-5 text-rose-700 shrink-0" />
                     )}
-                    <span className={`text-2xl font-black font-mono ${trendStats.isImproving ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    <span className={`text-2xl font-bold font-mono ${trendStats.isImproving ? 'text-emerald-700' : 'text-rose-700'}`}>
                       {trendStats.delta >= 0 ? `+${trendStats.delta}%` : `${trendStats.delta}%`}
                     </span>
                   </>
                 ) : (
-                  <span className="text-2xl font-black font-mono text-slate-400">—</span>
+                  <span className="text-2xl font-bold font-mono text-slate-400">—</span>
                 )}
               </div>
-              <p className="text-[10px] text-slate-500 mt-1 truncate">Latest vs baseline score</p>
+              <p className="text-xs text-slate-500 mt-1 truncate">Latest vs baseline score</p>
             </div>
           </div>
 
           {/* Benchmark Notice Banner if viewing sample benchmark */}
           {currentTrendDataset.some(d => d.isSample) && (
-            <div className="p-3.5 rounded-xl bg-purple-950/40 border border-purple-500/40 flex items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2 text-purple-200">
-                <Sparkles className="w-4 h-4 text-purple-400 shrink-0" />
+            <div className="p-3.5 rounded-xl bg-[#EBF3F5] border border-slate-300 flex items-center justify-between gap-3 text-xs text-slate-800">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-cyan-700 shrink-0" />
                 <span>
                   <strong>Sample Progression Benchmark Active:</strong> Demonstrating realistic 8-quiz score growth curve across {subjectChartTheme.name}. Take any quiz in the curriculum to plot your personal live data!
                 </span>
               </div>
               <button
                 onClick={() => setShowBenchmarkComparison(false)}
-                className="px-2.5 py-1 rounded-lg bg-purple-900/60 hover:bg-purple-800 text-purple-200 font-bold transition text-[11px] shrink-0 cursor-pointer"
+                className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 font-bold transition text-xs shrink-0 cursor-pointer"
               >
                 Dismiss
               </button>
@@ -1348,22 +1324,22 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
 
           {/* Recharts Area / Line Chart Container */}
           {currentTrendDataset.length === 0 ? (
-            <div className="p-10 rounded-2xl bg-slate-950/80 border border-slate-800 text-center space-y-4">
-              <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center mx-auto text-slate-400">
+            <div className="p-10 rounded-2xl bg-[#FDFBF7] border border-slate-200 text-center space-y-4">
+              <div className="w-12 h-12 rounded-full bg-white border border-slate-300 flex items-center justify-center mx-auto text-slate-600">
                 <Activity className="w-6 h-6" />
               </div>
               <div className="space-y-1">
-                <h3 className="text-base font-bold text-white">No Quizzes Recorded Yet for {subjectChartTheme.name}</h3>
-                <p className="text-xs text-slate-400 max-w-md mx-auto">
+                <h3 className="text-base font-bold text-slate-800">No Quizzes Recorded Yet for {subjectChartTheme.name}</h3>
+                <p className="text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
                   Take your first subtopic knowledge check in {subjectChartTheme.name} to start plotting your performance trajectory, rolling average, and mastery status!
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
                 <button
                   onClick={() => setShowBenchmarkComparison(true)}
-                  className="px-4 py-2 rounded-xl bg-purple-600/30 hover:bg-purple-600/40 border border-purple-500/50 text-purple-200 font-bold text-xs transition flex items-center gap-2 cursor-pointer shadow-xs"
+                  className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 border-2 border-black text-slate-800 font-bold text-sm transition flex items-center gap-2 cursor-pointer shadow-xs"
                 >
-                  <Sparkles className="w-4 h-4 text-purple-300" />
+                  <Sparkles className="w-4 h-4 text-purple-700" />
                   <span>Preview Sample Benchmark Curve</span>
                 </button>
                 <button
@@ -1371,7 +1347,7 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
                     const firstCode = trendsSubject === 'chemistry' ? 'C1.1' : trendsSubject === 'physics' ? 'P1.1' : 'B1.1';
                     onNavigateToTopic(firstCode);
                   }}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center gap-2 cursor-pointer shadow-xs"
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm transition flex items-center gap-2 cursor-pointer shadow-xs"
                 >
                   <BookOpen className="w-4 h-4" />
                   <span>Start First Quiz ({trendsSubject === 'chemistry' ? 'C1.1' : trendsSubject === 'physics' ? 'P1.1' : 'B1.1'})</span>
@@ -1379,25 +1355,25 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
               </div>
             </div>
           ) : (
-            <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-4">
+            <div className="p-4 sm:p-5 rounded-2xl bg-[#FDFBF7] border border-slate-200 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                    <History className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="font-mono text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <History className="w-3.5 h-3.5 text-emerald-700" />
                     <span>Chronological Score Trajectory ({currentTrendDataset.length} Points)</span>
                   </span>
                 </div>
-                <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                <div className="flex items-center gap-3 text-xs text-slate-600">
                   <div className="flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: subjectChartTheme.stroke }} />
-                    <span>Score (%)</span>
+                    <span className="font-medium">Score (%)</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span className="w-3 h-0.5 border-t border-dashed" style={{ borderColor: subjectChartTheme.movingAvgStroke, borderWidth: '2px' }} />
-                    <span>Rolling 3-Quiz Avg</span>
+                    <span className="font-medium">Rolling 3-Quiz Avg</span>
                   </div>
-                  <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
-                    <span className="w-3 h-0.5 border-t border-dashed border-emerald-500" style={{ borderWidth: '2px' }} />
+                  <div className="flex items-center gap-1.5 text-emerald-700 font-bold">
+                    <span className="w-3 h-0.5 border-t border-dashed border-emerald-600" style={{ borderWidth: '2px' }} />
                     <span>≥80% Green Target</span>
                   </div>
                 </div>
@@ -1412,22 +1388,22 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
                   >
                     <defs>
                       <linearGradient id="trendScoreGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={subjectChartTheme.fillStart} stopOpacity={0.35} />
+                        <stop offset="5%" stopColor={subjectChartTheme.fillStart} stopOpacity={0.25} />
                         <stop offset="95%" stopColor={subjectChartTheme.fillStop} stopOpacity={0.0} />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.35} vertical={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.8} vertical={false} />
                     <XAxis 
                       dataKey="displayLabel" 
                       stroke="#64748b" 
-                      tick={{ fill: '#94a3b8', fontSize: 11 }}
-                      tickLine={{ stroke: '#475569' }}
+                      tick={{ fill: '#475569', fontSize: 11 }}
+                      tickLine={{ stroke: '#cbd5e1' }}
                     />
                     <YAxis 
                       domain={[0, 100]} 
                       stroke="#64748b" 
-                      tick={{ fill: '#94a3b8', fontSize: 11 }}
-                      tickLine={{ stroke: '#475569' }}
+                      tick={{ fill: '#475569', fontSize: 11 }}
+                      tickLine={{ stroke: '#cbd5e1' }}
                       tickFormatter={(v) => `${v}%`}
                       ticks={[0, 20, 40, 60, 80, 100]}
                     />
@@ -1440,49 +1416,49 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
                           const isAmber = item.percentage >= 50 && item.percentage < 80;
 
                           return (
-                            <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700 p-3.5 rounded-xl shadow-2xl text-xs space-y-2 z-50 min-w-[220px]">
-                              <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
-                                <span className="font-mono font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">
+                            <div className="bg-white border-2 border-black p-3.5 rounded-xl shadow-lg text-xs space-y-2 z-50 min-w-[220px]">
+                              <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2">
+                                <span className="font-mono font-bold text-slate-800 bg-[#EBF3F5] px-2 py-0.5 rounded border border-slate-300">
                                   {item.subtopicCode}
                                 </span>
-                                <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                                <span className="text-[10px] text-slate-600 uppercase tracking-wider font-bold">
                                   {item.subject}
                                 </span>
                               </div>
-                              <div className="font-semibold text-white text-xs leading-snug">
+                              <div className="font-bold text-slate-800 text-xs leading-snug">
                                 {item.title}
                               </div>
-                              <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                              <div className="text-[11px] text-slate-600 flex items-center gap-1.5">
                                 <Clock className="w-3.5 h-3.5 text-slate-500" />
                                 <span>{item.formattedDate}</span>
                                 {item.isSample && (
-                                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-mono">
+                                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 font-mono border border-purple-200 font-bold">
                                     Sample Benchmark
                                   </span>
                                 )}
                               </div>
-                              <div className="pt-1.5 border-t border-slate-800 flex items-center justify-between">
-                                <span className="text-slate-400">Score:</span>
-                                <span className="font-mono font-bold text-white text-sm">
-                                  {item.score}/{item.total} <span className={isGreen ? 'text-emerald-400' : isAmber ? 'text-amber-400' : 'text-rose-400'}>({item.percentage}%)</span>
+                              <div className="pt-1.5 border-t border-slate-200 flex items-center justify-between">
+                                <span className="text-slate-600 font-medium">Score:</span>
+                                <span className="font-mono font-bold text-slate-800 text-sm">
+                                  {item.score}/{item.total} <span className={isGreen ? 'text-emerald-700' : isAmber ? 'text-amber-700' : 'text-rose-700'}>({item.percentage}%)</span>
                                 </span>
                               </div>
                               {item.movingAvg !== undefined && (
-                                <div className="flex items-center justify-between text-[11px] text-slate-400">
-                                  <span>Rolling 3-Quiz Avg:</span>
-                                  <span className="font-mono font-bold text-sky-400">{item.movingAvg}%</span>
+                                <div className="flex items-center justify-between text-[11px] text-slate-600">
+                                  <span className="font-medium">Rolling 3-Quiz Avg:</span>
+                                  <span className="font-mono font-bold text-cyan-700">{item.movingAvg}%</span>
                                 </div>
                               )}
                               <div className="pt-1">
                                 <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
                                   isGreen
-                                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                                     : isAmber
-                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                                    : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                                    ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                    : 'bg-rose-50 text-rose-800 border-rose-300'
                                 }`}>
                                   <span className={`w-1.5 h-1.5 rounded-full ${
-                                    isGreen ? 'bg-emerald-400' : isAmber ? 'bg-amber-400' : 'bg-rose-400'
+                                    isGreen ? 'bg-emerald-600' : isAmber ? 'bg-amber-600' : 'bg-rose-600'
                                   }`} />
                                   {isGreen ? 'Green Mastery (≥80%)' : isAmber ? 'Amber (50-70%)' : 'Red Priority (≤40%)'}
                                 </span>
@@ -1495,17 +1471,17 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
                     />
                     <ReferenceLine 
                       y={80} 
-                      stroke="#10b981" 
+                      stroke="#059669" 
                       strokeDasharray="4 4" 
                       strokeWidth={1.5}
-                      label={{ value: '80% Target', fill: '#10b981', fontSize: 10, position: 'insideTopRight' }}
+                      label={{ value: '80% Target', fill: '#059669', fontSize: 10, position: 'insideTopRight' }}
                     />
                     <ReferenceLine 
                       y={50} 
-                      stroke="#f59e0b" 
+                      stroke="#d97706" 
                       strokeDasharray="3 3" 
                       strokeWidth={1}
-                      label={{ value: '50% Amber', fill: '#f59e0b', fontSize: 9, position: 'insideBottomRight' }}
+                      label={{ value: '50% Amber', fill: '#d97706', fontSize: 9, position: 'insideBottomRight' }}
                     />
                     <Area
                       type="monotone"
@@ -1536,18 +1512,18 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
           {currentTrendDataset.length > 0 && (
             <div className="space-y-3 pt-2">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <History className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                  <History className="w-4 h-4 text-emerald-700" />
                   <span>Detailed Quiz History & Subtopic Logs</span>
                 </h3>
-                <span className="text-xs text-slate-400">
+                <span className="text-xs text-slate-500">
                   Showing {currentTrendDataset.length} chronologically logged attempts
                 </span>
               </div>
 
-              <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/60">
+              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-900/90 text-slate-400 font-semibold border-b border-slate-800">
+                  <thead className="bg-[#EBF3F5] text-slate-700 font-bold border-b border-slate-200">
                     <tr>
                       <th className="py-2.5 px-3">#</th>
                       <th className="py-2.5 px-3">Date</th>
@@ -1558,57 +1534,57 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
                       <th className="py-2.5 px-3 text-right">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/60">
+                  <tbody className="divide-y divide-slate-100">
                     {currentTrendDataset.map((item, idx) => {
                       const isGreen = item.percentage >= 80;
                       const isAmber = item.percentage >= 50 && item.percentage < 80;
 
                       return (
-                        <tr key={`${item.subtopicCode}-${idx}`} className="hover:bg-slate-900/40 transition">
+                        <tr key={`${item.subtopicCode}-${idx}`} className="hover:bg-slate-50 transition">
                           <td className="py-2.5 px-3 font-mono text-slate-500 font-bold">
                             {idx + 1}
                           </td>
-                          <td className="py-2.5 px-3 text-slate-300 font-medium whitespace-nowrap">
+                          <td className="py-2.5 px-3 text-slate-700 font-medium whitespace-nowrap">
                             {item.formattedDate}
                           </td>
                           <td className="py-2.5 px-3">
-                            <span className="capitalize text-[11px] font-semibold text-slate-300">
+                            <span className="capitalize text-[11px] font-bold text-slate-700">
                               {item.subject}
                             </span>
                           </td>
                           <td className="py-2.5 px-3">
                             <div className="flex items-center gap-2 max-w-md">
-                              <span className="font-mono text-[11px] font-bold px-1.5 py-0.2 rounded bg-slate-800 text-emerald-400 border border-slate-700 shrink-0">
+                              <span className="font-mono text-[11px] font-bold px-1.5 py-0.2 rounded bg-[#EBF3F5] text-slate-800 border border-slate-300 shrink-0">
                                 {item.subtopicCode}
                               </span>
-                              <span className="text-white font-medium truncate">{item.title}</span>
+                              <span className="text-slate-800 font-medium truncate">{item.title}</span>
                             </div>
                           </td>
                           <td className="py-2.5 px-3 whitespace-nowrap font-mono font-bold">
-                            <span className="text-white">{item.score}/{item.total}</span>
-                            <span className={`ml-1.5 text-xs ${isGreen ? 'text-emerald-400' : isAmber ? 'text-amber-400' : 'text-rose-400'}`}>
+                            <span className="text-slate-800">{item.score}/{item.total}</span>
+                            <span className={`ml-1.5 text-xs ${isGreen ? 'text-emerald-700' : isAmber ? 'text-amber-700' : 'text-rose-700'}`}>
                               ({item.percentage}%)
                             </span>
                           </td>
                           <td className="py-2.5 px-3 whitespace-nowrap">
                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
                               isGreen
-                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                                 : isAmber
-                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                                : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                                ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                : 'bg-rose-50 text-rose-800 border-rose-300'
                             }`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${isGreen ? 'bg-emerald-400' : isAmber ? 'bg-amber-400' : 'bg-rose-400'}`} />
+                              <span className={`w-1.5 h-1.5 rounded-full ${isGreen ? 'bg-emerald-600' : isAmber ? 'bg-amber-600' : 'bg-rose-600'}`} />
                               <span>{isGreen ? 'Green' : isAmber ? 'Amber' : 'Red'}</span>
                             </span>
                           </td>
                           <td className="py-2.5 px-3 text-right whitespace-nowrap">
                             <button
                               onClick={() => onNavigateToTopic(item.subtopicCode)}
-                              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] transition inline-flex items-center gap-1 cursor-pointer"
+                              className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-800 border border-black font-bold text-[11px] transition inline-flex items-center gap-1 cursor-pointer"
                             >
                               <span>Review</span>
-                              <ChevronRight className="w-3.5 h-3.5 text-emerald-400" />
+                              <ChevronRight className="w-3.5 h-3.5 text-slate-700" />
                             </button>
                           </td>
                         </tr>
@@ -1626,28 +1602,28 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
       {/* 2. SUBJECT MASTERY BREAKDOWN TABS (Curriculum Grid)            */}
       {/* ============================================================== */}
       {(trackerTab === 'curriculum' || trackerTab === 'all') && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 space-y-6 shadow-sm">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-4">
+        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 sm:p-7 space-y-6 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 pb-4">
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <BarChart3 className="w-5 h-5 text-emerald-400" />
+              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 text-emerald-700" />
                 <span>Syllabus Subtopic Breakdown</span>
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-sm text-slate-600 mt-0.5 leading-relaxed">
                 Review individual subtopic ratings. Click on any subtopic to view its lesson slides.
               </p>
             </div>
 
             {/* Subject Switcher Tabs */}
-            <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800 shrink-0">
+            <div className="flex items-center gap-1.5 bg-[#FDFBF7] p-1.5 rounded-xl border border-slate-200 shrink-0">
               {(['all', 'biology', 'chemistry', 'physics'] as const).map(cat => (
                 <button
                   key={cat}
                   onClick={() => setActiveCategory(cat)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition cursor-pointer ${
                     activeCategory === cat
-                      ? 'bg-emerald-600 text-white shadow-xs'
-                      : 'text-slate-400 hover:text-white'
+                      ? 'bg-slate-800 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                   }`}
                 >
                   {cat}
@@ -1662,52 +1638,52 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
               const status = trafficLights[sub.subtopicCode];
               const quizResult = quizScores[sub.subtopicCode];
 
-              let badgeColor = 'bg-slate-800 text-slate-400 border-slate-700';
-              let dotColor = 'bg-slate-600';
+              let badgeColor = 'bg-slate-100 text-slate-600 border-slate-200';
+              let dotColor = 'bg-slate-400';
               if (status === 'green') {
-                badgeColor = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
-                dotColor = 'bg-emerald-500';
+                badgeColor = 'bg-emerald-50 text-emerald-800 border-emerald-300';
+                dotColor = 'bg-emerald-600';
               } else if (status === 'orange') {
-                badgeColor = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
-                dotColor = 'bg-amber-500';
+                badgeColor = 'bg-amber-50 text-amber-800 border-amber-300';
+                dotColor = 'bg-amber-600';
               } else if (status === 'red') {
-                badgeColor = 'bg-rose-500/20 text-rose-300 border-rose-500/40';
-                dotColor = 'bg-rose-500';
+                badgeColor = 'bg-rose-50 text-rose-800 border-rose-300';
+                dotColor = 'bg-rose-600';
               }
 
               return (
                 <div
                   key={sub.subtopicCode}
-                  className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-slate-700 transition flex items-center justify-between gap-3"
+                  className="p-3.5 rounded-xl bg-[#FDFBF7] border border-slate-200 hover:border-slate-300 transition flex items-center justify-between gap-3 shadow-2xs"
                 >
                   <div className="space-y-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">
+                      <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-white text-slate-800 border border-slate-300">
                         {sub.subtopicCode}
                       </span>
-                      <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${badgeColor}`}>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${badgeColor}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`}></span>
-                        <span>{status || 'Unranked'}</span>
+                        <span>{status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Unranked'}</span>
                       </span>
                       {quizResult && (
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-mono">
-                          Quiz: {quizResult.score}/10 ({quizResult.percentage}%)
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-white text-slate-700 border border-slate-200 font-mono font-bold">
+                          {quizResult.score}/10 ({quizResult.percentage}%)
                         </span>
                       )}
                       {completedLessons.includes(sub.subtopicCode) && (
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium flex items-center gap-1">
-                          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 border border-emerald-300 font-bold flex items-center gap-1">
+                          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-700" />
                           <span>Deck Read</span>
                         </span>
                       )}
                     </div>
-                    <h3 className="text-sm font-semibold text-white truncate">{sub.title}</h3>
+                    <h3 className="text-sm font-bold text-slate-800 truncate">{sub.title}</h3>
                   </div>
 
                   <button
                     onClick={() => onNavigateToTopic(sub.subtopicCode)}
                     title="Open lesson slides and quiz for this subtopic"
-                    className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition shrink-0 flex items-center gap-1 text-xs font-medium cursor-pointer"
+                    className="p-2 text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition shrink-0 flex items-center gap-1 text-xs font-bold cursor-pointer"
                   >
                     <span className="hidden sm:inline">Slides</span>
                     <ChevronRight className="w-4 h-4" />
@@ -1723,14 +1699,14 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
       {/* 3. TOPIC CONFIDENCE MATRIX (Syllabus Units)                    */}
       {/* ============================================================== */}
       {(trackerTab === 'confidence' || trackerTab === 'all') && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 space-y-6 shadow-sm">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-800 pb-4">
+        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 sm:p-7 space-y-6 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-200 pb-4">
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Star className="w-5 h-5 text-amber-400" />
+              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Star className="w-5 h-5 text-amber-500" />
                 <span>Syllabus Unit Confidence Ratings</span>
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-sm text-slate-600 mt-0.5 leading-relaxed">
                 Star ratings automatically feed into the AI Revision Schedule and Recommendations.
               </p>
             </div>
@@ -1743,42 +1719,42 @@ export const ProgressTracker: React.FC<ProgressTrackerProps> = ({
               return (
                 <div 
                   key={item.code}
-                  className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-slate-700 transition flex flex-col justify-between gap-3"
+                  className="p-4 rounded-xl bg-[#FDFBF7] border border-slate-200 hover:border-slate-300 transition flex flex-col justify-between gap-3 shadow-2xs"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">
+                        <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-white text-slate-800 border border-slate-300">
                           {item.code}
                         </span>
-                        <span className="text-xs capitalize text-slate-400 font-medium">
+                        <span className="text-xs capitalize text-slate-600 font-bold">
                           {item.subject}
                         </span>
                       </div>
-                      <h3 className="text-sm font-semibold text-white leading-snug">{item.title}</h3>
+                      <h3 className="text-sm font-bold text-slate-800 leading-snug">{item.title}</h3>
                     </div>
 
                     <button
                       onClick={() => onNavigateToTopic(item.code)}
                       title="Open lesson slides for this topic"
-                      className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                      className="p-1.5 text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition cursor-pointer"
                     >
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
 
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-800/60">
-                    <span className="text-[11px] text-slate-400">Confidence Level:</span>
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+                    <span className="text-xs text-slate-600 font-medium">Confidence Level:</span>
                     <div className="flex items-center gap-1">
                       {[1, 2, 3, 4, 5].map(starVal => (
                         <button
                           key={starVal}
                           disabled={isInstructor && !!selectedStudent}
                           onClick={() => onUpdateConfidence(item.code, starVal)}
-                          className={`p-1 transition ${
+                          className={`p-1 transition cursor-pointer ${
                             starVal <= currentRating
-                              ? 'text-amber-400 hover:text-amber-300'
-                              : 'text-slate-700 hover:text-slate-500'
+                              ? 'text-amber-500 hover:text-amber-600'
+                              : 'text-slate-300 hover:text-slate-400'
                           }`}
                         >
                           <Star className="w-4 h-4 fill-current" />

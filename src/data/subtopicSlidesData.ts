@@ -2019,3 +2019,51 @@ export function getSubtopicsBySubject(subject: ScienceSubject): SubtopicTopicGro
 export function getSubtopicByCode(code: string): SubtopicTopicGroup | undefined {
   return allSubtopicsData.find(s => s.subtopicCode.toLowerCase() === code.toLowerCase());
 }
+
+/**
+ * Resolves a topic or subtopic query string (e.g. "C1.1", "C1", "[C1.1]", "States of Matter")
+ * to the corresponding SubtopicTopicGroup.
+ */
+export function resolveSubtopicByQuery(query: string): SubtopicTopicGroup | undefined {
+  if (!query) return undefined;
+  const raw = query.trim();
+  const lower = raw.toLowerCase();
+
+  // 1. Exact subtopic code match (case-insensitive, e.g. "C1.1")
+  let found = allSubtopicsData.find(s => s.subtopicCode.toLowerCase() === lower);
+  if (found) return found;
+
+  // 2. Bracket stripped match (e.g. "[C1.1]" -> "C1.1")
+  const stripped = raw.replace(/[\[\]]/g, '').trim().toLowerCase();
+  found = allSubtopicsData.find(s => s.subtopicCode.toLowerCase() === stripped);
+  if (found) return found;
+
+  // 3. Regex match for syllabus code pattern e.g. C1.1, B10.2, P3.1 or topic C1, B10, P3
+  const matchCode = raw.match(/([BCP]\d+(?:\.\d+)?)/i);
+  if (matchCode) {
+    const extracted = matchCode[1].toUpperCase();
+    found = allSubtopicsData.find(s => s.subtopicCode.toUpperCase() === extracted);
+    if (found) return found;
+    found = allSubtopicsData.find(s => s.topicCode.toUpperCase() === extracted);
+    if (found) return found;
+  }
+
+  // 4. Starts with code
+  found = allSubtopicsData.find(s => 
+    lower.startsWith(s.subtopicCode.toLowerCase()) || 
+    s.subtopicCode.toLowerCase().startsWith(lower)
+  );
+  if (found) return found;
+
+  // 5. Topic code match (e.g. "C1")
+  found = allSubtopicsData.find(s => s.topicCode.toLowerCase() === lower);
+  if (found) return found;
+
+  // 6. Title or topicName contains query
+  found = allSubtopicsData.find(s => 
+    s.title.toLowerCase().includes(lower) || 
+    s.topicName.toLowerCase().includes(lower)
+  );
+  return found;
+}
+
