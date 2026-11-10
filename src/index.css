@@ -8,14 +8,14 @@
 
 :root {
   --font-dyslexia: 'Atkinson Hyperlegible', Verdana, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --bg-app-pastel: #FDFBF7; /* Soft Warm Cream */
-  --bg-textbox-pastel: #FDFBF7; /* Glare-free pastel textbox background */
-  --bg-textbox-focus: #EBF3F5; /* Pale Soft Blue on focus */
-  --bg-card-pastel: #FFFFFF; /* Soft low-contrast card container */
-  --border-card-pastel: #E2E8F0; /* Clean light hairline border */
+  --bg-app-pastel: #EDE6D8; /* Deepened Soft Warm Cream with obvious contrast */
+  --bg-textbox-pastel: #F5EFE6; /* Deepened glare-free pastel textbox background */
+  --bg-textbox-focus: #DCE8EE; /* Pale Soft Blue on focus */
+  --bg-card-pastel: #FFFFFF; /* Soft high-contrast card container */
+  --border-card-pastel: #CBD5E1; /* Deepened hairline border */
   --border-textbox: #000000; /* Crisp black border for every textbox */
-  --text-primary: #1E293B; /* Dark Charcoal (6:1 sharp contrast without glare) */
-  --text-muted: #475569; /* Balanced slate for secondary context */
+  --text-primary: #0F172A; /* Deep Dark Slate/Charcoal for sharp contrast */
+  --text-muted: #334155; /* Deeper slate for secondary context */
   --font-size-body: 16px;
   --line-height-body: 1.55;
   --letter-spacing-body: 0.12em;
@@ -145,6 +145,9 @@ html.dark body {
 .dark .bg-white,
 .dark .bg-\[\#FDFBF7\],
 .dark .bg-\[\#EBF3F5\],
+.dark .bg-\[\#EDE6D8\],
+.dark .bg-\[\#F5EFE6\],
+.dark .bg-\[\#DCE8EE\],
 .dark .bg-slate-50,
 .dark .bg-slate-100,
 .dark .bg-slate-200,

@@ -38,7 +38,8 @@ import {
   X,
   ArrowRightLeft,
   Swords,
-  Edit3
+  Edit3,
+  Trophy
 } from 'lucide-react';
 import { InstructorTasksManager } from './InstructorTasksManager';
 import { 
@@ -110,6 +111,7 @@ interface InstructorDashboardProps {
   onSwitchToStudentMode?: () => void;
   onNavigateToLessons?: () => void;
   onNavigateToRoyale?: () => void;
+  onNavigateToLeaderboard?: () => void;
   initialTab?: 'classes' | 'tasks' | 'cohort' | 'roster' | 'invites' | 'drive' | 'slides';
 }
 
@@ -118,6 +120,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   onSwitchToStudentMode, 
   onNavigateToLessons,
   onNavigateToRoyale,
+  onNavigateToLeaderboard,
   initialTab = 'classes'
 }) => {
   const [dashboardTab, setDashboardTab] = useState<'classes' | 'tasks' | 'cohort' | 'roster' | 'invites' | 'drive' | 'slides'>(() => {
@@ -788,6 +791,17 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          {onNavigateToLeaderboard && (
+            <button
+              onClick={onNavigateToLeaderboard}
+              className="text-xs px-3.5 py-2 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-950 border-2 border-black font-bold flex items-center gap-2 transition shadow-xs cursor-pointer"
+              title="Inspect live class leaderboards and student performance rankings"
+            >
+              <Trophy className="w-4 h-4 text-amber-800" />
+              <span>Class Leaderboard</span>
+            </button>
+          )}
+
           {onNavigateToRoyale && (
             <button
               onClick={onNavigateToRoyale}

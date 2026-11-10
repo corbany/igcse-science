@@ -1,5 +1,11 @@
 import { LeaderboardEntry, UserProfile, StudentProgress, StudentBadge } from '../types';
-import { fetchStudentsInClass, ClassStudentItem, fetchStudentEnrolledClasses, ClassItem } from './firestoreService';
+import { 
+  fetchStudentsInClass, 
+  ClassStudentItem, 
+  fetchStudentEnrolledClasses, 
+  fetchClassesByInstructor,
+  ClassItem 
+} from './firestoreService';
 import { evaluateStudentBadges, BADGE_DEFINITIONS } from './badgeService';
 
 
@@ -43,13 +49,18 @@ export async function getClassStudentLeaderboard(
 
   try {
     if (currentUser?.id) {
-      const classes = await fetchStudentEnrolledClasses(currentUser.id);
-      classInfo = classes.find(c => c.id === classId);
+      if (currentUser.role === 'instructor') {
+        const classes = await fetchClassesByInstructor(currentUser.id, currentUser.email);
+        classInfo = classes.find(c => c.id === classId);
+      } else {
+        const classes = await fetchStudentEnrolledClasses(currentUser.id);
+        classInfo = classes.find(c => c.id === classId);
 
-      // Student visibility restriction:
-      // Students can ONLY view the leaderboard of a class they are officially enrolled in.
-      if (currentUser.role === 'student' && !classInfo) {
-        return emptyResult;
+        // Student visibility restriction:
+        // Students can ONLY view the leaderboard of a class they are officially enrolled in.
+        if (currentUser.role === 'student' && !classInfo) {
+          return emptyResult;
+        }
       }
     }
     rawStudents = await fetchStudentsInClass(classId);

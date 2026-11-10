@@ -32,6 +32,8 @@ export interface FantasySkinDefinition {
   category: 'skin';
   price: number;
   icon: string;
+  defense: number;
+  speed: number;
   imageSrc: string; // High-res portrait path: '/assets/characters/{id}.png'
   sheetImg: string; // Default idle sheet path: '/assets/aistudio/{name}_idle_sheet_{hash}.png'
   avatarImg?: string;
@@ -251,7 +253,7 @@ export const CHARACTER_ACTION_SHEETS: Record<string, ActionSheets> = {
 // ============================================================================
 
 export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
-  // --- COMMON (4) ---
+  // --- COMMON (4) - Tier I Basic Adventurers ---
   {
     id: 'cultist',
     name: 'Cultist',
@@ -260,6 +262,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 80,
     icon: '🔮',
+    defense: 22,
+    speed: 52,
     imageSrc: '/assets/characters/cultist.png',
     portraitPath: '/assets/characters/cultist.png',
     spritePath: '/assets/characters/cultist.png',
@@ -283,6 +287,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 90,
     icon: '💀',
+    defense: 28,
+    speed: 48,
     imageSrc: '/assets/characters/skeleton_warrior.png',
     portraitPath: '/assets/characters/skeleton_warrior.png',
     spritePath: '/assets/characters/skeleton_warrior.png',
@@ -306,6 +312,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 100,
     icon: '👺',
+    defense: 18,
+    speed: 58,
     imageSrc: '/assets/characters/goblin.png',
     portraitPath: '/assets/characters/goblin.png',
     spritePath: '/assets/characters/goblin.png',
@@ -329,6 +337,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 85,
     icon: '🟢',
+    defense: 25,
+    speed: 46,
     imageSrc: '/assets/characters/slime.png',
     portraitPath: '/assets/characters/slime.png',
     spritePath: '/assets/characters/slime.png',
@@ -345,7 +355,7 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     theme: { auraColor: '#10b981', badgeBg: 'bg-emerald-950/80 border-emerald-500/50' }
   },
 
-  // --- RARE (5) ---
+  // --- RARE (5) - Tier II Specialized Skirmishers ---
   {
     id: 'archer_hero',
     name: 'Archer',
@@ -354,6 +364,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 160,
     icon: '🏹',
+    defense: 42,
+    speed: 68,
     imageSrc: '/assets/characters/archer_hero.png',
     portraitPath: '/assets/characters/archer_hero.png',
     spritePath: '/assets/characters/archer_hero.png',
@@ -377,6 +389,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 180,
     icon: '🗡️',
+    defense: 38,
+    speed: 72,
     imageSrc: '/assets/characters/rogue.png',
     portraitPath: '/assets/characters/rogue.png',
     spritePath: '/assets/characters/rogue.png',
@@ -400,6 +414,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 200,
     icon: '💀',
+    defense: 48,
+    speed: 60,
     imageSrc: '/assets/characters/necromancer.png',
     portraitPath: '/assets/characters/necromancer.png',
     spritePath: '/assets/characters/necromancer.png',
@@ -423,6 +439,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 170,
     icon: '🧭',
+    defense: 45,
+    speed: 64,
     imageSrc: '/assets/characters/discoverer.png',
     portraitPath: '/assets/characters/discoverer.png',
     spritePath: '/assets/characters/discoverer.png',
@@ -446,6 +464,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 175,
     icon: '🦇',
+    defense: 36,
+    speed: 74,
     imageSrc: '/assets/characters/bat.png',
     portraitPath: '/assets/characters/bat.png',
     spritePath: '/assets/characters/bat.png',
@@ -462,7 +482,7 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     theme: { auraColor: '#8b5cf6', badgeBg: 'bg-violet-950/80 border-violet-500/50' }
   },
 
-  // --- EPIC (5) ---
+  // --- EPIC (5) - Tier III Elite Battlemasters ---
   {
     id: 'white_mage',
     name: 'White Mage',
@@ -471,6 +491,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 260,
     icon: '🧙‍♂️',
+    defense: 66,
+    speed: 76,
     imageSrc: '/assets/characters/white_mage.png',
     portraitPath: '/assets/characters/white_mage.png',
     spritePath: '/assets/characters/white_mage.png',
@@ -494,6 +516,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 280,
     icon: '🛡️',
+    defense: 78,
+    speed: 70,
     imageSrc: '/assets/characters/paladin.png',
     portraitPath: '/assets/characters/paladin.png',
     spritePath: '/assets/characters/paladin.png',
@@ -517,6 +541,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 300,
     icon: '⚔️',
+    defense: 80,
+    speed: 66,
     imageSrc: '/assets/characters/dark_knight.png',
     portraitPath: '/assets/characters/dark_knight.png',
     spritePath: '/assets/characters/dark_knight.png',
@@ -540,6 +566,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 290,
     icon: '🔮',
+    defense: 68,
+    speed: 78,
     imageSrc: '/assets/characters/warlock.png',
     portraitPath: '/assets/characters/warlock.png',
     spritePath: '/assets/characters/warlock.png',
@@ -563,6 +591,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 310,
     icon: '🎯',
+    defense: 62,
+    speed: 84,
     imageSrc: '/assets/characters/elitearcher.png',
     portraitPath: '/assets/characters/elitearcher.png',
     spritePath: '/assets/characters/elitearcher.png',
@@ -579,7 +609,7 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     theme: { auraColor: '#2dd4bf', badgeBg: 'bg-teal-950/80 border-teal-400/60' }
   },
 
-  // --- LEGENDARY (3) ---
+  // --- LEGENDARY (3) - Tier IV Realm Champions ---
   {
     id: 'knight_hero',
     name: 'Knight Hero',
@@ -588,6 +618,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 450,
     icon: '👑',
+    defense: 88,
+    speed: 86,
     imageSrc: '/assets/characters/knight_hero.png',
     portraitPath: '/assets/characters/knight_hero.png',
     spritePath: '/assets/characters/knight_hero.png',
@@ -611,6 +643,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 480,
     icon: '🐉',
+    defense: 86,
+    speed: 88,
     imageSrc: '/assets/characters/dragon_slayer.png',
     portraitPath: '/assets/characters/dragon_slayer.png',
     spritePath: '/assets/characters/dragon_slayer.png',
@@ -634,6 +668,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 500,
     icon: '🥷',
+    defense: 82,
+    speed: 94,
     imageSrc: '/assets/characters/shadow_assassin.png',
     portraitPath: '/assets/characters/shadow_assassin.png',
     spritePath: '/assets/characters/shadow_assassin.png',
@@ -650,7 +686,7 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     theme: { auraColor: '#8b5cf6', badgeBg: 'bg-violet-950/90 border-violet-400/80' }
   },
 
-  // --- MYTHIC (2 - 0.5% DROP RATE) ---
+  // --- MYTHIC (2 - 0.5% DROP RATE) - Tier V Godlike Titans ---
   {
     id: 'slime_king',
     name: 'Slime King',
@@ -659,6 +695,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 900,
     icon: '👑🟢',
+    defense: 96,
+    speed: 92,
     imageSrc: '/assets/characters/slime_king.png',
     portraitPath: '/assets/characters/slime_king.png',
     spritePath: '/assets/characters/slime_king.png',
@@ -682,6 +720,8 @@ export const ALL_FANTASY_SKINS: FantasySkinDefinition[] = [
     category: 'skin',
     price: 1000,
     icon: '👹👑',
+    defense: 98,
+    speed: 96,
     imageSrc: '/assets/characters/overlord.png',
     portraitPath: '/assets/characters/overlord.png',
     spritePath: '/assets/characters/overlord.png',

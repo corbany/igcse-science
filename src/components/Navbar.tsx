@@ -193,7 +193,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
               </div>
             ) : (
-              /* INSTRUCTOR: Mode switcher between Teaching Hub and Preview Student View */
+              /* INSTRUCTOR: Mode switcher between Teaching Hub, Preview Student View, and Class Leaderboards */
               <div className="flex items-center p-1 rounded-xl border-2 border-black dark:border-white bg-[#FDFBF7] dark:bg-black transition">
                 <button
                   onClick={() => setCurrentTab('instructor')}
@@ -206,6 +206,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   <ShieldCheck className="w-3.5 h-3.5" />
                   <span>Teaching Hub</span>
+                </button>
+
+                <button
+                  onClick={() => setCurrentTab('leaderboard')}
+                  className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    currentTab === 'leaderboard'
+                      ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-xs'
+                      : 'text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white'
+                  }`}
+                  title="View Class Leaderboards & Student Rankings"
+                >
+                  <Trophy className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Leaderboard</span>
                 </button>
 
                 <button
@@ -233,71 +246,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               onNavigateToLessons={onNavigateToLessons}
               onNavigateToQuizzes={onNavigateToQuizzes}
             />
-
-            {/* Quick Avatar Shop & Personal Collection Action Button */}
-            <button
-              onClick={() => onOpenShop ? onOpenShop() : setCurrentTab('shop')}
-              title="Open Avatar Shop & Personal 20-Card Science Collection"
-              className={`text-xs px-2.5 py-1.5 rounded-lg border font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer ${
-                currentTab === 'shop'
-                  ? 'bg-amber-500 text-slate-950 border-amber-400 ring-2 ring-amber-400/50'
-                  : 'bg-slate-800/80 border-slate-700 text-slate-200 hover:text-white hover:bg-slate-700'
-              }`}
-            >
-              <span>🎴</span>
-              <span className="hidden sm:inline">Shop & Cards</span>
-            </button>
-
-            {/* Quick Revision Royale Action Button (Gated for students until instructor opens lobby) */}
-            {isStudent && battleState?.status !== 'IN_PROGRESS' && !battleState?.isLobbyOpen ? (
-              <button
-                onClick={() => setCurrentTab('royale')}
-                title="Royale is locked until your instructor opens the tournament lobby"
-                className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-950/80 text-slate-400 hover:text-slate-300 font-bold transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <Lock className="w-3.5 h-3.5 text-slate-500" />
-                <span className="hidden sm:inline">Royale (Closed)</span>
-                <span className="sm:hidden">Closed</span>
-              </button>
-            ) : isStudent && battleState?.isLobbyOpen && battleState?.status !== 'IN_PROGRESS' ? (
-              <button
-                onClick={() => setCurrentTab('royale')}
-                title="Tournament Lobby is OPEN! Click to enter waiting room"
-                className={`text-xs px-2.5 py-1.5 rounded-lg border font-black transition flex items-center gap-1.5 shadow-xs cursor-pointer ${
-                  currentTab === 'royale'
-                    ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-cyan-500/25 ring-2 ring-cyan-400/50'
-                    : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/30 animate-pulse'
-                }`}
-              >
-                <span className="text-sm">🎮</span>
-                <span className="hidden sm:inline">Lobby (OPEN)</span>
-                <span className="sm:hidden">Lobby</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => setCurrentTab('royale')}
-                title={isStudent ? 'Battle Royale is LIVE! Click to enter match' : 'Open Admin Battle Control: Open/Close Student Lobby & Host Tournaments'}
-                className={`text-xs px-2.5 sm:px-3 py-1.5 rounded-lg border font-black transition flex items-center gap-1.5 shadow-xs cursor-pointer ${
-                  currentTab === 'royale'
-                    ? !isStudent
-                      ? 'bg-purple-600 text-white border-purple-400 shadow-purple-500/25 ring-2 ring-purple-400/50'
-                      : 'bg-amber-500 text-slate-950 border-amber-400 shadow-amber-500/25 ring-2 ring-amber-400/50'
-                    : isStudent && battleState?.status === 'IN_PROGRESS'
-                      ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-emerald-500/25 ring-2 ring-emerald-400/50 animate-pulse'
-                      : !isStudent
-                        ? 'bg-gradient-to-r from-purple-900/60 to-indigo-900/60 border-purple-500/50 text-purple-200 hover:text-white hover:border-purple-400 ring-1 ring-purple-500/30'
-                        : 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25'
-                }`}
-              >
-                <span className="text-sm">{isStudent && battleState?.status === 'IN_PROGRESS' ? '⚔️' : !isStudent ? '🎮' : '🎮'}</span>
-                <span className="hidden sm:inline">
-                  {!isStudent ? 'Battle Control' : isStudent && battleState?.status === 'IN_PROGRESS' ? 'Royale (LIVE!)' : 'Royale'}
-                </span>
-                <span className="sm:hidden">
-                  {!isStudent ? 'Battle' : 'Royale'}
-                </span>
-              </button>
-            )}
 
             {/* Global Light / Dark Mode toggle */}
             <button
@@ -359,7 +307,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       <nav className={`border-t px-2 sm:px-4 lg:px-8 py-2 transition-colors duration-150 ${theme === 'dark' ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-[#FDFBF7]'}`}>
         <div className="max-w-7xl mx-auto">
           {/* Navigation Grid */}
-          <div className={`grid ${isStudent ? 'grid-cols-4 lg:grid-cols-8' : 'grid-cols-3 sm:grid-cols-4 lg:grid-cols-7'} gap-1.5 sm:gap-2`}>
+          <div className={`grid ${isStudent ? 'grid-cols-4 lg:grid-cols-8' : 'grid-cols-4 lg:grid-cols-8'} gap-1.5 sm:gap-2`}>
             {isStudent ? (
               /* EXACT 8 STUDENT TABS WITH DASHBOARD AND TASK VIEW */
               <>
@@ -580,6 +528,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-400 shrink-0" />
                   <span className="truncate">Ask AI Tutor</span>
+                </button>
+
+                {/* 7. Class Leaderboard */}
+                <button
+                  onClick={() => setCurrentTab('leaderboard')}
+                  title="Class Leaderboards & Student Rankings"
+                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
+                    currentTab === 'leaderboard'
+                      ? 'bg-purple-600 text-white font-semibold shadow-xs ring-1 ring-purple-500/50'
+                      : theme === 'dark'
+                        ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                        : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
+                  }`}
+                >
+                  <Trophy className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-500 shrink-0" />
+                  <span className="truncate">Leaderboard</span>
                 </button>
               </>
             )}

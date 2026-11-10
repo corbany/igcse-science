@@ -7,7 +7,11 @@ import {
   BadgeRarity 
 } from '../types';
 import { getClassStudentLeaderboard, ClassLeaderboardData } from '../services/rankingService';
-import { fetchStudentEnrolledClasses, ClassItem } from '../services/firestoreService';
+import { 
+  fetchStudentEnrolledClasses, 
+  fetchClassesByInstructor, 
+  ClassItem 
+} from '../services/firestoreService';
 import { calculateStudentLevel } from '../services/badgeService';
 import { 
   Trophy, 
@@ -50,6 +54,7 @@ interface StudentLeaderboardProps {
   onNavigateToLessons?: (subtopicCode?: string) => void;
   onNavigateToQuizzes?: (topicCode?: string) => void;
   onNavigateToProfile?: () => void;
+  onNavigateToTeachingHub?: () => void;
 }
 
 export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
@@ -58,7 +63,8 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
   enrolledClassIds = [],
   onNavigateToLessons,
   onNavigateToQuizzes,
-  onNavigateToProfile
+  onNavigateToProfile,
+  onNavigateToTeachingHub
 }) => {
   const [enrolledClasses, setEnrolledClasses] = useState<ClassItem[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string>(
@@ -81,12 +87,17 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
   const [inspectedStudent, setInspectedStudent] = useState<LeaderboardEntry | null>(null);
   const [inspectedBadgeCategory, setInspectedBadgeCategory] = useState<'all' | 'streak' | 'topic_module' | 'quiz'>('all');
 
-  // Load student's enrolled classes
+  // Load user's classes (support both students and instructors)
   useEffect(() => {
     let isMounted = true;
     async function loadClasses() {
       try {
-        const classes = await fetchStudentEnrolledClasses(user.id);
+        let classes: ClassItem[] = [];
+        if (user.role === 'instructor') {
+          classes = await fetchClassesByInstructor(user.id, user.email);
+        } else {
+          classes = await fetchStudentEnrolledClasses(user.id);
+        }
         if (isMounted) {
           setEnrolledClasses(classes);
           if (classes.length > 0 && !classes.some(c => c.id === selectedClassId)) {
@@ -99,7 +110,7 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
     }
     loadClasses();
     return () => { isMounted = false; };
-  }, [user.id]);
+  }, [user.id, user.role, user.email]);
 
   // Load class-aggregated leaderboard
   const loadLeaderboard = async () => {
@@ -185,6 +196,31 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
   };
 
   if (!loading && enrolledClasses.length === 0) {
+    if (user.role === 'instructor') {
+      return (
+        <div className="rounded-3xl bg-white border border-[#E2E8F0] p-8 sm:p-12 text-center max-w-xl mx-auto space-y-6 shadow-xs my-8 text-slate-800">
+          <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-300 text-amber-700 mx-auto flex items-center justify-center">
+            <Trophy className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900">
+              No Classes Created Yet
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
+              Create your first class in the Teaching Hub to generate a live class leaderboard and monitor student rankings, badges, and quiz totals.
+            </p>
+          </div>
+          {onNavigateToTeachingHub && (
+            <button
+              onClick={onNavigateToTeachingHub}
+              className="px-4 py-2 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl border-2 border-black transition cursor-pointer shadow-xs"
+            >
+              Go to Teaching Hub
+            </button>
+          )}
+        </div>
+      );
+    }
     return (
       <div className="rounded-3xl bg-white border border-[#E2E8F0] p-8 sm:p-12 text-center max-w-xl mx-auto space-y-6 shadow-xs my-8 text-slate-800">
         <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-300 text-amber-700 mx-auto flex items-center justify-center">
@@ -216,7 +252,7 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
                 <Trophy className="w-5 h-5" />
               </div>
               <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
-                Class Leaderboard
+                {user.role === 'instructor' ? 'Instructor Class Leaderboard' : 'Class Leaderboard'}
               </h1>
               {currentClass && (
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
@@ -226,16 +262,24 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
             </div>
 
             <p className="text-xs sm:text-sm text-slate-600 max-w-2xl leading-relaxed font-medium">
-              Track your rank and celebrate achievements with classmates in <strong className="text-slate-900 font-bold">{currentClass?.name || 'your class'}</strong>! 
-              Standings are strictly limited to students in your own class, determined by
-              <strong className="text-slate-900 font-bold"> total badges earned</strong> and 
-              <strong className="text-slate-900 font-bold"> cumulative quiz scores</strong>.
+              {user.role === 'instructor' ? (
+                <>
+                  Inspect rankings, earned badges, and quiz totals for students enrolled in <strong className="text-slate-900 font-bold">{currentClass?.name || 'your class'}</strong>.
+                </>
+              ) : (
+                <>
+                  Track your rank and celebrate achievements with classmates in <strong className="text-slate-900 font-bold">{currentClass?.name || 'your class'}</strong>! 
+                  Standings are strictly limited to students in your own class, determined by
+                  <strong className="text-slate-900 font-bold"> total badges earned</strong> and 
+                  <strong className="text-slate-900 font-bold"> cumulative quiz scores</strong>.
+                </>
+              )}
             </p>
           </div>
 
           {/* Class Switcher & Refresh controls */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
-            {enrolledClasses.length > 1 && (
+            {enrolledClasses.length > 0 && (
               <div className="bg-[#FDFBF7] px-3 py-1.5 rounded-xl border-2 border-black flex items-center gap-2">
                 <Users className="w-3.5 h-3.5 text-teal-700 shrink-0" />
                 <select

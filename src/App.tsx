@@ -623,7 +623,7 @@ export default function App() {
 
   // 4. Authenticated App Experience
   return (
-    <div className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${theme === 'dark' ? 'bg-black text-slate-100' : 'bg-[#FDFBF7] text-slate-800'}`}>
+    <div className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${theme === 'dark' ? 'bg-black text-slate-100' : 'bg-[#EDE6D8] text-slate-900'}`}>
       {/* Top Navigation */}
       <Navbar
         currentTab={currentTab}
@@ -722,7 +722,7 @@ export default function App() {
         </div>
       ) : (
         /* Student Mode indicator */
-        <div className="bg-[#FDFBF7] border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-2">
+        <div className="bg-[#F5EFE6] border-b border-slate-300 px-4 sm:px-6 lg:px-8 py-2">
           <div className="max-w-7xl mx-auto flex items-center justify-between text-xs text-slate-600">
             <div className="flex items-center gap-2">
               <span className="font-bold text-slate-800">Student Space</span>
@@ -812,6 +812,7 @@ export default function App() {
                 setCurrentTab('dashboard');
               }}
               onNavigateToLessons={() => setCurrentTab('lessons')}
+              onNavigateToLeaderboard={() => setCurrentTab('leaderboard')}
             />
           )
         )}
@@ -854,6 +855,7 @@ export default function App() {
                 setCurrentTab('lessons');
               }}
               onNavigateToLessons={() => setCurrentTab('lessons')}
+              onNavigateToLeaderboard={() => setCurrentTab('leaderboard')}
             />
           )
         )}
@@ -866,6 +868,7 @@ export default function App() {
             onNavigateToLessons={handleOpenLesson}
             onNavigateToQuizzes={() => setCurrentTab('quizzes')}
             onNavigateToProfile={() => setCurrentTab('profile')}
+            onNavigateToTeachingHub={() => setCurrentTab('instructor')}
           />
         )}
 
@@ -926,6 +929,7 @@ export default function App() {
                 setCurrentTab('lessons');
               }}
               onNavigateToLessons={() => setCurrentTab('lessons')}
+              onNavigateToLeaderboard={() => setCurrentTab('leaderboard')}
             />
           )
         )}
@@ -995,6 +999,7 @@ export default function App() {
               }}
               onNavigateToLessons={() => setCurrentTab('lessons')}
               onNavigateToRoyale={() => setCurrentTab('royale')}
+              onNavigateToLeaderboard={() => setCurrentTab('leaderboard')}
             />
           ) : (
             <div className="p-8 text-center bg-slate-900 border border-rose-500/40 rounded-3xl space-y-3">

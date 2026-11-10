@@ -135,6 +135,7 @@ export interface ShopItem {
   packNumber?: number;
   stats?: {
     damage?: number;
+    fireRate?: number;
     cooldownSeconds?: number;
     range?: number;
     beamColor?: string;
@@ -423,6 +424,7 @@ export const SHOP_ITEMS: ShopItem[] = [
     icon: '🔥',
     stats: {
       damage: 16,
+      fireRate: 4.5,
       cooldownSeconds: 0.22,
       range: 340,
       beamColor: '#f97316',
@@ -448,6 +450,7 @@ export const SHOP_ITEMS: ShopItem[] = [
     icon: '🧪',
     stats: {
       damage: 20,
+      fireRate: 3.1,
       cooldownSeconds: 0.32,
       range: 380,
       beamColor: '#10b981',
@@ -473,6 +476,7 @@ export const SHOP_ITEMS: ShopItem[] = [
     icon: '❄️',
     stats: {
       damage: 28,
+      fireRate: 2.2,
       cooldownSeconds: 0.45,
       range: 460,
       beamColor: '#06b6d4',
@@ -498,6 +502,7 @@ export const SHOP_ITEMS: ShopItem[] = [
     icon: '🔦',
     stats: {
       damage: 38,
+      fireRate: 1.8,
       cooldownSeconds: 0.55,
       range: 640,
       beamColor: '#ef4444',
@@ -523,6 +528,7 @@ export const SHOP_ITEMS: ShopItem[] = [
     icon: '⚡',
     stats: {
       damage: 35,
+      fireRate: 3.6,
       cooldownSeconds: 0.28,
       range: 440,
       beamColor: '#38bdf8',
@@ -548,6 +554,7 @@ export const SHOP_ITEMS: ShopItem[] = [
     icon: '🔊',
     stats: {
       damage: 48,
+      fireRate: 1.4,
       cooldownSeconds: 0.70,
       range: 500,
       beamColor: '#eab308',
@@ -573,6 +580,7 @@ export const SHOP_ITEMS: ShopItem[] = [
     icon: '🌀',
     stats: {
       damage: 68,
+      fireRate: 1.1,
       cooldownSeconds: 0.95,
       range: 640,
       beamColor: '#a855f7',
@@ -598,6 +606,7 @@ export const SHOP_ITEMS: ShopItem[] = [
     icon: '☣️',
     stats: {
       damage: 88,
+      fireRate: 0.9,
       cooldownSeconds: 1.15,
       range: 780,
       beamColor: '#84cc16',
@@ -623,6 +632,7 @@ export const SHOP_ITEMS: ShopItem[] = [
     icon: '🌌',
     stats: {
       damage: 54,
+      fireRate: 4.0,
       cooldownSeconds: 0.25,
       range: 680,
       beamColor: '#06b6d4',
@@ -648,6 +658,7 @@ export const SHOP_ITEMS: ShopItem[] = [
     icon: '⚛️',
     stats: {
       damage: 115,
+      fireRate: 0.7,
       cooldownSeconds: 1.35,
       range: 750,
       beamColor: '#f43f5e',
@@ -864,12 +875,12 @@ const DEFAULT_GAME_PROFILE: UserGameProfile = {
   wood: 25,
   brick: 15,
   metal: 10,
-  avatar: 'classic_chemist',
-  equippedSkin: 'classic_chemist',
-  equippedWeapon: 'bunsen_burner',
+  avatar: 'cultist',
+  equippedSkin: 'cultist',
+  equippedWeapon: 'wpn_starter_blaster',
   equippedPower: 'element_shield',
-  inventory: ['classic_chemist', 'bunsen_burner', 'element_shield'],
-  unlockedSkins: ['classic_chemist'],
+  inventory: ['cultist', 'wpn_starter_blaster', 'bunsen_burner', 'element_shield'],
+  unlockedSkins: ['cultist'],
   monthlyCrown: false
 };
 
@@ -897,37 +908,35 @@ export const subscribeToGameProfile = (
         const level = Number(data.level || calculateLevelFromXP(xp).level);
         
         const isInstructor = data.role === 'instructor';
-        const all20SkinIds = [
-          'quantum_physicist', 'laser_optics_tech', 'polar_astronomer', 'circuit_engineer',
-          'robotics_mechanist', 'biohazard_specialist', 'virology_researcher', 'plant_pathologist',
-          'field_botanist', 'field_entomologist', 'crystallographer', 'marine_diver',
-          'paleontologist', 'cryo_glaciologist', 'mining_geologist', 'radiation_hazard_suit',
-          'pharmaceutical_tech', 'bioinformatics_dev', 'wildlife_ecologist', 'classic_chemist',
-          // Aliases & legacy IDs
-          'cyber_scientist', 'cyber_chemist', 'tesla_electrician', 'tesla_overlord',
-          'particle_specialist', 'supernova_cosmologist', 'botanist', 'geneticist',
-          'neuro_technologist', 'chrono_quantum_pioneer', 'astrophysicist', 'exoplanet_geologist',
-          'cosmic_radiation_tech', 'astro_chemist', 'mad_alchemist', 'alchemist_robes',
-          'cyborg_assistant', 'steampunk_inventor', 'antimatter_researcher'
+        const ALL_FANTASY_SKIN_IDS = [
+          'cultist', 'skeleton_warrior', 'goblin', 'slime', 'archer_hero', 'rogue',
+          'necromancer', 'discoverer', 'bat', 'white_mage', 'paladin', 'dark_knight',
+          'warlock', 'elitearcher', 'knight_hero', 'dragon_slayer', 'shadow_assassin',
+          'slime_king', 'overlord'
         ];
-        const all10WeaponIds = [
-          'bunsen_burner', 'acid_pipette', 'cryo_freeze_ray', 'laser_pointer',
-          'tesla_coil', 'centrifuge_sonic_blaster', 'particle_accelerator', 'biohazard_railgun',
-          'quantum_displacer', 'antimatter_annihilator'
+        const ALL_WEAPON_IDS = [
+          'wpn_starter_blaster', 'bunsen_burner', 'acid_pipette', 'wpn_heavy_cannon',
+          'wpn_rapid_repeater', 'wpn_sniper_railgun', 'wpn_freezer_lance', 'wpn_solar_disintegrator',
+          'wpn_quantum_rifle', 'wpn_antimatter_rifle'
         ];
         const allPowerIds = ['element_shield', 'damage_boost', 'quantum_dash', 'matter_synthesizer'];
 
         const inv = isInstructor 
-          ? Array.from(new Set([...all20SkinIds, ...all10WeaponIds, ...allPowerIds]))
-          : (Array.isArray(data.inventory) ? data.inventory : DEFAULT_GAME_PROFILE.inventory);
+          ? Array.from(new Set([...ALL_FANTASY_SKIN_IDS, ...ALL_WEAPON_IDS, ...allPowerIds]))
+          : (Array.isArray(data.inventory) ? [...data.inventory] : [...DEFAULT_GAME_PROFILE.inventory]);
         
+        if (!inv.includes('cultist')) inv.push('cultist');
+        if (!inv.includes('wpn_starter_blaster')) inv.push('wpn_starter_blaster');
+        if (!inv.includes('bunsen_burner')) inv.push('bunsen_burner');
+
         const skins = isInstructor 
-          ? all20SkinIds 
+          ? ALL_FANTASY_SKIN_IDS 
           : (Array.isArray(data.unlockedSkins) 
-              ? data.unlockedSkins 
-              : inv.filter(id => all20SkinIds.includes(id)));
-        if (!skins.includes('classic_chemist')) {
-          skins.unshift('classic_chemist');
+              ? [...data.unlockedSkins] 
+              : inv.filter(id => ALL_FANTASY_SKIN_IDS.includes(id)));
+        
+        if (!skins.includes('cultist')) {
+          skins.unshift('cultist');
         }
 
         const profile: UserGameProfile = {
@@ -935,7 +944,7 @@ export const subscribeToGameProfile = (
           level: isInstructor ? 99 : level,
           xp,
           role: data.role,
-          gold: isInstructor ? 999999 : Math.max(0, Number(data.gold ?? DEFAULT_GAME_PROFILE.gold)),
+          gold: isInstructor ? 999999 : Math.max(0, Number(data.gold ?? data.goldCoins ?? DEFAULT_GAME_PROFILE.gold)),
           wood: isInstructor ? 9999 : Number(data.wood ?? DEFAULT_GAME_PROFILE.wood),
           brick: isInstructor ? 9999 : Number(data.brick ?? DEFAULT_GAME_PROFILE.brick),
           metal: isInstructor ? 9999 : Number(data.metal ?? DEFAULT_GAME_PROFILE.metal),

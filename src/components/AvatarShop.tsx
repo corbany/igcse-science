@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Coins, 
   Check, 
@@ -9,7 +9,11 @@ import {
   Package, 
   Crosshair,
   Sparkles,
-  Zap
+  Zap,
+  Shield,
+  Activity,
+  Flame,
+  Eye
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { 
@@ -17,9 +21,10 @@ import {
   UserGameProfile, 
   subscribeToGameProfile,
   equipItem,
-  buyShopItem,
   ShopItem,
-  BattleEventState
+  BattleEventState,
+  getLocalGameItem,
+  setLocalGameItem
 } from '../services/firebaseGameService';
 import { db } from '../services/firebaseAuth';
 import { doc, setDoc, updateDoc, increment, arrayUnion, runTransaction } from 'firebase/firestore';
@@ -153,7 +158,16 @@ class PackSoundFX {
 
 const packSfx = new PackSoundFX();
 
+export const RARITY_RANK: Record<ItemRarity, { rank: number; label: string; badgeClass: string }> = {
+  mythic: { rank: 1, label: 'Mythic', badgeClass: 'bg-rose-100 text-rose-900 border-rose-300 font-black' },
+  legendary: { rank: 2, label: 'Legendary', badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-bold' },
+  epic: { rank: 3, label: 'Epic', badgeClass: 'bg-purple-100 text-purple-900 border-purple-300 font-bold' },
+  rare: { rank: 4, label: 'Rare', badgeClass: 'bg-cyan-100 text-cyan-900 border-cyan-300 font-bold' },
+  common: { rank: 5, label: 'Common', badgeClass: 'bg-slate-100 text-slate-800 border-slate-300 font-semibold' }
+};
+
 export const ALL_WEAPON_ITEMS: ShopItem[] = [
+  // --- COMMON (Rank 5) ---
   {
     id: 'wpn_starter_blaster',
     name: 'Laboratory Pulse Blaster',
@@ -162,8 +176,30 @@ export const ALL_WEAPON_ITEMS: ShopItem[] = [
     price: 0,
     icon: '🔫',
     description: 'Standard issue laboratory scientific blaster for precision target practice.',
-    stats: { damage: 18, cooldownSeconds: 0.35, range: 450, specialEffect: 'laser' }
+    stats: { damage: 18, fireRate: 2.9, cooldownSeconds: 0.35, range: 450, specialEffect: 'laser' }
   },
+  {
+    id: 'bunsen_burner',
+    name: 'Thermal Bunsen Burner',
+    category: 'weapon',
+    rarity: 'common',
+    price: 0,
+    icon: '🔥',
+    description: 'Pressurized laboratory methane burner with continuous thermal cone spray.',
+    stats: { damage: 16, fireRate: 4.5, cooldownSeconds: 0.22, range: 340, specialEffect: 'thermal' }
+  },
+  {
+    id: 'acid_pipette',
+    name: 'Corrosive Acid Pipette',
+    category: 'weapon',
+    rarity: 'common',
+    price: 80,
+    icon: '🧪',
+    description: 'Pressurized jet of dilute hydrochloric acid that rapidly dissolves defenses.',
+    stats: { damage: 20, fireRate: 3.1, cooldownSeconds: 0.32, range: 380, specialEffect: 'acid' }
+  },
+
+  // --- RARE (Rank 4) ---
   {
     id: 'wpn_heavy_cannon',
     name: 'Tesla Ion Cannon',
@@ -172,7 +208,7 @@ export const ALL_WEAPON_ITEMS: ShopItem[] = [
     price: 180,
     icon: '⚡',
     description: 'Fires high-voltage electromagnetic rounds that pierce multiple targets.',
-    stats: { damage: 45, cooldownSeconds: 0.85, range: 600, specialEffect: 'lightning' }
+    stats: { damage: 45, fireRate: 1.2, cooldownSeconds: 0.85, range: 600, specialEffect: 'lightning' }
   },
   {
     id: 'wpn_rapid_repeater',
@@ -182,8 +218,10 @@ export const ALL_WEAPON_ITEMS: ShopItem[] = [
     price: 150,
     icon: '🌀',
     description: 'Rapid-fire quantum particle accelerator with high cycle rate.',
-    stats: { damage: 12, cooldownSeconds: 0.12, range: 380, specialEffect: 'plasma' }
+    stats: { damage: 12, fireRate: 8.3, cooldownSeconds: 0.12, range: 380, specialEffect: 'plasma' }
   },
+
+  // --- EPIC (Rank 3) ---
   {
     id: 'wpn_sniper_railgun',
     name: 'Linear Accelerator Railgun',
@@ -192,7 +230,7 @@ export const ALL_WEAPON_ITEMS: ShopItem[] = [
     price: 260,
     icon: '🎯',
     description: 'Long-range electromagnetic projectile rifle with extreme velocity.',
-    stats: { damage: 85, cooldownSeconds: 1.4, range: 900, specialEffect: 'beam' }
+    stats: { damage: 85, fireRate: 0.7, cooldownSeconds: 1.4, range: 900, specialEffect: 'beam' }
   },
   {
     id: 'wpn_freezer_lance',
@@ -202,8 +240,10 @@ export const ALL_WEAPON_ITEMS: ShopItem[] = [
     price: 240,
     icon: '❄️',
     description: 'Emits a cryogenic wave that slows targets and freezes projectiles.',
-    stats: { damage: 32, cooldownSeconds: 0.5, range: 500, specialEffect: 'frost' }
+    stats: { damage: 32, fireRate: 2.0, cooldownSeconds: 0.5, range: 500, specialEffect: 'frost' }
   },
+
+  // --- LEGENDARY (Rank 2) ---
   {
     id: 'wpn_solar_disintegrator',
     name: 'Solar Thermal Disintegrator',
@@ -212,7 +252,19 @@ export const ALL_WEAPON_ITEMS: ShopItem[] = [
     price: 360,
     icon: '☀️',
     description: 'Channels concentrated solar radiation for massive thermal area damage.',
-    stats: { damage: 95, cooldownSeconds: 1.2, range: 750, specialEffect: 'solar' }
+    stats: { damage: 95, fireRate: 0.8, cooldownSeconds: 1.2, range: 750, specialEffect: 'solar' }
+  },
+
+  // --- MYTHIC (Rank 1) ---
+  {
+    id: 'quantum_displacer',
+    name: 'Quantum Displacer Rifle',
+    category: 'weapon',
+    rarity: 'mythic',
+    price: 780,
+    icon: '🌌',
+    description: 'Harnesses quantum entanglement to fire tachyon bolts with phase warp.',
+    stats: { damage: 54, fireRate: 4.0, cooldownSeconds: 0.25, range: 680, specialEffect: 'tachyon' }
   },
   {
     id: 'wpn_antimatter_rifle',
@@ -220,9 +272,9 @@ export const ALL_WEAPON_ITEMS: ShopItem[] = [
     category: 'weapon',
     rarity: 'mythic',
     price: 500,
-    icon: '🌌',
+    icon: '⚛️',
     description: 'Experimental antimatter particle rifle with maximum theoretical power.',
-    stats: { damage: 120, cooldownSeconds: 1.5, range: 850, specialEffect: 'void' }
+    stats: { damage: 120, fireRate: 0.7, cooldownSeconds: 1.5, range: 850, specialEffect: 'void' }
   }
 ];
 
@@ -266,11 +318,39 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
   }, [user?.id]);
 
   const currentGold = gameProfile?.gold ?? 100;
-  const unlockedSkins = gameProfile?.unlockedSkins ?? ['skin_warrior'];
-  const equippedSkin = gameProfile?.equippedSkin ?? 'skin_warrior';
+  const unlockedSkins = gameProfile?.unlockedSkins ?? ['cultist'];
+  const equippedSkin = gameProfile?.equippedSkin ?? 'cultist';
   const equippedWeapon = gameProfile?.equippedWeapon ?? 'wpn_starter_blaster';
-  const inventory = gameProfile?.inventory ?? ['wpn_starter_blaster'];
+  const inventory = gameProfile?.inventory ?? ['wpn_starter_blaster', 'bunsen_burner', 'cultist'];
   const isInstructor = user?.role === 'instructor';
+
+  // Sort skins by rarity rank (Rank 1 Mythic -> Rank 2 Legendary -> Rank 3 Epic -> Rank 4 Rare -> Rank 5 Common)
+  const sortedSkins = useMemo(() => {
+    return [...ALL_SKIN_CARDS].sort((a, b) => {
+      const rankA = RARITY_RANK[a.rarity]?.rank ?? 99;
+      const rankB = RARITY_RANK[b.rarity]?.rank ?? 99;
+      return rankA - rankB;
+    });
+  }, []);
+
+  // Sort weapons by rarity rank (Rank 1 Mythic -> Rank 2 Legendary -> Rank 3 Epic -> Rank 4 Rare -> Rank 5 Common)
+  const sortedWeapons = useMemo(() => {
+    return [...ALL_WEAPON_ITEMS].sort((a, b) => {
+      const rankA = RARITY_RANK[a.rarity]?.rank ?? 99;
+      const rankB = RARITY_RANK[b.rarity]?.rank ?? 99;
+      return rankA - rankB;
+    });
+  }, []);
+
+  const unlockedSkinsCount = useMemo(() => {
+    if (isInstructor) return ALL_SKIN_CARDS.length;
+    return ALL_SKIN_CARDS.filter(c => unlockedSkins.includes(c.id) || c.id === 'cultist').length;
+  }, [isInstructor, unlockedSkins]);
+
+  const unlockedWeaponsCount = useMemo(() => {
+    if (isInstructor) return ALL_WEAPON_ITEMS.length;
+    return ALL_WEAPON_ITEMS.filter(w => inventory.includes(w.id) || w.id === 'wpn_starter_blaster' || w.id === 'bunsen_burner').length;
+  }, [isInstructor, inventory]);
 
   const rollRarity = (odds: BoosterPackConfig['odds']): ItemRarity => {
     const rand = Math.random() * 100;
@@ -303,30 +383,77 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
         if (matchingSkins.length === 0) matchingSkins = ALL_SKIN_CARDS;
         const selected = matchingSkins[Math.floor(Math.random() * matchingSkins.length)];
         reward = { type: 'skin', item: selected };
-        duplicate = unlockedSkins.includes(selected.id);
+        duplicate = unlockedSkins.includes(selected.id) || selected.id === 'cultist';
       } else {
         let matchingWeapons = ALL_WEAPON_ITEMS.filter(w => w.rarity === rolledRarity);
         if (matchingWeapons.length === 0) matchingWeapons = ALL_WEAPON_ITEMS;
         const selected = matchingWeapons[Math.floor(Math.random() * matchingWeapons.length)];
         reward = { type: 'weapon', item: selected };
-        duplicate = inventory.includes(selected.id);
+        duplicate = inventory.includes(selected.id) || selected.id === 'wpn_starter_blaster' || selected.id === 'bunsen_burner';
       }
 
-      const userDocRef = doc(db, 'users', user.id);
-      await runTransaction(db, async (txn) => {
-        if (!isInstructor) {
-          txn.update(userDocRef, { goldCoins: increment(-pack.price) });
-        }
-        if (reward.type === 'skin') {
-          if (!duplicate) {
-            txn.update(userDocRef, { unlockedSkins: arrayUnion(reward.item.id) });
-          }
-        } else {
-          if (!duplicate) {
-            txn.update(userDocRef, { inventory: arrayUnion(reward.item.id) });
-          }
-        }
+      const newGold = isInstructor ? currentGold : Math.max(0, currentGold - pack.price);
+      const updatedUnlockedSkins = reward.type === 'skin'
+        ? (unlockedSkins.includes(reward.item.id) ? unlockedSkins : [...unlockedSkins, reward.item.id])
+        : unlockedSkins;
+      const updatedInventory = reward.type === 'weapon'
+        ? (inventory.includes(reward.item.id) ? inventory : [...inventory, reward.item.id])
+        : (reward.type === 'skin' ? (inventory.includes(reward.item.id) ? inventory : [...inventory, reward.item.id]) : inventory);
+
+      // 1. Immediately update React state so the newly unlocked card is visibly revealed in the collection instantly!
+      setGameProfile(prev => {
+        const base = prev || {
+          uid: user.id,
+          level: 1,
+          xp: 0,
+          role: user.role,
+          gold: newGold,
+          wood: 25,
+          brick: 15,
+          metal: 10,
+          avatar: 'cultist',
+          equippedSkin: 'cultist',
+          equippedWeapon: 'wpn_starter_blaster',
+          equippedPower: 'element_shield',
+          inventory: updatedInventory,
+          unlockedSkins: updatedUnlockedSkins,
+          monthlyCrown: false
+        };
+        return {
+          ...base,
+          gold: newGold,
+          unlockedSkins: updatedUnlockedSkins,
+          inventory: updatedInventory
+        };
       });
+
+      // 2. Immediately cache to local storage
+      const localKey = `igcse_game_profile_${user.id}`;
+      try {
+        const cached = getLocalGameItem<any>(localKey, {});
+        setLocalGameItem(localKey, {
+          ...cached,
+          gold: newGold,
+          unlockedSkins: updatedUnlockedSkins,
+          inventory: updatedInventory
+        });
+      } catch (cacheErr) {
+        console.warn('Cache write warning:', cacheErr);
+      }
+
+      // 3. Persist to Firestore with merge
+      try {
+        const userDocRef = doc(db, 'users', user.id);
+        const firestorePayload: Record<string, any> = {
+          gold: newGold,
+          goldCoins: newGold,
+          unlockedSkins: updatedUnlockedSkins,
+          inventory: updatedInventory
+        };
+        await setDoc(userDocRef, firestorePayload, { merge: true });
+      } catch (firestoreErr) {
+        console.warn('Firestore update note (preserved in profile):', firestoreErr);
+      }
 
       setPulledReward(reward);
       setIsDuplicate(duplicate);
@@ -341,24 +468,40 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
 
   const handleEquipSkin = async (skinId: string) => {
     if (!user?.id) return;
+    setGameProfile(prev => prev ? ({ ...prev, equippedSkin: skinId, avatar: skinId }) : prev);
+    const localKey = `igcse_game_profile_${user.id}`;
+    try {
+      const cached = getLocalGameItem<any>(localKey, {});
+      setLocalGameItem(localKey, { ...cached, equippedSkin: skinId, avatar: skinId });
+    } catch (e) {}
+
     try {
       const userDocRef = doc(db, 'users', user.id);
       await setDoc(userDocRef, { equippedSkin: skinId, avatar: skinId }, { merge: true });
       await equipItem(user.id, 'skin', skinId);
       setFeedback(`Equipped ${ALL_SKIN_CARDS.find(c => c.id === skinId)?.name || 'Skin'} successfully.`);
     } catch (err) {
-      console.error('Error equipping skin:', err);
+      console.warn('Error equipping skin:', err);
+      setFeedback(`Equipped ${ALL_SKIN_CARDS.find(c => c.id === skinId)?.name || 'Skin'} successfully.`);
     }
   };
 
   const handleEquipWeapon = async (weaponId: string) => {
     if (!user?.id) return;
+    packSfx.playEquip();
+    setGameProfile(prev => prev ? ({ ...prev, equippedWeapon: weaponId }) : prev);
+    const localKey = `igcse_game_profile_${user.id}`;
     try {
-      packSfx.playEquip();
+      const cached = getLocalGameItem<any>(localKey, {});
+      setLocalGameItem(localKey, { ...cached, equippedWeapon: weaponId });
+    } catch (e) {}
+
+    try {
       await equipItem(user.id, 'weapon', weaponId);
       setFeedback('Equipped weapon successfully.');
     } catch (err) {
-      console.error('Error equipping weapon:', err);
+      console.warn('Error equipping weapon:', err);
+      setFeedback('Equipped weapon successfully.');
     }
   };
 
@@ -445,7 +588,7 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
             }`}
           >
             <Layers className="w-4 h-4" />
-            <span>My Characters ({unlockedSkins.length} / {ALL_SKIN_CARDS.length})</span>
+            <span>My Characters ({unlockedSkinsCount} / {ALL_SKIN_CARDS.length})</span>
           </button>
 
           <button
@@ -457,7 +600,7 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
             }`}
           >
             <Crosshair className="w-4 h-4" />
-            <span>Weapons and Tools</span>
+            <span>Weapons and Tools ({unlockedWeaponsCount} / {ALL_WEAPON_ITEMS.length})</span>
           </button>
         </div>
       </div>
@@ -525,139 +668,316 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
 
       {/* TAB 2: MY CHARACTERS COLLECTION */}
       {activeTab === 'collection' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-          {ALL_SKIN_CARDS.map((card) => {
-            const isUnlocked = isInstructor || unlockedSkins.includes(card.id);
-            const isEquipped = equippedSkin === card.id || FANTASY_SKIN_ALIASES[equippedSkin] === card.id;
+        <div className="space-y-4">
+          <div className="p-3.5 bg-[#EDE6D8] dark:bg-zinc-900 border-2 border-black dark:border-zinc-700 rounded-xl text-xs text-slate-800 dark:text-zinc-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Package className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
+              <span>
+                <strong>Card Pack Exclusives:</strong> All 19 champions are ranked by rarity. Locked skins remain concealed until pulled in a Booster Pack.
+              </span>
+            </div>
+            <button
+              onClick={() => setActiveTab('shop')}
+              className="px-3 py-1.5 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-lg shrink-0 cursor-pointer border border-black"
+            >
+              Open Packs
+            </button>
+          </div>
 
-            return (
-              <div
-                key={card.id}
-                className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col justify-between space-y-3"
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-600">
-                      {card.subject || 'Science'}
-                    </span>
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 border border-slate-300">
-                      {card.rarity}
-                    </span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            {sortedSkins.map((card) => {
+              const isUnlocked = isInstructor || unlockedSkins.includes(card.id) || card.id === 'cultist';
+              const isEquipped = equippedSkin === card.id || FANTASY_SKIN_ALIASES[equippedSkin] === card.id;
+              const rankInfo = RARITY_RANK[card.rarity] || { rank: 5, label: card.rarity, badgeClass: 'bg-slate-100 text-slate-800 border-slate-300' };
+
+              if (!isUnlocked) {
+                // HIDDEN LOCKED SKIN
+                return (
+                  <div
+                    key={card.id}
+                    className="bg-white dark:bg-black border-2 border-slate-300 dark:border-zinc-800 rounded-xl p-4 shadow-xs flex flex-col justify-between space-y-3 opacity-90"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                          Undiscovered Champion
+                        </span>
+                        <span className={`text-[11px] px-2 py-0.5 rounded border ${rankInfo.badgeClass}`}>
+                          Rank {rankInfo.rank} • {rankInfo.label}
+                        </span>
+                      </div>
+
+                      <div className="bg-[#EDE6D8] dark:bg-zinc-950 border-2 border-dashed border-slate-400 dark:border-zinc-800 rounded-lg p-3 flex flex-col items-center justify-center h-28 text-center">
+                        <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 flex items-center justify-center text-slate-600 dark:text-zinc-400">
+                          <Lock className="w-5 h-5" />
+                        </div>
+                        <span className="text-[11px] font-bold text-slate-700 dark:text-zinc-300 mt-1.5">
+                          Hidden Character
+                        </span>
+                      </div>
+
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-700 dark:text-zinc-300">
+                          🔒 Undiscovered {card.rarity.charAt(0).toUpperCase() + card.rarity.slice(1)} Skin
+                        </h3>
+                        <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1 leading-relaxed">
+                          Defense, speed, and avatar abilities are hidden until unlocked through a Science Card Pack.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => setActiveTab('shop')}
+                      className="w-full py-2 bg-[#EDE6D8] hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200 border-2 border-black dark:border-zinc-700 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Package className="w-3.5 h-3.5 text-amber-700" />
+                      <span>Unlock via Card Packs</span>
+                    </button>
                   </div>
+                );
+              }
 
-                  <div className="bg-[#FDFBF7] border border-slate-200 rounded-lg p-3 flex items-center justify-center h-28">
-                    <img 
-                      src={card.portraitPath || card.spritePath || `/assets/characters/${card.id}.png`} 
-                      alt={card.name}
-                      className="w-20 h-20 object-contain pixelated"
-                      onError={(e) => {
-                        const fallback = card.spritePath || `/assets/characters/${card.id}.png`;
-                        if (e.currentTarget.src !== fallback) {
-                          e.currentTarget.src = fallback;
-                        }
-                      }}
-                    />
+              // UNLOCKED SKIN: Fully visible with high-res portrait, attributes, ability & equip action
+              return (
+                <div
+                  key={card.id}
+                  className="bg-white dark:bg-black border-2 border-black dark:border-zinc-700 rounded-xl p-4 shadow-xs flex flex-col justify-between space-y-3"
+                >
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-200 border border-emerald-400">
+                          ✓ Unlocked
+                        </span>
+                        <span className="text-xs font-bold text-slate-600 dark:text-zinc-400">
+                          {card.subject || 'Science'}
+                        </span>
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded border ${rankInfo.badgeClass}`}>
+                        Rank {rankInfo.rank} • {rankInfo.label}
+                      </span>
+                    </div>
+
+                    <div className="bg-[#EDE6D8] dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-lg p-2.5 flex items-center justify-center h-28">
+                      <img 
+                        src={card.portraitPath || card.spritePath || `/assets/characters/${card.id}.png`} 
+                        alt={card.name}
+                        className="w-20 h-20 object-contain pixelated"
+                        onError={(e) => {
+                          const fallback = card.spritePath || `/assets/characters/${card.id}.png`;
+                          if (e.currentTarget.src !== fallback) {
+                            e.currentTarget.src = fallback;
+                          }
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">{card.name}</h3>
+                      <p className="text-xs text-slate-600 dark:text-zinc-400">{card.title}</p>
+                    </div>
+
+                    {/* Skin Attributes: Defense and Speed */}
+                    <div className="bg-[#EDE6D8] dark:bg-zinc-900/80 border border-slate-300 dark:border-zinc-800 rounded-lg p-2.5 text-xs space-y-1.5">
+                      <div>
+                        <div className="flex items-center justify-between text-slate-800 dark:text-zinc-200 font-bold mb-0.5">
+                          <span className="flex items-center gap-1">
+                            <Shield className="w-3 h-3 text-indigo-700" />
+                            <span>Defense</span>
+                          </span>
+                          <span className="font-mono">{card.defense}/100</span>
+                        </div>
+                        <div className="w-full bg-slate-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                          <div 
+                            className="bg-indigo-600 h-full rounded-full transition-all"
+                            style={{ width: `${card.defense}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between text-slate-800 dark:text-zinc-200 font-bold mb-0.5">
+                          <span className="flex items-center gap-1">
+                            <Activity className="w-3 h-3 text-emerald-700" />
+                            <span>Speed</span>
+                          </span>
+                          <span className="font-mono">{card.speed}/100</span>
+                        </div>
+                        <div className="w-full bg-slate-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                          <div 
+                            className="bg-emerald-600 h-full rounded-full transition-all"
+                            style={{ width: `${card.speed}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {card.ability && (
+                      <p className="text-[11px] text-slate-600 dark:text-zinc-400 font-medium">
+                        <strong>Ability:</strong> {card.ability}
+                      </p>
+                    )}
                   </div>
 
                   <div>
-                    <h3 className="text-base font-bold text-slate-800">{card.name}</h3>
-                    <p className="text-xs text-slate-600">{card.title}</p>
+                    {isEquipped ? (
+                      <div className="w-full py-2 bg-emerald-100 dark:bg-emerald-950/80 border-2 border-emerald-500 text-emerald-900 dark:text-emerald-200 rounded-lg text-xs font-bold text-center flex items-center justify-center gap-1.5">
+                        <Check className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-300" />
+                        <span>Equipped</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => handleEquipSkin(card.id)}
+                        className="w-full py-2 bg-slate-900 hover:bg-black text-white rounded-lg text-xs font-bold cursor-pointer transition border-2 border-black"
+                      >
+                        Equip Character
+                      </button>
+                    )}
                   </div>
                 </div>
-
-                <div>
-                  {isEquipped ? (
-                    <div className="w-full py-2 bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-lg text-xs font-bold text-center flex items-center justify-center gap-1.5">
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Equipped</span>
-                    </div>
-                  ) : isUnlocked ? (
-                    <button
-                      onClick={() => handleEquipSkin(card.id)}
-                      className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold cursor-pointer transition"
-                    >
-                      Equip Character
-                    </button>
-                  ) : (
-                    <div className="w-full py-2 bg-slate-100 border border-slate-300 text-slate-500 rounded-lg text-xs font-semibold text-center flex items-center justify-center gap-1.5">
-                      <Lock className="w-3.5 h-3.5" />
-                      <span>Locked (In Packs)</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
       {/* TAB 3: WEAPONS AND ARSENAL */}
       {activeTab === 'armory' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-          {ALL_WEAPON_ITEMS.map((weapon) => {
-            const isOwned = inventory.includes(weapon.id) || weapon.price === 0 || isInstructor;
-            const isEquipped = equippedWeapon === weapon.id;
-            const canAfford = currentGold >= weapon.price;
+        <div className="space-y-4">
+          <div className="p-3.5 bg-[#EDE6D8] dark:bg-zinc-900 border-2 border-black dark:border-zinc-700 rounded-xl text-xs text-slate-800 dark:text-zinc-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Package className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
+              <span>
+                <strong>Card Pack Exclusives:</strong> Weapons can only be unlocked via Science Booster Packs (no direct purchase). Locked weapons remain hidden until unlocked.
+              </span>
+            </div>
+            <button
+              onClick={() => setActiveTab('shop')}
+              className="px-3 py-1.5 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-lg shrink-0 cursor-pointer border border-black"
+            >
+              Open Packs
+            </button>
+          </div>
 
-            return (
-              <div
-                key={weapon.id}
-                className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col justify-between space-y-3"
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-2xl">{weapon.icon}</span>
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 border border-slate-300">
-                      {weapon.rarity}
-                    </span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            {sortedWeapons.map((weapon) => {
+              const isOwned = isInstructor || inventory.includes(weapon.id) || weapon.price === 0 || weapon.id === 'wpn_starter_blaster' || weapon.id === 'bunsen_burner';
+              const isEquipped = equippedWeapon === weapon.id;
+              const rankInfo = RARITY_RANK[weapon.rarity] || { rank: 5, label: weapon.rarity, badgeClass: 'bg-slate-100 text-slate-800 border-slate-300' };
+
+              if (!isOwned) {
+                // HIDDEN LOCKED WEAPON
+                return (
+                  <div
+                    key={weapon.id}
+                    className="bg-white dark:bg-black border-2 border-slate-300 dark:border-zinc-800 rounded-xl p-4 shadow-xs flex flex-col justify-between space-y-3 opacity-90"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                          Undiscovered Weapon
+                        </span>
+                        <span className={`text-[11px] px-2 py-0.5 rounded border ${rankInfo.badgeClass}`}>
+                          Rank {rankInfo.rank} • {rankInfo.label}
+                        </span>
+                      </div>
+
+                      <div className="bg-[#EDE6D8] dark:bg-zinc-950 border-2 border-dashed border-slate-400 dark:border-zinc-800 rounded-lg p-3 flex flex-col items-center justify-center h-28 text-center">
+                        <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 flex items-center justify-center text-slate-600 dark:text-zinc-400">
+                          <Lock className="w-5 h-5" />
+                        </div>
+                        <span className="text-[11px] font-bold text-slate-700 dark:text-zinc-300 mt-1.5">
+                          Hidden Arsenal
+                        </span>
+                      </div>
+
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-700 dark:text-zinc-300">
+                          🔒 Undiscovered {weapon.rarity.charAt(0).toUpperCase() + weapon.rarity.slice(1)} Weapon
+                        </h3>
+                        <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1 leading-relaxed">
+                          Damage, fire rate, and firing mechanics are concealed until pulled from a Science Booster Pack.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => setActiveTab('shop')}
+                      className="w-full py-2 bg-[#EDE6D8] hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200 border-2 border-black dark:border-zinc-700 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Package className="w-3.5 h-3.5 text-amber-700" />
+                      <span>Unlock via Card Packs</span>
+                    </button>
+                  </div>
+                );
+              }
+
+              // UNLOCKED WEAPON: Fully visible with icon, attributes, and equip option
+              return (
+                <div
+                  key={weapon.id}
+                  className="bg-white dark:bg-black border-2 border-black dark:border-zinc-700 rounded-xl p-4 shadow-xs flex flex-col justify-between space-y-3"
+                >
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl">{weapon.icon}</span>
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-200 border border-emerald-400">
+                          ✓ Unlocked
+                        </span>
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded border ${rankInfo.badgeClass}`}>
+                        Rank {rankInfo.rank} • {rankInfo.label}
+                      </span>
+                    </div>
+
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">{weapon.name}</h3>
+                      <p className="text-xs text-slate-600 dark:text-zinc-400 mt-0.5">{weapon.description}</p>
+                    </div>
+
+                    {/* Weapon Attributes: Damage, Fire Rate, Range */}
+                    <div className="bg-[#EDE6D8] dark:bg-zinc-900/80 border border-slate-300 dark:border-zinc-800 rounded-lg p-2.5 text-xs text-slate-800 dark:text-zinc-200 grid grid-cols-3 gap-2 text-center">
+                      <div className="p-1 bg-white/70 dark:bg-black/40 rounded border border-slate-300 dark:border-zinc-800">
+                        <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400 block">Damage</span>
+                        <strong className="text-rose-700 dark:text-rose-400 font-mono text-xs">{weapon.stats?.damage || 18} HP</strong>
+                      </div>
+                      <div className="p-1 bg-white/70 dark:bg-black/40 rounded border border-slate-300 dark:border-zinc-800">
+                        <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400 block">Fire Rate</span>
+                        <strong className="text-indigo-700 dark:text-indigo-400 font-mono text-xs">{weapon.stats?.fireRate || 2.5}/s</strong>
+                      </div>
+                      <div className="p-1 bg-white/70 dark:bg-black/40 rounded border border-slate-300 dark:border-zinc-800">
+                        <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-zinc-400 block">Range</span>
+                        <strong className="text-emerald-700 dark:text-emerald-400 font-mono text-xs">{weapon.stats?.range || 400}m</strong>
+                      </div>
+                    </div>
+
+                    {weapon.stats?.specialEffect && (
+                      <p className="text-[11px] text-slate-600 dark:text-zinc-400 font-medium">
+                        <strong>Effect:</strong> {weapon.stats.specialEffect}
+                      </p>
+                    )}
                   </div>
 
                   <div>
-                    <h3 className="text-base font-bold text-slate-800">{weapon.name}</h3>
-                    <p className="text-xs text-slate-600 mt-1">{weapon.description}</p>
-                  </div>
-
-                  <div className="bg-[#FDFBF7] border border-slate-200 rounded-lg p-2.5 text-xs text-slate-700">
-                    <p>Damage: <strong>{weapon.stats?.damage} HP</strong></p>
-                    <p>Range: <strong>{weapon.stats?.range}m</strong></p>
+                    {isEquipped ? (
+                      <div className="w-full py-2 bg-emerald-100 dark:bg-emerald-950/80 border-2 border-emerald-500 text-emerald-900 dark:text-emerald-200 rounded-lg text-xs font-bold text-center flex items-center justify-center gap-1.5">
+                        <Check className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-300" />
+                        <span>Equipped</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => handleEquipWeapon(weapon.id)}
+                        className="w-full py-2 bg-slate-900 hover:bg-black text-white rounded-lg text-xs font-bold cursor-pointer transition border-2 border-black"
+                      >
+                        Equip Weapon
+                      </button>
+                    )}
                   </div>
                 </div>
-
-                <div>
-                  {isEquipped ? (
-                    <div className="w-full py-2 bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-lg text-xs font-bold text-center flex items-center justify-center gap-1.5">
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Equipped</span>
-                    </div>
-                  ) : isOwned ? (
-                    <button
-                      onClick={() => handleEquipWeapon(weapon.id)}
-                      className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold cursor-pointer transition"
-                    >
-                      Equip Weapon
-                    </button>
-                  ) : (
-                    <button
-                      onClick={async () => {
-                        if (user?.id) {
-                          const res = await buyShopItem(user.id, weapon, currentGold, inventory);
-                          if (!res.success) setFeedback(res.message);
-                        }
-                      }}
-                      disabled={!canAfford}
-                      className={`w-full py-2 rounded-lg text-xs font-bold transition ${
-                        canAfford
-                          ? 'bg-slate-800 hover:bg-slate-700 text-white cursor-pointer'
-                          : 'bg-slate-100 text-slate-400 border border-slate-300 cursor-not-allowed'
-                      }`}
-                    >
-                      {canAfford ? `Unlock for ${weapon.price} Gold` : `Requires ${weapon.price} Gold`}
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -680,17 +1000,32 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
                 <span className="text-5xl">{pulledReward.item.icon}</span>
               )}
               <h4 className="text-base font-bold text-slate-800 mt-2">{pulledReward.item.name}</h4>
-              <span className="text-xs text-slate-600">Rarity: {pulledReward.item.rarity}</span>
+              <span className="text-xs text-slate-600 font-semibold">
+                Rank {RARITY_RANK[pulledReward.item.rarity]?.rank || 5} • {pulledReward.item.rarity}
+              </span>
+              {pulledReward.type === 'skin' ? (
+                <div className="flex items-center gap-3 text-xs text-slate-700 mt-2 bg-white/80 px-3 py-1 rounded-lg border border-slate-200">
+                  <span>Defense: <strong>{pulledReward.item.defense}/100</strong></span>
+                  <span>•</span>
+                  <span>Speed: <strong>{pulledReward.item.speed}/100</strong></span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3 text-xs text-slate-700 mt-2 bg-white/80 px-3 py-1 rounded-lg border border-slate-200">
+                  <span>Damage: <strong>{pulledReward.item.stats?.damage || 18} HP</strong></span>
+                  <span>•</span>
+                  <span>Fire Rate: <strong>{pulledReward.item.stats?.fireRate || 2.5}/s</strong></span>
+                </div>
+              )}
             </div>
 
-            <div className="flex items-center gap-2 pt-2">
+            <div className="flex flex-col sm:flex-row items-center gap-2 pt-2">
               {pulledReward.type === 'skin' ? (
                 <button
                   onClick={() => {
                     handleEquipSkin(pulledReward.item.id);
                     setPulledReward(null);
                   }}
-                  className="flex-1 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-sm font-bold cursor-pointer"
+                  className="w-full sm:flex-1 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold cursor-pointer transition shadow-xs"
                 >
                   Equip Now
                 </button>
@@ -700,15 +1035,26 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
                     handleEquipWeapon(pulledReward.item.id);
                     setPulledReward(null);
                   }}
-                  className="flex-1 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-sm font-bold cursor-pointer"
+                  className="w-full sm:flex-1 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold cursor-pointer transition shadow-xs"
                 >
                   Equip Now
                 </button>
               )}
 
               <button
+                onClick={() => {
+                  setActiveTab(pulledReward.type === 'skin' ? 'collection' : 'armory');
+                  setPulledReward(null);
+                }}
+                className="w-full sm:flex-1 py-2 bg-[#EDE6D8] hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200 border-2 border-black dark:border-zinc-700 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition shadow-xs"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>View in {pulledReward.type === 'skin' ? 'Collection' : 'Armory'}</span>
+              </button>
+
+              <button
                 onClick={() => setPulledReward(null)}
-                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-bold hover:bg-slate-100 cursor-pointer"
+                className="w-full sm:w-auto px-3.5 py-2 border-2 border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg text-xs font-bold hover:bg-slate-100 dark:hover:bg-zinc-800 cursor-pointer"
               >
                 Done
               </button>
