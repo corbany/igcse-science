@@ -7,7 +7,6 @@ import {
   Calendar, 
   Sparkles, 
   BarChart3, 
-  MessageSquare, 
   Search, 
   User, 
   ShieldCheck, 
@@ -307,7 +306,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       <nav className={`border-t px-2 sm:px-4 lg:px-8 py-2 transition-colors duration-150 ${theme === 'dark' ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-[#FDFBF7]'}`}>
         <div className="max-w-7xl mx-auto">
           {/* Navigation Grid */}
-          <div className={`grid ${isStudent ? 'grid-cols-4 lg:grid-cols-8' : 'grid-cols-4 lg:grid-cols-8'} gap-1.5 sm:gap-2`}>
+          <div className={`grid ${isStudent ? 'grid-cols-4 lg:grid-cols-8' : 'grid-cols-4 lg:grid-cols-7'} gap-1.5 sm:gap-2`}>
             {isStudent ? (
               /* EXACT 8 STUDENT TABS WITH DASHBOARD AND TASK VIEW */
               <>
@@ -388,19 +387,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span className="truncate">Past Papers</span>
                 </button>
 
-                {/* 6. Game Arena */}
-                <button
-                  onClick={() => setCurrentTab('royale')}
-                  title="Revision Royale & Battle Arena"
-                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition select-none cursor-pointer ${
-                    currentTab === 'royale'
-                      ? 'bg-slate-800 text-white shadow-xs'
-                      : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
-                  }`}
-                >
-                  <ShoppingBag className="w-4 h-4 shrink-0" />
-                  <span className="truncate">Game Arena</span>
-                </button>
+                {/* 6. Game Arena - Only visible for corbanb@gisboyshigh.net test access */}
+                {user?.email === 'corbanb@gisboyshigh.net' && (
+                  <button
+                    onClick={() => setCurrentTab('royale')}
+                    title="Revision Royale Arena (Instructor Game Test Mode)"
+                    className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition select-none cursor-pointer ${
+                      currentTab === 'royale'
+                        ? 'bg-slate-800 text-white shadow-xs'
+                        : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
+                    }`}
+                  >
+                    <ShoppingBag className="w-4 h-4 shrink-0 text-amber-500" />
+                    <span className="truncate">Royale Arena</span>
+                    <span className="text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-800 font-bold border border-amber-300">Test</span>
+                  </button>
+                )}
 
                 {/* 7. My Progress */}
                 <button
@@ -514,23 +516,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span className="truncate">Syllabus Notebook</span>
                 </button>
 
-                {/* 6. Ask AI Tutor */}
-                <button
-                  onClick={() => setCurrentTab('chat')}
-                  title="0653 Cambridge Science AI Tutor"
-                  className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1.5 transition-all duration-150 select-none ${
-                    currentTab === 'chat'
-                      ? 'bg-purple-600 text-white font-semibold shadow-xs ring-1 ring-purple-500/50'
-                      : theme === 'dark'
-                        ? 'text-slate-300 hover:text-white hover:bg-slate-800/80'
-                        : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/80'
-                  }`}
-                >
-                  <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-400 shrink-0" />
-                  <span className="truncate">Ask AI Tutor</span>
-                </button>
-
-                {/* 7. Class Leaderboard */}
+                {/* 6. Class Leaderboard */}
                 <button
                   onClick={() => setCurrentTab('leaderboard')}
                   title="Class Leaderboards & Student Rankings"
@@ -554,7 +540,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => setShowMoreTools(prev => !prev)}
                 title="Study Tools Suite & AI Revision Assistant"
                 className={`w-full h-9 sm:h-10 px-1 sm:px-2 rounded-lg text-xs sm:text-[13px] font-medium flex items-center justify-center gap-1 transition-all duration-150 select-none ${
-                  isExtraStudentTab || currentTab === 'chat'
+                  isExtraStudentTab
                     ? (isStudent 
                         ? 'bg-emerald-600 text-white font-semibold shadow-xs ring-1 ring-emerald-500/50' 
                         : 'bg-purple-600 text-white font-semibold shadow-xs ring-1 ring-purple-500/50'
@@ -568,8 +554,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className="truncate">
                   {currentTab === 'schedule' ? 'Schedule' :
                    currentTab === 'recommendations' ? 'AI Path' :
-                   currentTab === 'guidelines' ? 'Guidelines' :
-                   currentTab === 'chat' ? 'AI Tutor' : 'Study Tools'}
+                   currentTab === 'guidelines' ? 'Guidelines' : 'Study Tools'}
                 </span>
                 <ChevronDown className={`w-3 h-3 shrink-0 opacity-70 transition-transform ${showMoreTools ? 'rotate-180' : ''}`} />
               </button>
@@ -582,34 +567,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Study Suite & Revision Tools</p>
                   </div>
 
-                  {/* REVISION ROYALE & SHOP QUICK ACCESS */}
-                  <button
-                    onClick={() => { setCurrentTab('royale'); setShowMoreTools(false); }}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition ${
-                      currentTab === 'royale' 
-                        ? 'bg-amber-500/20 text-amber-300 font-bold'
-                        : theme === 'dark' ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-slate-100 text-slate-800'
-                    }`}
-                  >
-                    <span className="text-base shrink-0">
-                      {isStudent && battleState?.status !== 'IN_PROGRESS' && !battleState?.isLobbyOpen ? '🔒' : isStudent && battleState?.status === 'IN_PROGRESS' ? '⚔️' : '🎮'}
-                    </span>
-                    <div className="text-left">
-                      <div className="font-semibold text-amber-400 flex items-center gap-1.5">
-                        <span>Revision Royale Arena</span>
-                        {isStudent && battleState?.status !== 'IN_PROGRESS' && !battleState?.isLobbyOpen && (
-                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 border border-slate-700">Closed</span>
-                        )}
-                        {isStudent && battleState?.isLobbyOpen && battleState?.status !== 'IN_PROGRESS' && (
-                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">Lobby Open</span>
-                        )}
-                        {isStudent && battleState?.status === 'IN_PROGRESS' && (
-                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse">Live</span>
-                        )}
+                  {/* REVISION ROYALE QUICK ACCESS (Test Mode for corbanb@gisboyshigh.net) */}
+                  {user?.email === 'corbanb@gisboyshigh.net' && (
+                    <button
+                      onClick={() => { setCurrentTab('royale'); setShowMoreTools(false); }}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition ${
+                        currentTab === 'royale' 
+                          ? 'bg-amber-500/20 text-amber-300 font-bold'
+                          : theme === 'dark' ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-slate-100 text-slate-800'
+                      }`}
+                    >
+                      <span className="text-base shrink-0">🎮</span>
+                      <div className="text-left">
+                        <div className="font-semibold text-amber-400 flex items-center gap-1.5">
+                          <span>Revision Royale Arena</span>
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">Test Mode</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-normal">Arena solo testing & Map Designer</div>
                       </div>
-                      <div className="text-[10px] text-slate-400 font-normal">Live 2D battle, wall building & crates</div>
-                    </div>
-                  </button>
+                    </button>
+                  )}
 
                   <button
                     onClick={() => { setCurrentTab('shop'); setShowMoreTools(false); }}
@@ -697,21 +674,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <div className="text-left">
                       <div className="font-semibold">Exam Guidelines</div>
                       <div className="text-[10px] text-slate-400 font-normal">Core vs Extended criteria</div>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => { setCurrentTab('chat'); setShowMoreTools(false); }}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition border-t border-slate-800/60 mt-1 pt-1.5 ${
-                      currentTab === 'chat' 
-                        ? (isStudent ? 'bg-indigo-500/20 text-indigo-400' : 'bg-purple-500/20 text-purple-400')
-                        : theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
-                    }`}
-                  >
-                    <MessageSquare className="w-4 h-4 text-indigo-400 shrink-0" />
-                    <div className="text-left">
-                      <div className="font-semibold text-indigo-300">Ask 0653 AI Tutor</div>
-                      <div className="text-[10px] text-slate-400 font-normal">Cambridge examiner guidance</div>
                     </div>
                   </button>
                 </div>

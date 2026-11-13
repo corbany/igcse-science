@@ -6,6 +6,8 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
 import { getRevisionTasksForTopic, TOPIC_REVISION_CONFIGS } from './src/data/revisionScheduleTasks.ts';
+import { generateDynamicSyllabusQuestions } from './src/data/syllabusQuestionsBank.ts';
+import { isValidQuizQuestion } from './src/data/quizSanitizer.ts';
 
 dotenv.config();
 
@@ -284,28 +286,28 @@ function getSmtpConfig(): SmtpSettings | null {
     if (fs.existsSync(SMTP_CONFIG_FILE)) {
       const raw = fs.readFileSync(SMTP_CONFIG_FILE, 'utf-8');
       const data = JSON.parse(raw);
-      if (data && data.host && data.user) {
+      if (data && data.host && data.user && data.pass && typeof data.pass === 'string' && data.pass.trim().length >= 8) {
         return {
           host: data.host,
           port: parseInt(data.port || '587', 10),
           secure: data.secure === true || data.secure === 'true' || parseInt(data.port, 10) === 465,
           user: data.user,
-          pass: data.pass || '',
+          pass: data.pass.trim(),
           from: data.from || `"Cambridge 0653 Science Hub" <${data.user}>`
         };
       }
     }
   } catch (err) {
-    console.warn('Failed to parse .smtp_config.json:', err);
+    // silently ignore unparseable config
   }
 
-  if (process.env.SMTP_HOST && process.env.SMTP_USER) {
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_PASS.trim().length >= 8) {
     return {
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT || '587', 10),
       secure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465',
       user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS || '',
+      pass: process.env.SMTP_PASS.trim(),
       from: process.env.SMTP_FROM || `"Cambridge 0653 Science Hub" <${process.env.SMTP_USER}>`
     };
   }
@@ -340,13 +342,13 @@ function addEmailLog(item: Omit<EmailLogItem, 'id' | 'timestamp'>) {
 
 function getMailTransporter(): { transporter: any; config: SmtpSettings | null } {
   const config = getSmtpConfig();
-  if (!config || !config.host || !config.user) {
+  if (!config || !config.host || !config.user || !config.pass || config.pass.trim().length < 8) {
     return { transporter: null, config: null };
   }
 
   if (!activeTransporter) {
     try {
-      const cleanPass = config.pass ? config.pass.replace(/\s+/g, '') : '';
+      const cleanPass = config.pass.replace(/\s+/g, '');
       activeTransporter = nodemailer.createTransport({
         pool: true,
         maxConnections: 3,
@@ -365,7 +367,7 @@ function getMailTransporter(): { transporter: any; config: SmtpSettings | null }
         greetingTimeout: 15000
       });
     } catch (err) {
-      console.error('[SMTP Transporter Create Error]', err);
+      activeTransporter = null;
     }
   }
 
@@ -653,14 +655,16 @@ ${taskPortalLink}
     // Asynchronous background delivery using pooled connections
     if (transporter && validRecipients.length > 0) {
       (async () => {
-        console.log(`[Task Email Notification] Starting pooled dispatch to ${validRecipients.length} students...`);
         let deliveredCount = 0;
+        let authFailed = false;
 
         // Process in concurrent batches of 3 to prevent SMTP rate-limiting while finishing quickly
         const BATCH_SIZE = 3;
         for (let i = 0; i < validRecipients.length; i += BATCH_SIZE) {
+          if (authFailed) break;
           const batch = validRecipients.slice(i, i + BATCH_SIZE);
           await Promise.allSettled(batch.map(async (r) => {
+            if (authFailed) return;
             const emailHtml = `
               <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background-color: #0f172a; color: #f8fafc; border-radius: 16px; border: 1px solid #1e293b;">
                 <div style="text-align: center; margin-bottom: 24px;">
@@ -752,22 +756,36 @@ ${taskPortalLink}
                 method: 'smtp',
                 info: `Delivered via ${smtpConfig?.host || 'SMTP server'}`
               });
-              console.log(`[Task Email Notification] (${deliveredCount}/${validRecipients.length}) Delivered to ${r.email}`);
             } catch (err: any) {
-              addEmailLog({
-                taskTitle: task.title,
-                recipientEmail: r.email,
-                recipientName: r.name,
-                status: 'failed',
-                method: 'smtp',
-                error: err?.message || 'SMTP delivery failed'
-              });
-              console.warn(`[Task Email Notification] Delivery to ${r.email} failed:`, err?.message || err);
+              const errMsg = err?.message || '';
+              if (errMsg.includes('535') || errMsg.includes('Username and Password not accepted') || errMsg.includes('EAUTH')) {
+                authFailed = true;
+                activeTransporter = null;
+                addEmailLog({
+                  taskTitle: task.title,
+                  recipientEmail: r.email,
+                  recipientName: r.name,
+                  status: 'ready_for_client',
+                  method: 'gmail_compose',
+                  info: 'SMTP requires Google App Password. Prepared 1-Click Gmail/Mail client dispatch.'
+                });
+              } else {
+                addEmailLog({
+                  taskTitle: task.title,
+                  recipientEmail: r.email,
+                  recipientName: r.name,
+                  status: 'failed',
+                  method: 'smtp',
+                  error: errMsg
+                });
+              }
             }
           }));
         }
-        console.log(`[Task Email Notification] Completed dispatch: ${deliveredCount}/${validRecipients.length} successfully delivered via SMTP.`);
-      })().catch(err => console.error('[Background Email Dispatch Error]', err));
+        if (deliveredCount > 0) {
+          console.log(`[Task Email Notification] Completed dispatch: ${deliveredCount}/${validRecipients.length} successfully delivered via SMTP.`);
+        }
+      })().catch(() => {});
     }
   } catch (err: any) {
     console.error('Error in /api/notify-task-assigned:', err);
@@ -1043,10 +1061,10 @@ SYLLABUS GROUNDING & CORE PRINCIPLES:
 - B10 Diseases and immunity: Pathogens (bacteria, viruses, fungi). Viruses have protein coat & genetic material, lack cells. Defenses: physical/chemical barriers, phagocytosis, antibody production. Active immunity (vaccines, memory cells).
 - B11 Gas exchange: Alveoli adaptations (huge surface area, one-cell thin, moist, dense capillary network, steep gradient). Ventilation mechanics (diaphragm and intercostal muscles).
 - B12 Respiration: Aerobic: C6H12O6 + 6O2 -> 6CO2 + 6H2O. 5 uses of energy: muscle contraction, protein synthesis, cell division, active transport, body temperature maintenance. Anaerobic respiration in muscles (lactic acid) and yeast (ethanol + CO2).
-- B13 Coordination and response: Nervous system (CNS, sensory, relay, motor neurones, reflex arc). Adrenaline, insulin, glucagon. Plant tropisms: phototropism and gravitropism mediated by auxin.
-- B14 Drugs: Antibiotics destroy bacterial cell walls, ineffective against viruses. Antibiotic resistance (MRSA, natural selection).
-- B15 Reproduction: Asexual vs sexual. Insect vs wind pollination. Seed germination requirements: WOW (Water, Oxygen, Warmth). Menstrual cycle: ovulation ~day 14, lining repair and maintenance.
-- B16 Organisms & environment: Energy from Sun, food chains & webs, trophic levels, 10% energy transfer rule, pyramids of numbers/biomass, carbon cycle. Human impact, deforestation, greenhouse gases, conservation.
+- B13 Drugs: Definition of a drug (substance modifying chemical reactions in body). Antibiotics destroy bacterial cell walls/metabolism, ineffective against viruses. Antibiotic resistance (MRSA, natural selection). Prudent antibiotic usage.
+- B14 Reproduction: Asexual vs sexual. Insect vs wind pollination. Seed germination requirements: WOW (Water, Oxygen, Warmth). Menstrual cycle: ovulation ~day 14, lining repair and maintenance.
+- B15 Organisms & environment: Energy from Sun, food chains & webs, trophic levels, 10% energy transfer rule, pyramids of numbers/biomass, carbon cycle.
+- B16 Human influences on ecosystems: Deforestation, greenhouse effect and global warming, eutrophication, conservation.
 
 2. CHEMISTRY (C1-C12):
 - C1 States of matter: Particle arrangement in solids, liquids, gases. Kinetic particle theory. Diffusion rates related to molecular mass (lower Mr diffuses faster).
@@ -1203,7 +1221,7 @@ For every daily session item, the "tasks" array MUST contain exactly 3 tasks des
    Example: "Recap Slides 1–4 of C4 (Electrochemistry & Electrolysis: Molten PbBr₂ products & aqueous NaCl ionic half-equations)"
    Example: "Recap Slides 1–4 of P4 (Electricity & Circuits: Ohm's law V=IR, series vs parallel resistor calculations & power P=VI)"
 2. TASK 2 & TASK 3 MUST BE CREATIVE, ENGAGING, TOPIC-RELEVANT TASKS:
-   - In some situations, direct the student to use tools available on the website (e.g. "Launch Quiz Arena on [Topic Code]: Score 80%+ to secure an instant Green traffic light", "Ask AI Chat Tutor: \"[Challenging, topic-specific prompt with Cambridge mark scheme angle]\"", "Open Past Exams Vault: Attempt 2025 Specimen Paper 4 extended problem on [Concept]", "Open Syllabus Notebook: Record summary note and rate confidence stars").
+   - In some situations, direct the student to use tools available on the website (e.g. "Launch Quiz Arena on [Topic Code]: Score 80%+ to secure an instant Green traffic light", "Open Past Exams Vault: Attempt 2025 Specimen Paper 4 extended problem on [Concept]", "Open Syllabus Notebook: Record summary note and rate confidence stars").
    - In other situations, DO NOT LIMIT THEM TO WEBSITE TOOLS: include hands-on creative revision techniques, real-world mini-experiments (e.g. potato cylinder osmosis in salt water vs tap water, thermal conduction check with metal vs wood, vinegar-baking soda rate demo), the Feynman technique (explaining the mechanism aloud for 2 minutes from memory without notes), visual diagram sketches with colored pens (drawing double circulation with red/blue pens, reflex arc 5 steps, or blast furnace 3 chemical equations), or writing pocket-sized cheat sheets and Cambridge mark scheme keyword audits.
 
 Please provide a complete revision roadmap spanning ALL ${totalWeeks} weeks leading up to the exam.
@@ -1236,7 +1254,7 @@ Return a valid JSON object matching this schema:
       "topicTitle": "Topic Name",
       "tasks": [
         "Recap Slides X–Y of [Code] ([Deck Title]: [Key points])",
-        "Creative task (e.g. Quiz Arena / AI Chat Tutor prompt / Hands-on kitchen lab / Feynman technique)",
+        "Creative task (e.g. Quiz Arena / Hands-on kitchen lab / Feynman technique)",
         "Creative task (e.g. Visual sketch & recall / Cambridge mark scheme drill / Error notebook audit)"
       ],
       "estimatedMinutes": ${Math.round((computedWeeklyHours * 60) / studyDaysPerWeek)},
@@ -1530,43 +1548,85 @@ Ensure high variety and rigor. Output JSON only.`;
         };
       });
 
-      // Filter out any questions containing genetics/inheritance content (not on Cambridge 0653 syllabus)
+      // Filter out any malformed, duplicate, or non-0653 syllabus questions
       const nonGenetics = formatted.filter(q => {
         const fullContent = `${q.question} ${(q.options || []).join(' ')} ${q.explanation}`;
-        return !isGeneticsContent(fullContent);
+        return !isGeneticsContent(fullContent) && isValidQuizQuestion(q as any);
       });
 
       // Deduplicate questions from parallel AI batches
       const seenStems = new Set<string>();
       const normalizeStem = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-      const uniqueAIQuestions: typeof nonGenetics = [];
+      const topicBuckets = new Map<string, typeof nonGenetics>();
+      for (const t of targetTopics) {
+        topicBuckets.set(t, []);
+      }
+
+      // Calculate fair even quotas
+      const K = targetTopics.length;
+      const topicQuotas = new Map<string, number>();
+      if (requestedCount <= K) {
+        for (let i = 0; i < K; i++) {
+          topicQuotas.set(targetTopics[i], i < requestedCount ? 1 : 0);
+        }
+      } else {
+        const base = Math.floor(requestedCount / K);
+        const rem = requestedCount % K;
+        for (let i = 0; i < K; i++) {
+          topicQuotas.set(targetTopics[i], base + (i < rem ? 1 : 0));
+        }
+      }
 
       for (const q of nonGenetics) {
         const norm = normalizeStem(q.question);
         if (norm.length >= 15 && !seenStems.has(norm)) {
-          seenStems.add(norm);
-          uniqueAIQuestions.push(q);
-        }
-      }
-
-      // If fewer unique questions than requestedCount, fill with non-repeating fallback questions
-      if (uniqueAIQuestions.length < requestedCount) {
-        const remainder = requestedCount - uniqueAIQuestions.length;
-        const fill = generateServerFallbackQuiz(targetTopics, remainder, tier, `${sessionSeed}-fill`, uniqueAIQuestions);
-        for (const f of fill) {
-          const norm = normalizeStem(f.question);
-          if (!seenStems.has(norm)) {
+          const tCode = q.topicCode && topicBuckets.has(q.topicCode) ? q.topicCode : targetTopics[0];
+          const bucket = topicBuckets.get(tCode) || [];
+          const quota = topicQuotas.get(tCode) || 0;
+          if (bucket.length < quota) {
             seenStems.add(norm);
-            uniqueAIQuestions.push(f);
+            bucket.push(q);
+            topicBuckets.set(tCode, bucket);
           }
         }
       }
 
-      return res.json({ quiz: uniqueAIQuestions.slice(0, requestedCount), source: 'gemini-3.8-flash' });
+      // If any topic has fewer questions than its quota, fill using syllabus-engine for that specific topic
+      for (const t of targetTopics) {
+        const bucket = topicBuckets.get(t) || [];
+        const quota = topicQuotas.get(t) || 0;
+        if (bucket.length < quota) {
+          const needed = quota - bucket.length;
+          const fill = generateServerFallbackQuiz([t], needed, tier, `${sessionSeed}-fill-${t}`, bucket);
+          for (const f of fill) {
+            const norm = normalizeStem(f.question);
+            if (!seenStems.has(norm)) {
+              seenStems.add(norm);
+              bucket.push(f as any);
+            }
+          }
+          topicBuckets.set(t, bucket);
+        }
+      }
+
+      // Interleave round-robin across chosen topics
+      const balancedQuestions: typeof nonGenetics = [];
+      const maxBucketLen = Math.max(0, ...Array.from(topicBuckets.values()).map(b => b.length));
+      for (let r = 0; r < maxBucketLen; r++) {
+        for (const t of targetTopics) {
+          const bucket = topicBuckets.get(t);
+          if (bucket && r < bucket.length) {
+            balancedQuestions.push(bucket[r]);
+            if (balancedQuestions.length >= requestedCount) break;
+          }
+        }
+        if (balancedQuestions.length >= requestedCount) break;
+      }
+
+      return res.json({ quiz: balancedQuestions.slice(0, requestedCount), source: 'gemini-3.8-flash' });
     }
 
     const fallback = generateServerFallbackQuiz(targetTopics, requestedCount, tier, sessionSeed);
-    return res.json({ quiz: fallback, source: 'syllabus-engine' });
     return res.json({ quiz: fallback, source: 'syllabus-engine' });
   } catch (error) {
     console.error('Error generating AI quiz in /api/generate-quiz:', error);
@@ -1825,18 +1885,29 @@ const SERVER_SYLLABUS_BANK: Record<string, {
   },
   'B13': {
     subject: 'biology',
-    title: 'Coordination & Response',
+    title: 'Drugs',
     ref: 'B13.1',
     questions: [
       {
-        stem: 'What is the correct sequence of components in a spinal reflex arc following a painful stimulus to the finger?',
-        correct: 'Receptor ➔ Sensory neurone ➔ Relay neurone in spinal cord ➔ Motor neurone ➔ Effector muscle',
+        stem: 'What is the precise Cambridge IGCSE definition of a drug?',
+        correct: 'Any substance taken into the body that modifies or affects chemical reactions in the body',
         distractors: [
-          'Effector ➔ Motor neurone ➔ Brain ➔ Sensory neurone ➔ Receptor',
-          'Receptor ➔ Motor neurone ➔ Spinal cord ➔ Sensory neurone ➔ Effector',
-          'Sensory neurone ➔ Effector ➔ Relay neurone ➔ Motor neurone ➔ Receptor'
+          'Any chemical synthesized by pharmaceutical companies to destroy infectious pathogens',
+          'A nutrient that provides calories and essential amino acids for growth and tissue repair',
+          'An antibody synthesized by lymphocytes during an active immune response'
         ],
-        explanation: 'A stimulus is detected by a receptor, triggering electrical impulses along a sensory neurone, across a synapse to a relay neurone in the CNS, then along a motor neurone to the effector.',
+        explanation: 'The Cambridge 0653 syllabus defines a drug as any substance taken into the body that modifies or affects chemical reactions in the body.',
+        ref: 'B13.1'
+      },
+      {
+        stem: 'Why are antibiotics like penicillin effective against bacterial infections but completely ineffective against viral infections like colds and influenza?',
+        correct: 'Antibiotics attack bacterial cell walls and metabolic processes; viruses lack cell walls and reproduce inside host human cells',
+        distractors: [
+          'Viruses produce rapid digestive enzymes that deactivate antibiotic molecules before absorption',
+          'Antibiotics only work in blood vessels whereas viruses exist exclusively in lymph nodes',
+          'Viruses possess thick protein capsules that prevent antibiotic molecules from entering'
+        ],
+        explanation: 'Antibiotics target bacterial cell walls, protein synthesis, or cell membranes. Viruses lack cellular structure and metabolic machinery of their own, replicating inside host cells.',
         ref: 'B13.1'
       }
     ]
@@ -2216,161 +2287,28 @@ function generateServerFallbackQuiz(
   existingQuestions: { question: string }[] = []
 ): ServerFallbackQuestion[] {
   const safeCount = Math.min(40, Math.max(1, count));
-  const availableCodes = Object.keys(SERVER_SYLLABUS_BANK);
-  const targetTopics = Array.isArray(topics) && topics.length > 0 
-    ? topics.filter(t => availableCodes.includes(t)) 
-    : availableCodes;
-  const activeCodes = targetTopics.length > 0 ? targetTopics : availableCodes;
-  const sessionSeed = seed || `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-  const questions: ServerFallbackQuestion[] = [];
-  const seenStems = new Set<string>();
-
   const normalizeStem = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+  const seenExisting = new Set<string>(existingQuestions.map(eq => normalizeStem(eq?.question || '')).filter(Boolean));
 
-  // Populate seenStems with existing questions
-  for (const eq of existingQuestions) {
-    if (eq && eq.question) {
-      seenStems.add(normalizeStem(eq.question));
-    }
-  }
-
-  const addUnique = (q: ServerFallbackQuestion): boolean => {
-    if (!q || !q.question || !q.options || q.options.length < 4) return false;
+  const generated = generateDynamicSyllabusQuestions(topics, safeCount + existingQuestions.length, tier || 'Extended', seed || '');
+  const filtered = generated.filter(q => {
     const norm = normalizeStem(q.question);
-    if (norm.length < 15 || seenStems.has(norm)) return false;
-    seenStems.add(norm);
-    questions.push(q);
-    return true;
-  };
+    if (!norm || seenExisting.has(norm)) return false;
+    seenExisting.add(norm);
+    return isValidQuizQuestion(q);
+  });
 
-  // 1. First add available bank questions
-  for (const topicCode of activeCodes) {
-    const bankItem = SERVER_SYLLABUS_BANK[topicCode] || SERVER_SYLLABUS_BANK['B1'];
-    for (const template of bankItem.questions) {
-      // Build 4 options and shuffle
-      const rawOptions = [template.correct, ...template.distractors.slice(0, 3)];
-      const shuffled = [...rawOptions];
-      for (let j = shuffled.length - 1; j > 0; j--) {
-        const k = Math.floor(Math.random() * (j + 1));
-        [shuffled[j], shuffled[k]] = [shuffled[k], shuffled[j]];
-      }
-      const correctIndex = shuffled.indexOf(template.correct);
-
-      addUnique({
-        id: `srv-${topicCode.toLowerCase()}-${sessionSeed}-${questions.length + 1}`,
-        subject: bankItem.subject,
-        topicCode,
-        topicTitle: bankItem.title,
-        syllabusRef: template.ref || bankItem.ref,
-        question: template.stem,
-        options: shuffled,
-        correctIndex: correctIndex >= 0 ? correctIndex : 0,
-        explanation: template.explanation
-      });
-      if (questions.length >= safeCount) break;
-    }
-    if (questions.length >= safeCount) break;
-  }
-
-  // 2. If more are needed, dynamically generate unique parametric questions
-  let counter = 1;
-  while (questions.length < safeCount && counter <= 60) {
-    const topicCode = activeCodes[(questions.length + counter) % activeCodes.length];
-    const bankItem = SERVER_SYLLABUS_BANK[topicCode] || SERVER_SYLLABUS_BANK['B1'];
-
-    if (bankItem.subject === 'physics') {
-      const force = (20 + counter * 5);
-      const mass = (2 + (counter % 5));
-      const acc = (force / mass).toFixed(1);
-      const correctAns = `${acc} m/s²`;
-      const rawOpts = [
-        correctAns,
-        `${(Number(acc) * 2).toFixed(1)} m/s²`,
-        `${(Number(acc) / 2).toFixed(1)} m/s²`,
-        `${(force * mass).toFixed(1)} m/s²`
-      ];
-      const shuffledOpts = [...rawOpts];
-      for (let j = shuffledOpts.length - 1; j > 0; j--) {
-        const k = Math.floor(Math.random() * (j + 1));
-        [shuffledOpts[j], shuffledOpts[k]] = [shuffledOpts[k], shuffledOpts[j]];
-      }
-      addUnique({
-        id: `srv-dyn-p-${sessionSeed}-${counter}`,
-        subject: 'physics',
-        topicCode,
-        topicTitle: bankItem.title,
-        syllabusRef: `${topicCode}.1`,
-        question: `A resultant force of ${force} N acts on a trolley of mass ${mass} kg in trial #${counter}. What is the resulting acceleration?`,
-        options: shuffledOpts,
-        correctIndex: shuffledOpts.indexOf(correctAns),
-        explanation: `Resultant force F = m × a => a = F / m = ${force} N / ${mass} kg = ${acc} m/s².`
-      });
-    } else if (bankItem.subject === 'chemistry') {
-      // Cambridge 0653 C3: Formula mass (Mr) & Law of Conservation of Mass (no moles required in 0653)
-      const compounds = [
-        { name: 'calcium carbonate (CaCO₃)', ar: 'Ca = 40, C = 12, O = 16', mr: 100 },
-        { name: 'magnesium hydroxide (Mg(OH)₂)', ar: 'Mg = 24, O = 16, H = 1', mr: 58 },
-        { name: 'sulfuric acid (H₂SO₄)', ar: 'H = 1, S = 32, O = 16', mr: 98 },
-        { name: 'aluminium oxide (Al₂O₃)', ar: 'Al = 27, O = 16', mr: 102 },
-        { name: 'ammonium sulfate ((NH₄)₂SO₄)', ar: 'N = 14, H = 1, S = 32, O = 16', mr: 132 }
-      ];
-      const picked = compounds[counter % compounds.length];
-      const correctAns = `${picked.mr}`;
-      const rawOpts = [
-        correctAns,
-        `${picked.mr - 16}`,
-        `${picked.mr + 18}`,
-        `${picked.mr + 32}`
-      ];
-      const shuffledOpts = [...rawOpts];
-      for (let j = shuffledOpts.length - 1; j > 0; j--) {
-        const k = Math.floor(Math.random() * (j + 1));
-        [shuffledOpts[j], shuffledOpts[k]] = [shuffledOpts[k], shuffledOpts[j]];
-      }
-      addUnique({
-        id: `srv-dyn-c-${sessionSeed}-${counter}`,
-        subject: 'chemistry',
-        topicCode,
-        topicTitle: bankItem.title,
-        syllabusRef: `${topicCode}.1`,
-        question: `Given relative atomic masses (${picked.ar}), what is the relative formula mass (Mr) of ${picked.name}?`,
-        options: shuffledOpts,
-        correctIndex: shuffledOpts.indexOf(correctAns),
-        explanation: `Sum the relative atomic masses: Mr of ${picked.name} = ${correctAns}. (Note: Mole calculations from mass or concentration are not required in Cambridge IGCSE 0653 Combined Science).`
-      });
-    } else {
-      const temp = (25 + (counter % 4) * 10);
-      const rate = temp < 40 ? 'increases because enzyme and substrate molecules have more kinetic energy and collide more frequently'
-        : temp === 45 ? 'reaches optimum rate before high thermal denaturation occurs'
-        : 'decreases rapidly because the enzyme active site denatures and changes shape';
-      const correctAns = `The rate ${rate}`;
-      const rawOpts = [
-        correctAns,
-        `The enzyme increases the activation energy required for the reaction`,
-        `The substrate molecules are permanently destroyed by thermal expansion`,
-        `The reaction stops completely because pH drops to zero`
-      ];
-      const shuffledOpts = [...rawOpts];
-      for (let j = shuffledOpts.length - 1; j > 0; j--) {
-        const k = Math.floor(Math.random() * (j + 1));
-        [shuffledOpts[j], shuffledOpts[k]] = [shuffledOpts[k], shuffledOpts[j]];
-      }
-      addUnique({
-        id: `srv-dyn-b-${sessionSeed}-${counter}`,
-        subject: 'biology',
-        topicCode,
-        topicTitle: bankItem.title,
-        syllabusRef: `${topicCode}.1`,
-        question: `In an investigation into enzyme activity carried out at ${temp} °C (Experiment #${counter}), how is the rate of reaction affected compared to 15 °C?`,
-        options: shuffledOpts,
-        correctIndex: shuffledOpts.indexOf(correctAns),
-        explanation: `Temperature affects kinetic collision frequency and enzyme 3D active site conformation.`
-      });
-    }
-    counter++;
-  }
-
-  return questions.slice(0, safeCount);
+  return filtered.slice(0, safeCount).map(q => ({
+    id: q.id,
+    subject: q.subject,
+    topicCode: q.topicCode,
+    topicTitle: q.topicTitle || 'Cambridge 0653 Science',
+    syllabusRef: q.syllabusRef || q.topicCode,
+    question: q.question,
+    options: q.options,
+    correctIndex: q.correctIndex,
+    explanation: q.explanation
+  }));
 }
 
 // Fallback generators for offline/instant mode
@@ -2642,7 +2580,7 @@ function generateFallbackSchedule(
     'B10': { subject: 'biology', title: 'Diseases & Immunity', tasks: ['Distinguish pathogens (viruses, bacteria, fungi) and modes of transmission', 'Explain mechanical/chemical body defences and antibody-antigen response', 'Understand active immunity via vaccination and memory cell persistence'] },
     'B11': { subject: 'biology', title: 'Gas Exchange in Humans', tasks: ['Identify alveoli adaptations for rapid gas exchange (thin, moist, large surface, capillaries)', 'Explain intercostal muscles and diaphragm movements during inspiration/expiration', 'Compare inspired vs expired air composition percentages'] },
     'B12': { subject: 'biology', title: 'Respiration', tasks: ['Write word and balanced chemical equation for aerobic respiration', 'Link cellular respiration to ATP generation in mitochondria', 'Distinguish aerobic from anaerobic respiration in muscles and yeast'] },
-    'B13': { subject: 'biology', title: 'Coordination & Response', tasks: ['Trace reflex arc pathway: Receptor ➔ Sensory ➔ Relay ➔ Motor ➔ Effector', 'Compare nervous vs hormonal control communication speeds and durations', 'Study eye accommodation for near/distant objects and pupil light reflex'] },
+    'B13': { subject: 'biology', title: 'Drugs', tasks: ['Define a drug as any substance taken into the body that modifies or affects chemical reactions in the body', 'Describe how antibiotics treat bacterial infections and explain why they do not affect viruses', 'Explain how antibiotic resistance (such as MRSA) develops through natural selection and why prudent usage is essential'] },
     'B14': { subject: 'biology', title: 'Reproduction', tasks: ['Compare asexual (clones, 1 parent) vs sexual reproduction (gametes, genetic variation)', 'Label insect-pollinated vs wind-pollinated flower adaptations', 'Outline human menstrual cycle hormones: FSH, LH, oestrogen, progesterone'] },
     'B15': { subject: 'biology', title: 'Organisms & Environment', tasks: ['Trace sunlight as ultimate energy input in food chains and webs', 'Explain why only ~10% of energy transfers between trophic levels', 'Construct and interpret pyramids of numbers and pyramids of biomass'] },
     'B16': { subject: 'biology', title: 'Ecosystems & Human Influences', tasks: ['Diagram the carbon cycle: photosynthesis, respiration, combustion, decomposition', 'Explain causes and impacts of deforestation on biodiversity and soil erosion', 'Review greenhouse effect and eutrophication caused by fertilizer leaching'] },

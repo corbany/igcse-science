@@ -194,12 +194,32 @@ export interface SubtopicQuizResult {
   date: string;
 }
 
+export interface SubtopicSlideProgress {
+  visitedKeys: string[];
+  totalSlides: number;
+  allSlidesRead: boolean;
+  updatedAt: string;
+}
+
+export interface QuizLengthRecord {
+  score: number;
+  total: number;
+  percentage: number;
+  quizLength: number;
+  topics?: string[];
+  subtopics?: string[];
+  taskId?: string;
+  date: string;
+}
+
 export interface StudentProgress {
   topicConfidence: Record<string, number>; // 1-5
   trafficLights: Record<string, TrafficLightStatus>; // subtopicCode -> red | orange | green
   subtopicQuizScores: Record<string, SubtopicQuizResult>; // subtopicCode -> quiz result
+  slidesReadBySubtopic?: Record<string, SubtopicSlideProgress>; // subtopicCode -> granular slide reading progress
   completedLessons: string[]; // lesson ids
   quizScores: Record<string, { score: number; total: number; date: string }>;
+  practiceQuizByLength?: Record<string, QuizLengthRecord>; // key -> latest record for specific quiz length
   savedNotes: Record<string, string>; // syllabus code -> note content
   flaggedQuestions?: string[];
   lastActive?: string;
@@ -314,6 +334,8 @@ export interface ClassTask {
   targetSubtopics: string[]; // e.g. ['B1.1', 'C2.3']
   targetSubject: ScienceSubject | 'all';
   targetStudentIds?: string[]; // optional array of specific student UIDs; if empty/omitted, whole class
+  requiredQuizLength?: number; // exact number of questions students must choose in Practice Quiz (default 10)
+  requireSlidesAndTrafficLight?: boolean; // default true: must read all slides & complete Traffic Light Quiz
   dueDate: string; // ISO date string (e.g. 2026-10-10T23:59:59Z)
   instructorId: string;
   instructorName: string;
@@ -328,10 +350,17 @@ export interface TaskSubmission {
   status: TaskProgressStatus;
   completedAt?: string;
   lastActivityAt?: string;
-  quizScore?: number;
+  quizScore?: number; // Percentage (0-100) recorded for exact quiz length (or traffic light quiz if slides-only)
+  practiceQuizScore?: number; // Percentage (0-100) for exact requiredQuizLength practice quiz
+  practiceQuizLength?: number; // Question count completed
+  requiredQuizLength?: number; // Exact question count required
+  trafficLightQuizScore?: number; // Percentage (0-100) for subtopic Traffic Light quiz
+  trafficLightQuizCompleted?: boolean;
   trafficLight?: TrafficLightStatus;
-  slidesCompleted?: boolean;
+  slidesCompleted?: boolean; // True only when all assigned slides have been read
   quizCompleted?: boolean;
+  slidesReadCount?: number;
+  slidesTotalCount?: number;
   notes?: string;
 }
 

@@ -54,7 +54,6 @@ interface RevisionScheduleProps {
   progress?: StudentProgress;
   onOpenLesson: (topicCode: string) => void;
   onNavigateToQuiz?: (topicCode?: string) => void;
-  onAskAITutor?: (query: string, topicCode?: string) => void;
   onNavigateToExams?: () => void;
   onNavigateToNotebook?: () => void;
   onNavigateToGuidelines?: () => void;
@@ -70,7 +69,6 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
   progress,
   onOpenLesson,
   onNavigateToQuiz,
-  onAskAITutor,
   onNavigateToExams,
   onNavigateToNotebook,
   onNavigateToGuidelines
@@ -1885,17 +1883,6 @@ export const RevisionSchedule: React.FC<RevisionScheduleProps> = ({
                                   >
                                     <BookOpen className="w-3 h-3" />
                                     <span>Open {item.topicCode} Slide Deck</span>
-                                  </button>
-                                )}
-
-                                {tIdx > 0 && action.type === 'ai_tutor' && onAskAITutor && (
-                                  <button
-                                    type="button"
-                                    onClick={() => onAskAITutor(action.prompt || task, item.topicCode)}
-                                    className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-xs active:scale-95 cursor-pointer"
-                                  >
-                                    <Sparkles className="w-3 h-3" />
-                                    <span>Ask AI Tutor This Question</span>
                                   </button>
                                 )}
 

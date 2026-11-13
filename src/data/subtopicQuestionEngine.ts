@@ -1,9 +1,14 @@
-import { QuizQuestion, ScienceSubject } from '../types';
+import { QuizQuestion } from '../types';
 import { allSubtopicsData, getSubtopicByCode, SubtopicTopicGroup } from './subtopicSlidesData';
-import { TOPIC_QUESTION_LIBRARY } from './topicQuestionLibrary';
+import { TOPIC_QUESTION_LIBRARY, generateParametricQuestion } from './topicQuestionLibrary';
 import { BIOLOGY_SUBTOPIC_QUESTIONS } from './subtopicQuestionsBiology';
 import { CHEMISTRY_SUBTOPIC_QUESTIONS } from './subtopicQuestionsChemistry';
 import { PHYSICS_SUBTOPIC_QUESTIONS } from './subtopicQuestionsPhysics';
+import { CURATED_BIO_QUESTIONS } from './curatedQuestionsBio';
+import { CURATED_CHEM_QUESTIONS } from './curatedQuestionsChem';
+import { CURATED_PHY_QUESTIONS } from './curatedQuestionsPhy';
+import { predefinedSubtopicQuizzes } from './predefinedSubtopicQuizzes';
+import { isValidQuizQuestion } from './quizSanitizer';
 import { march2026Paper12Core } from './examPapers/march2026Paper12Core';
 import { march2026Paper22Extended } from './examPapers/march2026Paper22Extended';
 import { specimen2025Paper2 } from './examPapers/specimen2025Paper2';
@@ -1140,7 +1145,6 @@ export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuesti
   const subject = subtopic.subject;
   const topicCode = subtopic.topicCode;
   const title = subtopic.title;
-  const decks = subtopic.decks || [];
 
   const questions: QuizQuestion[] = [];
   const seenStems = new Set<string>();
@@ -1148,7 +1152,7 @@ export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuesti
   const normalize = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
 
   const addQ = (q: QuizQuestion): boolean => {
-    if (!q || !q.question || !q.options || q.options.length < 4) return false;
+    if (!isValidQuizQuestion(q)) return false;
     const norm = normalize(q.question);
     if (norm.length < 15 || seenStems.has(norm)) return false;
     seenStems.add(norm);
@@ -1162,13 +1166,21 @@ export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuesti
     return true;
   };
 
-  // 1. Direct Curated Questions from our master database for this exact subtopic
-  const curated = SUBTOPIC_QUESTION_DATABASE[code] || [];
-  for (const cq of curated) {
-    addQ(cq);
+  // 1. Predefined & Curated Subtopic Question Banks (exact subtopic match)
+  const exactPools: QuizQuestion[][] = [
+    predefinedSubtopicQuizzes[code] || [],
+    CURATED_BIO_QUESTIONS[code] || [],
+    CURATED_CHEM_QUESTIONS[code] || [],
+    CURATED_PHY_QUESTIONS[code] || [],
+    SUBTOPIC_QUESTION_DATABASE[code] || []
+  ];
+  for (const pool of exactPools) {
+    for (const cq of pool) {
+      addQ(cq);
+    }
   }
 
-  // 1.2 Authentic Past Paper Examination Questions matching this exact subtopic
+  // 2. Authentic Past Paper Examination Questions matching this exact subtopic
   const examPapers = [march2026Paper12Core, march2026Paper22Extended, specimen2025Paper2];
   for (const paper of examPapers) {
     for (const q of paper.questions) {
@@ -1193,7 +1205,7 @@ export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuesti
     }
   }
 
-  // 2. Questions from TOPIC_QUESTION_LIBRARY that explicitly match this subtopic
+  // 3. Questions from TOPIC_QUESTION_LIBRARY matching this exact subtopic
   const topicLib = TOPIC_QUESTION_LIBRARY[topicCode] || [];
   for (const tq of topicLib) {
     if (tq.syllabusRef && tq.syllabusRef.toUpperCase() === code) {
@@ -1204,261 +1216,7 @@ export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuesti
     }
   }
 
-  // 3. Extract Starter LookBack / LookForward Questions from the subtopic's slide decks
-  decks.forEach((deck, dIdx) => {
-    if (deck.starterLookBack && deck.starterLookBack.question && deck.starterLookBack.answer) {
-      const qText = deck.starterLookBack.question;
-      const ans = deck.starterLookBack.answer;
-      
-      // Skip administrative syllabus / non-science queries
-      if (qText.length < 15 || /how many exams|when do you sit|what are the exams|which term will you sit|course outline|syllabus code/i.test(qText)) {
-        return;
-      }
-
-      // Build 3 realistic distractors from deck keywords
-      const kws = deck.keywords || [];
-      const dist1 = kws[0] ? `It is directly controlled by ${kws[0]} without energy changes` : 'It occurs at constant rate regardless of temperature or pressure';
-      const dist2 = kws[1] ? `It only applies to ${kws[1]} in closed systems` : 'It violates the principle of conservation of energy';
-      const dist3 = 'It occurs spontaneously without requiring any molecular movement';
-
-      addQ({
-        id: `starter-${code}-${dIdx}`,
-        subject,
-        topicCode,
-        topicTitle: title,
-        syllabusRef: code,
-        tier: 'Core',
-        question: qText.endsWith('?') ? qText : `${qText}?`,
-        options: [ans, dist1, dist2, dist3],
-        correctIndex: 0,
-        explanation: `Cambridge syllabus rationale: ${ans}`,
-      });
-    }
-
-    // 4. Practical Experiments in this subtopic
-    (deck.slides || []).forEach((slide, sIdx) => {
-      if (slide.practicalInfo) {
-        const p = slide.practicalInfo;
-        if (p.aim && p.equipment && p.equipment.length > 0) {
-          const correctApparatus = p.equipment.slice(0, 3).join(', ');
-          const fakeApp1 = 'Bunsen burner, tripod, and wire gauze only';
-          const fakeApp2 = 'Newton force meter and metre rule';
-          const fakeApp3 = 'Biuret reagent and water bath';
-
-          addQ({
-            id: `prac-app-${code}-${sIdx}`,
-            subject,
-            topicCode,
-            topicTitle: title,
-            syllabusRef: code,
-            tier: 'Core',
-            question: `In a laboratory investigation into "${p.aim}", which combination of apparatus is suitable?`,
-            options: [correctApparatus, fakeApp1, fakeApp2, fakeApp3],
-            correctIndex: 0,
-            explanation: `Required Cambridge laboratory equipment for this practical: ${p.equipment.join(', ')}.`,
-          });
-        }
-
-        if (p.riskAssessment && p.riskAssessment.length > 0) {
-          const r = p.riskAssessment[0];
-          addQ({
-            id: `prac-risk-${code}-${sIdx}`,
-            subject,
-            topicCode,
-            topicTitle: title,
-            syllabusRef: code,
-            tier: 'Core',
-            question: `What safety precaution must be taken when handling ${r.hazard} during this investigation?`,
-            options: [
-              r.precaution,
-              'Carry out the entire experiment without wearing eye protection',
-              'Heat the chemicals directly in a sealed container without ventilation',
-              'Dispose of the chemical by pouring directly into ordinary paper bins'
-            ],
-            correctIndex: 0,
-            explanation: `Cambridge safety standard for ${r.hazard}: ${r.precaution}.`,
-          });
-        }
-      }
-
-      // 5. Challenge Questions from Slides
-      if (slide.task && slide.task.challengeQuestion && slide.task.challengeSolution) {
-        addQ({
-          id: `challenge-${code}-${sIdx}`,
-          subject,
-          topicCode,
-          topicTitle: title,
-          syllabusRef: code,
-          tier: 'Extended',
-          question: slide.task.challengeQuestion,
-          options: [
-            slide.task.challengeSolution,
-            'The reaction rate remains completely unchanged because temperature does not affect collisions',
-            'Mass is destroyed during the process violating conservation principles',
-            'Energy is transferred with 100% efficiency into mechanical movement'
-          ],
-          correctIndex: 0,
-          explanation: `Examiner breakdown: ${slide.task.challengeSolution}`,
-        });
-      }
-    });
-  });
-
-  // 6. Extract Slide Content Bullets (Definitions, Mechanisms & Factual Points)
-  decks.forEach((deck, dIdx) => {
-    const deckKeywords = deck.keywords || [];
-    deck.slides.forEach((slide, sIdx) => {
-      const bullets = slide.content || [];
-      bullets.forEach((bullet, bIdx) => {
-        const cleaned = bullet.replace(/^[0-9•\.\s\-]+/, '').trim();
-        const colonIdx = cleaned.indexOf(':');
-
-        if (colonIdx > 2 && colonIdx < 45) {
-          const term = cleaned.substring(0, colonIdx).trim();
-          const def = cleaned.substring(colonIdx + 1).trim();
-
-          const termLower = term.toLowerCase();
-          const ignoredLabels = [
-            'objective', 'objectives', 'task', 'task 1', 'task 2', 'task 3', 'task one', 'task two', 
-            'task three', 'keyword', 'keywords', 'look forward', 'look back', 'starter', 'homework', 
-            'extension', 'plenary', 'summary', 'challenge', 'aim', 'equipment', 'method', 'safety', 
-            'instructions', 'hint', 'note', 'check', 'activity', 'table', 'slide', 'figure', 'question', 'answer',
-            'key point', 'key points', 'key idea', 'key ideas', 'key fact', 'key facts', 'important', 'remember', 'recall', 'recap'
-          ];
-          if (ignoredLabels.some(lbl => termLower === lbl || termLower.startsWith(lbl + ' ') || termLower.startsWith('task '))) {
-            return;
-          }
-
-          if (term.length >= 3 && def.length >= 20) {
-            // Type 1: Given Term, What is its Definition / Role?
-            const dist1 = deckKeywords.length > 1
-              ? `It operates as ${deckKeywords[0]} without mass transfer or energy conversion`
-              : 'It occurs only under vacuum conditions and stops at room temperature';
-            const dist2 = deckKeywords.length > 2
-              ? `It is completely determined by ${deckKeywords[1]} and is independent of concentration`
-              : 'The reaction rate remains zero because activation energy is unattainable';
-            const dist3 = 'It causes the total mass and energy to decrease spontaneously';
-
-            addQ({
-              id: `bullet-def-${code}-${dIdx}-${sIdx}-${bIdx}`,
-              subject,
-              topicCode,
-              topicTitle: title,
-              syllabusRef: code,
-              tier: 'Core',
-              question: `Which statement correctly defines or describes the role of ${term}?`,
-              options: [def, dist1, dist2, dist3],
-              correctIndex: 0,
-              explanation: `Examiner syllabus point for ${term}: ${def}`,
-            });
-
-            // Type 2: Given Definition, Which Term matches?
-            const otherTerms = deckKeywords.filter(k => k.toLowerCase() !== term.toLowerCase());
-            if (otherTerms.length >= 3) {
-              addQ({
-                id: `bullet-term-${code}-${dIdx}-${sIdx}-${bIdx}`,
-                subject,
-                topicCode,
-                topicTitle: title,
-                syllabusRef: code,
-                tier: 'Core',
-                question: `Which scientific term is defined as: "${def.slice(0, 140)}"?`,
-                options: [term, otherTerms[0], otherTerms[1], otherTerms[2]],
-                correctIndex: 0,
-                explanation: `Correct scientific term: ${term}. Def: ${def}`,
-              });
-            }
-          }
-        } else if (cleaned.length >= 30 && !cleaned.toLowerCase().startsWith('objectives') && !cleaned.toLowerCase().startsWith('keywords')) {
-          // Factual concept statement
-          const dist1 = `The magnitude of this process decreases when thermal energy and molecular collision rates increase`;
-          const dist2 = `This phenomenon occurs exclusively in non-living mineral crystals with zero energy change`;
-          const dist3 = `The physical parameters remain strictly constant regardless of temperature, pressure, or concentration`;
-
-          addQ({
-            id: `bullet-stmt-${code}-${dIdx}-${sIdx}-${bIdx}`,
-            subject,
-            topicCode,
-            topicTitle: title,
-            syllabusRef: code,
-            tier: 'Core',
-            question: `Which statement concerning ${slide.title} is scientifically correct?`,
-            options: [cleaned, dist1, dist2, dist3],
-            correctIndex: 0,
-            explanation: `Cambridge 0653 Key Concept for ${slide.title}: ${cleaned}`,
-          });
-        }
-      });
-    });
-  });
-
-  // 7. Authentic Exam-Style Questions Derived from Syllabus Learning Objectives
-  (subtopic.syllabusSummary || []).forEach((obj, oIdx) => {
-    if (obj && obj.length > 15) {
-      const cleanObj = obj.replace(/^[0-9•\.\s\-]+/, '').trim();
-      
-      let examStem = '';
-      let correctAns = cleanObj;
-      
-      if (/^define\s+/i.test(cleanObj)) {
-        const withoutVerb = cleanObj.replace(/^define\s+/i, '');
-        examStem = `Which statement provides the correct scientific definition for ${withoutVerb.split(/\s+as\s+|\s+that\s+/i)[0]}?`;
-        correctAns = cleanObj.includes(' as ') ? cleanObj.split(/\s+as\s+/i)[1] : withoutVerb;
-      } else if (/^describe\s+/i.test(cleanObj)) {
-        const withoutVerb = cleanObj.replace(/^describe\s+(the\s+|how\s+)?/i, '');
-        examStem = `Which statement correctly describes ${withoutVerb.replace(/[\.\:]+$/, '')}?`;
-        correctAns = cleanObj;
-      } else if (/^explain\s+/i.test(cleanObj)) {
-        const withoutVerb = cleanObj.replace(/^explain\s+(why\s+|the\s+|how\s+)?/i, '');
-        examStem = `Which statement provides the scientific explanation for ${withoutVerb.replace(/[\.\:]+$/, '')}?`;
-        correctAns = cleanObj;
-      } else if (/^state\s+that\s+/i.test(cleanObj)) {
-        const fact = cleanObj.replace(/^state\s+that\s+/i, '');
-        examStem = `Which statement regarding ${title.toLowerCase()} is scientifically correct?`;
-        correctAns = fact.charAt(0).toUpperCase() + fact.slice(1);
-      } else if (/^identify\s+/i.test(cleanObj)) {
-        const withoutVerb = cleanObj.replace(/^identify\s+(the\s+)?/i, '');
-        examStem = `Which statement correctly identifies ${withoutVerb.replace(/[\.\:]+$/, '')}?`;
-        correctAns = cleanObj;
-      } else {
-        examStem = `Which statement concerning ${title.toLowerCase()} is correct?`;
-        correctAns = cleanObj;
-      }
-
-      let dist1 = '';
-      let dist2 = '';
-      let dist3 = '';
-
-      if (subject === 'biology') {
-        dist1 = 'This process occurs solely through anaerobic pathway mechanisms independent of cellular enzymes';
-        dist2 = 'The rate remains strictly unaffected by changes in temperature, pH, or substrate availability';
-        dist3 = 'Nutrient molecules are converted directly into inorganic minerals without releasing metabolic energy';
-      } else if (subject === 'chemistry') {
-        dist1 = 'Strong covalent bonds between atoms within the molecule are broken rather than weak intermolecular forces';
-        dist2 = 'Electrons are transferred from non-metal anions directly into the nucleus of the metal cation';
-        dist3 = 'The total mass of products decreases because gaseous substances have zero mass';
-      } else {
-        dist1 = 'The speed increases continuously while the resultant force acting on the object remains zero';
-        dist2 = 'Energy is spontaneously generated from empty space in violation of conservation principles';
-        dist3 = 'The electric current through the component decreases linearly when the potential difference is doubled';
-      }
-
-      addQ({
-        id: `exam-obj-${code}-${oIdx}`,
-        subject,
-        topicCode,
-        topicTitle: title,
-        syllabusRef: code,
-        tier: 'Core',
-        question: examStem,
-        options: [correctAns, dist1, dist2, dist3],
-        correctIndex: 0,
-        explanation: `Cambridge 0653 Examiner rationale: ${cleanObj}`,
-      });
-    }
-  });
-
-  // 8. Subtopic-Specific Calculations (ONLY for subtopics that involve formulas)
+  // 4. Subtopic-Specific Quantitative Calculations (strictly for formula-based subtopics)
   if (code === 'B2.2') {
     [100, 200, 400, 500].forEach((mag, idx) => {
       const act = [20, 25, 40, 50][idx];
@@ -1476,7 +1234,24 @@ export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuesti
         explanation: `Actual size A = Image size I / Magnification M = (${imgMm} × 1000 μm) / ${mag} = ${act} μm.`,
       });
     });
-  } else if (code === 'P1.1') {
+  } else if (code === 'C3.1') {
+    [2.4, 4.8, 1.2, 3.6].forEach((m1, idx) => {
+      const m2 = [1.6, 3.2, 0.8, 2.4][idx];
+      const prod = Number((m1 + m2).toFixed(1));
+      addQ({
+        id: `calc-c3-${idx}`,
+        subject: 'chemistry',
+        topicCode: 'C3',
+        topicTitle: title,
+        syllabusRef: code,
+        tier: 'Core',
+        question: `In a sealed crucible, ${m1} g of magnesium reacts completely with ${m2} g of oxygen. According to the Law of Conservation of Mass, what mass of magnesium oxide is formed?`,
+        options: [`${prod} g`, `${(prod * 1.5).toFixed(1)} g`, `${(m1 * 2).toFixed(1)} g`, `${(prod - 0.5).toFixed(1)} g`],
+        correctIndex: 0,
+        explanation: `Law of Conservation of Mass: Total mass of products = Total mass of reactants = ${m1} g + ${m2} g = ${prod} g.`,
+      });
+    });
+  } else if (code === 'P1.1' || code === 'P1.2') {
     [60, 120, 240, 300].forEach((d, idx) => {
       const t = [10, 15, 20, 25][idx];
       const spd = d / t;
@@ -1629,99 +1404,73 @@ export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuesti
         explanation: `Ohm's Law: V = I × R = ${cur} A × ${res} Ω = ${volt} V.`,
       });
     });
-  } else if (code === 'C3.2') {
-    [2.4, 4.8, 1.2, 3.6].forEach((m1, idx) => {
-      const m2 = [1.6, 3.2, 0.8, 2.4][idx];
-      const prod = Number((m1 + m2).toFixed(1));
-      addQ({
-        id: `calc-c3-${idx}`,
-        subject: 'chemistry',
-        topicCode: 'C3',
-        topicTitle: title,
-        syllabusRef: code,
-        tier: 'Core',
-        question: `In a sealed crucible, ${m1} g of element A reacts completely with ${m2} g of element B. According to the Law of Conservation of Mass, what mass of compound AB is formed?`,
-        options: [`${prod} g`, `${(prod * 1.5).toFixed(1)} g`, `${(m1 * 2).toFixed(1)} g`, `${(prod - 0.5).toFixed(1)} g`],
-        correctIndex: 0,
-        explanation: `Law of Conservation of Mass: Total mass of products = Total mass of reactants = ${m1} g + ${m2} g = ${prod} g.`,
-      });
-    });
   }
 
-  // 9. Guaranteed Minimum Pool of 12+ Questions for EVERY subtopic
-  // If pool has fewer than 12 questions, generate strictly targeted Cambridge experimental and practical MCQs
-  if (questions.length < 12) {
-    addQ({
-      id: `synth-exp-${code}-1`,
-      subject,
-      topicCode,
-      topicTitle: title,
-      syllabusRef: code,
-      tier: 'Core',
-      question: `When carrying out an experimental investigation into ${title.toLowerCase()}, which practice ensures high reliability of the results?`,
-      options: [
-        'Repeating the measurements at least three times, identifying anomalous results, and calculating a mean',
-        'Altering three independent variables simultaneously in every test run',
-        'Discarding all results that do not match theoretical expectations without recording them',
-        'Using uncalibrated measuring apparatus to speed up data collection'
-      ],
-      correctIndex: 0,
-      explanation: `Cambridge practical criteria (Paper 6): Reliability is established through repeats, checking for anomalies, and computing an average.`,
-    });
+  // 5. If this exact subtopic has fewer than 10 unique curated questions, top up strictly
+  // from curated/exam/library questions within the SAME parent topic (e.g. P4.1.1 -> P4.*),
+  // NEVER using nonsensical slide/objective templates or unrelated topics.
+  if (questions.length < 10) {
+    // 5a. Remaining questions in TOPIC_QUESTION_LIBRARY for this parent topicCode
+    for (const tq of topicLib) {
+      if (questions.length >= 12) break;
+      addQ({
+        ...tq,
+        id: `topiclib-${code}-${questions.length + 1}`
+      });
+    }
 
-    addQ({
-      id: `synth-exp-${code}-2`,
-      subject,
-      topicCode,
-      topicTitle: title,
-      syllabusRef: code,
-      tier: 'Core',
-      question: `In a scientific investigation into ${title.toLowerCase()}, why must control variables be kept constant throughout the experiment?`,
-      options: [
-        'To ensure that any observed change in the dependent variable is solely caused by the independent variable (validity)',
-        'To ensure that the experiment finishes in the shortest possible time',
-        'To prevent any chemical or physical reaction from occurring',
-        'To eliminate the need for measuring instruments'
-      ],
-      correctIndex: 0,
-      explanation: `A fair test requires controlling all other variables so that changes in the dependent variable are caused strictly by the independent variable.`,
-    });
+    // 5b. Exam paper questions belonging to the same parent topicCode
+    for (const paper of examPapers) {
+      if (questions.length >= 12) break;
+      for (const q of paper.questions) {
+        if (questions.length >= 12) break;
+        const qTopic = q.syllabusCode?.trim().split('.')[0].toUpperCase();
+        if (qTopic === topicCode.toUpperCase() && q.options && q.options.length === 4) {
+          const optTexts = q.options.map(opt => typeof opt === 'string' ? opt : (opt as any).text);
+          const letter = q.correctAnswer || 'A';
+          const correctIdx = ['A', 'B', 'C', 'D'].indexOf(letter);
+          addQ({
+            id: `exam-topic-${paper.id}-${q.id}`,
+            subject,
+            topicCode,
+            topicTitle: subtopic.topicName || title,
+            syllabusRef: q.syllabusCode || code,
+            tier: paper.tier === 'Extended' ? 'Extended' : 'Core',
+            question: q.questionText,
+            options: optTexts,
+            correctIndex: correctIdx >= 0 ? correctIdx : 0,
+            explanation: q.explanation || `Correct answer is option ${letter}.`
+          });
+        }
+      }
+    }
 
-    addQ({
-      id: `synth-exp-${code}-3`,
-      subject,
-      topicCode,
-      topicTitle: title,
-      syllabusRef: code,
-      tier: 'Core',
-      question: `In an experiment investigating ${title.toLowerCase()}, what is the scientific purpose of including a control experiment?`,
-      options: [
-        'To confirm that any observed effect is caused solely by changing the independent variable',
-        'To allow the experiment to be conducted at higher temperatures without risk',
-        'To increase the total mass and volume of product collected',
-        'To eliminate the need for repeating measurements or taking averages'
-      ],
-      correctIndex: 0,
-      explanation: `A control experiment acts as a baseline comparison to verify that changes in the dependent variable are caused strictly by the independent variable.`,
-    });
+    // 5c. Sibling subtopics within the SAME parent topicCode
+    const allMaps: Record<string, QuizQuestion[]>[] = [
+      predefinedSubtopicQuizzes,
+      CURATED_BIO_QUESTIONS,
+      CURATED_CHEM_QUESTIONS,
+      CURATED_PHY_QUESTIONS,
+      SUBTOPIC_QUESTION_DATABASE
+    ];
+    for (const bank of allMaps) {
+      if (questions.length >= 12) break;
+      for (const [k, list] of Object.entries(bank)) {
+        if (questions.length >= 12) break;
+        if (k.toUpperCase().startsWith(`${topicCode.toUpperCase()}.`)) {
+          for (const sq of list) {
+            if (questions.length >= 12) break;
+            addQ(sq);
+          }
+        }
+      }
+    }
 
-    addQ({
-      id: `synth-exp-${code}-4`,
-      subject,
-      topicCode,
-      topicTitle: title,
-      syllabusRef: code,
-      tier: 'Core',
-      question: `In an investigation into ${title.toLowerCase()}, a student records an anomalous reading. What is the correct scientific procedure?`,
-      options: [
-        'Identify the anomaly, repeat that specific measurement, and exclude the anomalous value when calculating the mean',
-        'Include the anomalous reading in the calculation of the mean without repeating',
-        'Change the theoretical prediction to match the anomalous value',
-        'Discard the entire experiment and assume the apparatus is faulty'
-      ],
-      correctIndex: 0,
-      explanation: `Cambridge Paper 6 criteria: Anomalous readings should be identified, repeated, and excluded from the calculation of the average.`,
-    });
+    // 5d. Quantitative parametric variations for mathematical parent topics (B2, C3, P1, P3, P4, P5)
+    for (let seed = 1; seed <= 6 && questions.length < 10; seed++) {
+      const paramQ = generateParametricQuestion(topicCode, code, seed);
+      if (paramQ) addQ(paramQ);
+    }
   }
 
   return questions;

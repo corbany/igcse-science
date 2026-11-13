@@ -1187,13 +1187,13 @@ export const claimModuleRevisionReward = async (
     return { success: false, alreadyClaimed: false, message: 'Student ID and Module ID required.' };
   }
 
-  // Anti-exploit check: dwell time threshold (must exceed 10 seconds per slide)
-  const requiredSeconds = Math.max(10, slideCount * 10);
+  // Anti-exploit check: dwell time threshold (must exceed 1 full minute = 60s)
+  const requiredSeconds = 60;
   if (totalDwellSeconds < requiredSeconds) {
     return {
       success: false,
       alreadyClaimed: false,
-      message: `Anti-exploit gate active: you spent ${totalDwellSeconds}s across ${slideCount} slides (minimum ${requiredSeconds}s required for full concept comprehension).`
+      message: `Anti-exploit gate active: you spent ${totalDwellSeconds}s (minimum 60s / 1 full minute required, and all slides must be clicked through).`
     };
   }
 
@@ -1566,6 +1566,8 @@ export const startBattleRoyale = async (): Promise<void> => {
     currentWinner: null
   };
   setLocalGameItem(LOCAL_BATTLE_STATE_KEY, liveState);
+  setLocalGameItem(LOCAL_STRUCTURES_KEY, []);
+  setLocalGameItem(LOCAL_CRATES_KEY, []);
   batch.set(stateDoc, liveState);
 
   await batch.commit();
@@ -1916,6 +1918,25 @@ export const subscribeToStructures = (
   } catch (err) {
     handleFirestoreError(err, 'subscribeToStructures');
     return () => {};
+  }
+};
+
+/**
+ * Remove all player-built structures (local fallback + Firestore) when starting or resetting an arena session.
+ */
+export const clearArenaStructures = async (): Promise<void> => {
+  setLocalGameItem(LOCAL_STRUCTURES_KEY, []);
+
+  if (!canPerformFirestoreWrite()) return;
+  try {
+    const structuresColl = collection(db, 'battleEvent', 'structures', 'items');
+    const structSnap = await getDocs(structuresColl);
+    if (structSnap.empty) return;
+    const batch = writeBatch(db);
+    structSnap.forEach(s => batch.delete(s.ref));
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, 'clearArenaStructures');
   }
 };
 

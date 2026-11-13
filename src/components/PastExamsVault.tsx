@@ -2,7 +2,6 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
   FileText, 
   CheckCircle2, 
-  HelpCircle, 
   Sparkles, 
   Search, 
   Clock, 
@@ -35,12 +34,11 @@ import {
 
 interface PastExamsVaultProps {
   isInstructor?: boolean;
-  onAskAITutor: (query: string, topicCode: string) => void;
 }
 
 const STORAGE_PREFIX = 'cambridge_0653_answers_';
 
-export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = false, onAskAITutor }) => {
+export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = false }) => {
   const [selectedPaperId, setSelectedPaperId] = useState<string>(pastExamPapers[0]?.id || '');
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState<ScienceSubject | 'all'>('all');
   
@@ -551,14 +549,6 @@ export const PastExamsVault: React.FC<PastExamsVaultProps> = ({ isInstructor = f
                             <span>{isRevealed ? 'Hide Mark Scheme' : 'View Mark Scheme'}</span>
                           </button>
                         </div>
-
-                        <button
-                          onClick={() => onAskAITutor(`Please tutor me on Cambridge question ${q.fullLabel || q.number} (${q.syllabusCode}):\n\n${q.questionText}\n\nCandidate drafted: "${studentAnswer}"`, q.syllabusCode)}
-                          className="text-xs text-slate-700 hover:text-black flex items-center gap-1 font-bold cursor-pointer"
-                        >
-                          <HelpCircle className="w-3.5 h-3.5" />
-                          <span>Ask AI Tutor for guidance</span>
-                        </button>
                       </div>
 
                       {/* Error Banner */}

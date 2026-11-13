@@ -168,7 +168,7 @@ export const TOPIC_SUBTOPIC_KEYWORD_RULES: Record<string, Array<{ subtopic: stri
     { subtopic: 'B12.1', keywords: ['respiration', 'aerobic', 'anaerobic', 'glucose', 'oxygen debt', 'lactic acid', 'fermentation', 'yeast respiration'] }
   ],
   B13: [
-    { subtopic: 'B13.1', keywords: ['coordination', 'nervous system', 'neurone', 'reflex arc', 'synapse', 'hormone', 'adrenaline', 'insulin', 'homeostasis', 'temperature regulation', 'skin', 'vasoconstriction', 'vasodilation', 'tropism', 'phototropism', 'auxin'] }
+    { subtopic: 'B13.1', keywords: ['drugs', 'drug definition', 'antibiotic', 'antibiotics', 'penicillin', 'bacteria', 'viral infection', 'virus', 'antibiotic resistance', 'mrsa', 'superbug', 'painkiller'] }
   ],
   B14: [
     { subtopic: 'B14.2', keywords: ['human reproduction', 'menstrual', 'menstruation', 'testis', 'testes', 'ovary', 'uterus', 'gamete', 'sperm', 'ovum', 'fertilisation in human', 'puberty', 'prostate', 'penis', 'vagina', 'placenta', 'embryo'] },

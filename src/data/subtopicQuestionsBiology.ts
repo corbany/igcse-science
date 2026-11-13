@@ -1076,7 +1076,7 @@ export const BIOLOGY_SUBTOPIC_QUESTIONS: Record<string, QuizQuestion[]> = {
     }
   ],
 
-  // B13.1 Coordination and Response
+  // B13.1 Drugs
   'B13.1': [
     {
       id: 'b13-1-q1',
@@ -1084,15 +1084,15 @@ export const BIOLOGY_SUBTOPIC_QUESTIONS: Record<string, QuizQuestion[]> = {
       topicCode: 'B13',
       syllabusRef: 'B13.1',
       tier: 'Core',
-      question: 'What is the junction called across which an electrical nerve impulse is transmitted between two neurones via chemical neurotransmitters?',
+      question: 'What is the Cambridge IGCSE syllabus definition of a drug?',
       options: [
-        'Synapse',
-        'Axon terminal',
-        'Myelin sheath',
-        'Receptor cell'
+        'Any substance taken into the body that modifies or affects chemical reactions in the body',
+        'Any medicinal substance prescribed by a qualified medical practitioner',
+        'A compound containing nitrogen that cannot be digested by stomach acid',
+        'A natural enzyme that accelerates metabolic catabolism'
       ],
       correctIndex: 0,
-      explanation: 'A synapse is the microscopic junction between two neurones where the impulse triggers release of neurotransmitter chemicals that diffuse across the synaptic gap.'
+      explanation: 'A drug is any substance taken into the body that modifies or affects chemical reactions in the body.'
     },
     {
       id: 'b13-1-q2',
@@ -1100,15 +1100,15 @@ export const BIOLOGY_SUBTOPIC_QUESTIONS: Record<string, QuizQuestion[]> = {
       topicCode: 'B13',
       syllabusRef: 'B13.1',
       tier: 'Extended',
-      question: 'Which hormone is secreted by adrenal glands in situations of fear or stress to prepare the human body for "fight or flight"?',
+      question: 'Which factor is most critical in limiting the rapid evolution and spread of antibiotic-resistant bacteria such as MRSA?',
       options: [
-        'Adrenaline',
-        'Insulin',
-        'Oestrogen',
-        'Glucagon'
+        'Using antibiotics only when strictly essential and always completing the full prescribed treatment course',
+        'Prescribing antibiotics for all viral common colds as an early preventative measure',
+        'Diluting antibiotic tablets with water before consumption',
+        'Switching between three different antibiotics every 12 hours'
       ],
       correctIndex: 0,
-      explanation: 'Adrenaline increases heart rate, widens pupils, increases breathing rate, and stimulates glycogen breakdown into glucose to prepare muscles for intense action.'
+      explanation: 'To limit the emergence of resistant bacteria (e.g. MRSA), antibiotics should only be used when essential (never for viral infections), and patients must finish the complete course so all partially resistant bacteria are eradicated.'
     }
   ],
 

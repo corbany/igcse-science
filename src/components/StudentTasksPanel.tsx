@@ -31,15 +31,16 @@ import {
 import { 
   fetchTasksForStudent, 
   autoEvaluateAllTasksForStudent,
-  subscribeToStudentTasks
+  subscribeToStudentTasks,
+  evaluateTaskProgressForStudent
 } from '../services/firestoreService';
 
 interface StudentTasksPanelProps {
   user: UserProfile;
   progress: StudentProgress;
   enrolledClassIds: string[];
-  onNavigateToLessons?: (subtopicCode?: string) => void;
-  onNavigateToQuizzes?: (topicCode?: string) => void;
+  onNavigateToLessons?: (subtopicCode?: string, task?: TaskWithSubmission) => void;
+  onNavigateToQuizzes?: (topicCode?: string, task?: TaskWithSubmission) => void;
   onTaskUpdated?: () => void;
 }
 
@@ -103,11 +104,11 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
   const handleStartTask = (task: TaskWithSubmission) => {
     const subtopic = task.targetSubtopics[0] || '';
     if (task.type === 'slides_traffic_light' && onNavigateToLessons) {
-      onNavigateToLessons(subtopic);
+      onNavigateToLessons(subtopic, task);
     } else if (task.type === 'practice_quiz' && onNavigateToQuizzes) {
-      onNavigateToQuizzes(subtopic);
+      onNavigateToQuizzes(subtopic, task);
     } else if (onNavigateToLessons) {
-      onNavigateToLessons(subtopic);
+      onNavigateToLessons(subtopic, task);
     }
   };
 
@@ -178,7 +179,7 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
               <span>Teacher Assignments & Due Dates</span>
             </h2>
             <p className="text-xs text-slate-400 max-w-2xl">
-              Tasks set specifically for your science class. Tasks are automatically verified and marked as complete when you finish the assigned slide deck, set your traffic light rating, or complete practice quizzes.
+              Tasks set specifically for your science class. Tasks are marked complete automatically once you read all assigned slides, complete the Traffic Light Quiz, and finish any required practice quiz at its exact length.
             </p>
           </div>
 
@@ -330,11 +331,12 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredTasks.map(task => {
-            const submission = task.submission;
-            const isCompleted = submission?.status === 'completed';
+            const submission = evaluateTaskProgressForStudent(task, user, progress, task.submission);
+            const isCompleted = submission.status === 'completed';
             const dueDateObj = new Date(task.dueDate);
             const isOverdue = task.isOverdue && !isCompleted;
             const diffDays = Math.ceil((dueDateObj.getTime() - now) / (1000 * 60 * 60 * 24));
+            const reqLen = task.requiredQuizLength || submission.requiredQuizLength || 10;
 
             return (
               <div
@@ -370,9 +372,9 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
                         {task.type === 'practice_quiz' && <Award className="w-3 h-3 text-sky-400" />}
                         {task.type === 'exam_paper' && <FileText className="w-3 h-3" />}
                         <span>
-                          {task.type === 'both' ? 'Both: Slides & Quiz' :
-                           task.type === 'slides_traffic_light' ? 'Slides & Traffic Lights' :
-                           task.type === 'practice_quiz' ? 'Practice Quiz' : 'Assignment'}
+                          {task.type === 'both' ? `Slides, TL Quiz & ${reqLen}-Q Quiz` :
+                           task.type === 'slides_traffic_light' ? 'Slides & Traffic Light Quiz' :
+                           task.type === 'practice_quiz' ? `Practice Quiz (${reqLen} Qs)` : 'Assignment'}
                         </span>
                       </span>
                     </div>
@@ -414,60 +416,53 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
                     )}
                   </div>
 
-                  {/* Dual Task Progress Components (for 'both' tasks) */}
-                  {task.type === 'both' && (
-                    <div className="p-2.5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2">
-                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                        <span>Required Components:</span>
-                        <span className="text-purple-300 font-bold">
-                          {isCompleted ? '2 of 2 Finished' : (submission?.trafficLight || submission?.quizScore !== undefined) ? '1 of 2 Complete' : '0 of 2 Complete'}
+                  {/* Completion Requirements Checklist */}
+                  <div className="p-2.5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Required Steps:</span>
+                      <span className="text-purple-300 font-bold">
+                        {isCompleted ? 'All Complete' : submission.slidesCompleted || submission.trafficLightQuizCompleted || submission.practiceQuizScore !== undefined ? 'In Progress' : 'Not Started'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                      <div className={`p-2 rounded-xl border flex items-center justify-between ${
+                        submission.slidesCompleted
+                          ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                          : 'bg-slate-900 border-slate-800 text-slate-300'
+                      }`}>
+                        <span className="font-semibold truncate">1. All Slides</span>
+                        <span className="text-[11px] font-mono font-bold shrink-0">
+                          {submission.slidesCompleted ? '✓ Read' : submission.slidesTotalCount ? `${submission.slidesReadCount || 0}/${submission.slidesTotalCount}` : 'Pending'}
                         </span>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                        {/* Component 1: Slides & Traffic Light */}
-                        <div className={`p-2 rounded-xl border flex items-center justify-between ${
-                          submission?.trafficLight || submission?.slidesCompleted
-                            ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
-                            : 'bg-slate-900 border-slate-800 text-slate-300'
-                        }`}>
-                          <div className="flex items-center gap-1.5">
-                            <BookOpen className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                            <span className="font-semibold truncate">1. Slides & Light</span>
-                          </div>
-                          {submission?.trafficLight ? (
-                            <span className="flex items-center gap-1 text-[11px] font-bold shrink-0">
-                              <span className={`w-2.5 h-2.5 rounded-full ${
-                                submission.trafficLight === 'green' ? 'bg-emerald-400' :
-                                submission.trafficLight === 'orange' ? 'bg-amber-400' : 'bg-rose-500'
-                              }`}></span>
-                              <span className="capitalize">{submission.trafficLight === 'orange' ? 'Amber / Orange' : submission.trafficLight}</span>
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-slate-500 shrink-0">Pending</span>
-                          )}
-                        </div>
 
-                        {/* Component 2: Practice Quiz */}
+                      <div className={`p-2 rounded-xl border flex items-center justify-between ${
+                        submission.trafficLightQuizCompleted
+                          ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                          : 'bg-slate-900 border-slate-800 text-slate-300'
+                      }`}>
+                        <span className="font-semibold truncate">2. TL Quiz</span>
+                        <span className="text-[11px] font-mono font-bold shrink-0">
+                          {submission.trafficLightQuizCompleted && submission.trafficLightQuizScore !== undefined
+                            ? `${submission.trafficLightQuizScore}%`
+                            : 'Pending'}
+                        </span>
+                      </div>
+
+                      {(task.type === 'both' || task.type === 'practice_quiz' || task.type === 'exam_paper') && (
                         <div className={`p-2 rounded-xl border flex items-center justify-between ${
-                          submission?.quizScore !== undefined || submission?.quizCompleted
+                          submission.practiceQuizScore !== undefined
                             ? 'bg-sky-950/40 border-sky-500/40 text-sky-300'
                             : 'bg-slate-900 border-slate-800 text-slate-300'
                         }`}>
-                          <div className="flex items-center gap-1.5">
-                            <Award className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                            <span className="font-semibold truncate">2. Practice Quiz</span>
-                          </div>
-                          {submission?.quizScore !== undefined ? (
-                            <span className="text-[11px] font-bold text-sky-400 shrink-0">
-                              {submission.quizScore}% Score
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-slate-500 shrink-0">Pending</span>
-                          )}
+                          <span className="font-semibold truncate">3. Quiz ({reqLen}Q)</span>
+                          <span className="text-[11px] font-bold text-sky-400 shrink-0">
+                            {submission.practiceQuizScore !== undefined ? `${submission.practiceQuizScore}%` : `Need ${reqLen}Q`}
+                          </span>
                         </div>
-                      </div>
+                      )}
                     </div>
-                  )}
+                  </div>
 
                   {/* Target Subtopics */}
                   {task.targetSubtopics && task.targetSubtopics.length > 0 && (
@@ -550,25 +545,25 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
                     <div className="space-y-2">
                       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                         <button
-                          onClick={() => onNavigateToLessons && onNavigateToLessons(task.targetSubtopics[0])}
+                          onClick={() => onNavigateToLessons && onNavigateToLessons(task.targetSubtopics[0], task)}
                           className="flex-1 py-2 px-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
                         >
                           <BookOpen className="w-3.5 h-3.5" />
-                          <span>1. Open Slides & Set Light</span>
+                          <span>1. Slides & TL Quiz</span>
                         </button>
 
                         <button
-                          onClick={() => onNavigateToQuizzes && onNavigateToQuizzes(task.targetSubtopics[0])}
+                          onClick={() => onNavigateToQuizzes && onNavigateToQuizzes(task.targetSubtopics[0], task)}
                           className="flex-1 py-2 px-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
                         >
                           <Award className="w-3.5 h-3.5" />
-                          <span>2. Take Practice Quiz</span>
+                          <span>2. {reqLen}-Q Practice Quiz</span>
                         </button>
                       </div>
 
                       <div className="p-2 rounded-xl bg-purple-950/20 border border-purple-500/30 text-purple-300 text-[11px] flex items-center gap-1.5">
                         <Sparkles className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                        <span>Automatically marks complete once you review slides, set your traffic light, and finish the quiz.</span>
+                        <span>Marks complete automatically once all slides are read, the Traffic Light Quiz is finished, and the {reqLen}-question quiz is recorded.</span>
                       </div>
                     </div>
                   ) : (
@@ -580,12 +575,12 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
                         {task.type === 'slides_traffic_light' ? (
                           <>
                             <BookOpen className="w-3.5 h-3.5" />
-                            <span>Open Slides & Set Traffic Light</span>
+                            <span>Open Slides & Traffic Light Quiz</span>
                           </>
                         ) : task.type === 'practice_quiz' ? (
                           <>
                             <Award className="w-3.5 h-3.5" />
-                            <span>Start Practice Quiz</span>
+                            <span>Start {reqLen}-Q Practice Quiz</span>
                           </>
                         ) : (
                           <>
@@ -599,10 +594,10 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                         <span>
                           {task.type === 'slides_traffic_light' 
-                            ? 'Automatically marks complete when you review the slides and set your confidence rating.'
+                            ? 'Automatically marks complete after reading all assigned slides and finishing the Traffic Light Quiz.'
                             : task.type === 'practice_quiz'
-                              ? 'Automatically marks complete upon quiz completion.'
-                              : 'Automatically marks complete when you finish the assigned activity.'}
+                              ? `Automatically marks complete after reading all slides, finishing the Traffic Light Quiz, and completing the exact ${reqLen}-question quiz.`
+                              : 'Automatically marks complete when all assigned requirements are verified.'}
                         </span>
                       </div>
                     </div>

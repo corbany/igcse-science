@@ -41,12 +41,11 @@ import {
   Lock,
   RefreshCw,
   Key,
-  Brain,
   XCircle,
   CheckCircle2,
   ChevronUp
 } from 'lucide-react';
-import { ScienceSubject, TrafficLightStatus, SubtopicQuizResult, StudentProgress } from '../types';
+import { ScienceSubject, TrafficLightStatus, SubtopicQuizResult, StudentProgress, SubtopicSlideProgress } from '../types';
 import { 
   allSubtopicsData, 
   SubtopicTopicGroup, 
@@ -80,6 +79,15 @@ import { signInWithGoogle, signInWithDriveScope, getCachedDriveToken, clearCache
 import { claimModuleRevisionReward, checkModuleClaimed } from '../services/firebaseGameService';
 import { UserProfile } from '../types';
 
+export interface ActiveLessonTaskContext {
+  taskId: string;
+  title: string;
+  targetSubtopics: string[];
+  targetSubject?: ScienceSubject | 'all';
+  requiredQuizLength: number;
+  type?: string;
+}
+
 interface LessonSlidesViewerProps {
   user?: UserProfile;
   isInstructor?: boolean;
@@ -88,13 +96,16 @@ interface LessonSlidesViewerProps {
   targetSubtopicCode?: string | null;
   onClearTargetSubtopicCode?: () => void;
   completedLessons: string[];
+  slidesReadBySubtopic?: Record<string, SubtopicSlideProgress>;
   trafficLights: Record<string, TrafficLightStatus>;
   subtopicQuizScores: Record<string, SubtopicQuizResult>;
+  activeTaskContext?: ActiveLessonTaskContext | null;
+  onUpdateSlidesRead?: (subtopicCode: string, slideProgress: SubtopicSlideProgress) => void;
   onUpdateTrafficLight: (subtopicCode: string, status: TrafficLightStatus) => void;
   onSaveQuizResult: (subtopicCode: string, result: SubtopicQuizResult) => void;
   onToggleCompleteLesson: (lessonId: string) => void;
   onSaveNoteFromSlide: (topicCode: string, note: string) => void;
-  onAskAITutor: (query: string, topicCode: string) => void;
+  onNavigateToTaskQuiz?: () => void;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
 }
@@ -107,13 +118,16 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   targetSubtopicCode,
   onClearTargetSubtopicCode,
   completedLessons,
+  slidesReadBySubtopic = {},
   trafficLights = {},
   subtopicQuizScores = {},
+  activeTaskContext = null,
+  onUpdateSlidesRead,
   onUpdateTrafficLight,
   onSaveQuizResult,
   onToggleCompleteLesson,
   onSaveNoteFromSlide,
-  onAskAITutor,
+  onNavigateToTaskQuiz,
   theme,
   onToggleTheme
 }) => {
@@ -321,13 +335,35 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   const currentSlide: ClassroomSlide = currentDeck?.slides[activeSlideIndex] || currentDeck?.slides[0];
 
   // ==========================================================================
-  // MODULE 2: ANTI-EXPLOIT SLIDE REVISION STATE & GATES
+  // MODULE 2: ANTI-EXPLOIT SLIDE REVISION STATE & GATES (60s dwell & entire deck clicked)
   // ==========================================================================
   const [nextSlideCountdown, setNextSlideCountdown] = useState<number>(5);
   const [deckDwellSeconds, setDeckDwellSeconds] = useState<number>(0);
   const [isModuleClaimed, setIsModuleClaimed] = useState<boolean>(false);
   const [claimLoading, setClaimLoading] = useState<boolean>(false);
   const [claimFeedback, setClaimFeedback] = useState<{ message: string; isError?: boolean; rewards?: any } | null>(null);
+
+  // Track all unique slide indices visited by the student in the current deck
+  const [visitedSlideIndices, setVisitedSlideIndices] = useState<Set<number>>(() => new Set([0]));
+
+  // Reset visited slides when changing subtopic or slide deck
+  useEffect(() => {
+    setVisitedSlideIndices(new Set([0]));
+  }, [selectedSubtopicCode, activeDeckIndex]);
+
+  // Record active slide index into visited set
+  useEffect(() => {
+    setVisitedSlideIndices(prev => {
+      const next = new Set(prev);
+      next.add(activeSlideIndex);
+      return next;
+    });
+  }, [activeSlideIndex]);
+
+  // Derived gate metrics (updated further below once Drive slide mode is evaluated)
+  const totalDeckSlidesCount = currentDeck?.slides?.length || 1;
+  const hasClickedThroughAllSlidesInteractive = visitedSlideIndices.size >= totalDeckSlidesCount;
+  const isDwellOneMinuteReached = deckDwellSeconds >= 60;
 
   // 1. Dwell-Time Lock: Lock "Next" button with 5-second countdown on every slide change
   useEffect(() => {
@@ -370,6 +406,19 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   const handleClaimRevisionRewards = async () => {
     const currentUid = auth.currentUser?.uid || user?.id;
     if (!currentUid || claimLoading) return;
+
+    const hasAllSlides = hasMatchingDriveSlide
+      ? isCurrentSubtopicAllSlidesRead
+      : hasClickedThroughAllSlidesInteractive;
+
+    if (!isDwellOneMinuteReached || !hasAllSlides) {
+      setClaimFeedback({
+        message: `Requirements not met: You must spend at least 1 minute (60s) studying and complete all slides (${currentSubtopicReadCount}/${currentSubtopicTotalSlides} slides read, dwell ${deckDwellSeconds}s/60s).`,
+        isError: true
+      });
+      return;
+    }
+
     setClaimLoading(true);
     setClaimFeedback(null);
 
@@ -530,6 +579,113 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   const hasMatchingDriveSlide = useMemo(() => {
     return driveSlidesForCurrentSubtopic.length > 0;
   }, [driveSlidesForCurrentSubtopic]);
+
+  // Persistent cumulative slide reading progress for current subtopic (across all decks or Drive parts)
+  const currentSubtopicSavedSlides: SubtopicSlideProgress | undefined = useMemo(() => {
+    if (!currentSubtopic) return undefined;
+    return slidesReadBySubtopic[currentSubtopic.subtopicCode] ||
+      slidesReadBySubtopic[currentSubtopic.subtopicCode.toUpperCase()];
+  }, [slidesReadBySubtopic, currentSubtopic]);
+
+  const totalInteractiveSlidesForSubtopic = useMemo(() => {
+    if (!currentSubtopic?.decks?.length) return 1;
+    return Math.max(1, currentSubtopic.decks.reduce((acc, d) => acc + (d.slides?.length || 0), 0));
+  }, [currentSubtopic]);
+
+  const currentSubtopicTotalSlides = hasMatchingDriveSlide
+    ? Math.max(1, driveSlidesForCurrentSubtopic.length)
+    : totalInteractiveSlidesForSubtopic;
+
+  const isCurrentSubtopicAllSlidesRead = useMemo(() => {
+    if (!currentSubtopicSavedSlides) return false;
+    if (currentSubtopicSavedSlides.allSlidesRead) return true;
+    const keys = currentSubtopicSavedSlides.visitedKeys || [];
+    if (hasMatchingDriveSlide) {
+      const partKeys = keys.filter(k => k.startsWith('drive-part-'));
+      return partKeys.length >= currentSubtopicTotalSlides && keys.includes('drive-confirmed');
+    }
+    const interactiveKeys = keys.filter(k => k.startsWith('d'));
+    return interactiveKeys.length >= currentSubtopicTotalSlides;
+  }, [currentSubtopicSavedSlides, hasMatchingDriveSlide, currentSubtopicTotalSlides]);
+
+  const currentSubtopicReadCount = useMemo(() => {
+    const keys = currentSubtopicSavedSlides?.visitedKeys || [];
+    if (hasMatchingDriveSlide) {
+      return Math.min(currentSubtopicTotalSlides, keys.filter(k => k.startsWith('drive-part-')).length);
+    }
+    return Math.min(currentSubtopicTotalSlides, keys.filter(k => k.startsWith('d')).length);
+  }, [currentSubtopicSavedSlides, hasMatchingDriveSlide, currentSubtopicTotalSlides]);
+
+  const hasClickedThroughAllSlides = hasMatchingDriveSlide
+    ? isCurrentSubtopicAllSlidesRead
+    : hasClickedThroughAllSlidesInteractive;
+  const canClaimRevisionRewards = isDwellOneMinuteReached && hasClickedThroughAllSlides && !isModuleClaimed && !claimLoading;
+
+  // Persist current slide or Drive part view into slidesReadBySubtopic
+  useEffect(() => {
+    if (!currentSubtopic || !onUpdateSlidesRead) return;
+    const code = currentSubtopic.subtopicCode;
+    const existing = slidesReadBySubtopic[code] || slidesReadBySubtopic[code.toUpperCase()];
+    const existingKeys = new Set(existing?.visitedKeys || []);
+
+    if (hasMatchingDriveSlide) {
+      const key = `drive-part-${activeDriveSlideIdx}`;
+      const hadKey = existingKeys.has(key);
+      if (hadKey && existing?.totalSlides === currentSubtopicTotalSlides) return;
+      existingKeys.add(key);
+      const nextKeys = Array.from(existingKeys);
+      const partCount = nextKeys.filter(k => k.startsWith('drive-part-')).length;
+      const allRead = existing?.allSlidesRead === true || (partCount >= currentSubtopicTotalSlides && existingKeys.has('drive-confirmed'));
+      onUpdateSlidesRead(code, {
+        visitedKeys: nextKeys,
+        totalSlides: currentSubtopicTotalSlides,
+        allSlidesRead: allRead,
+        updatedAt: new Date().toISOString()
+      });
+    } else if (currentDeck && currentDeck.slides && currentDeck.slides[activeSlideIndex]) {
+      const key = `d${activeDeckIndex}-s${activeSlideIndex}`;
+      const hadKey = existingKeys.has(key);
+      existingKeys.add(key);
+      const nextKeys = Array.from(existingKeys);
+      const interactiveCount = nextKeys.filter(k => k.startsWith('d')).length;
+      const allRead = existing?.allSlidesRead === true || interactiveCount >= currentSubtopicTotalSlides;
+      if (hadKey && existing?.totalSlides === currentSubtopicTotalSlides && existing?.allSlidesRead === allRead) return;
+      onUpdateSlidesRead(code, {
+        visitedKeys: nextKeys,
+        totalSlides: currentSubtopicTotalSlides,
+        allSlidesRead: allRead,
+        updatedAt: new Date().toISOString()
+      });
+    }
+  }, [
+    currentSubtopic?.subtopicCode,
+    hasMatchingDriveSlide,
+    activeDriveSlideIdx,
+    activeDeckIndex,
+    activeSlideIndex,
+    currentSubtopicTotalSlides
+  ]);
+
+  const handleConfirmDriveSlidesRead = () => {
+    if (!currentSubtopic || !onUpdateSlidesRead) return;
+    const code = currentSubtopic.subtopicCode;
+    const existing = slidesReadBySubtopic[code] || slidesReadBySubtopic[code.toUpperCase()];
+    const existingKeys = new Set(existing?.visitedKeys || []);
+    existingKeys.add(`drive-part-${activeDriveSlideIdx}`);
+    existingKeys.add('drive-confirmed');
+    const nextKeys = Array.from(existingKeys);
+    const partCount = nextKeys.filter(k => k.startsWith('drive-part-')).length;
+    const allRead = partCount >= currentSubtopicTotalSlides;
+    onUpdateSlidesRead(code, {
+      visitedKeys: nextKeys,
+      totalSlides: currentSubtopicTotalSlides,
+      allSlidesRead: allRead,
+      updatedAt: new Date().toISOString()
+    });
+    if (allRead && !completedLessons.includes(code)) {
+      onToggleCompleteLesson(code);
+    }
+  };
 
   // Total clear lesson count for current subtopic
   const currentLessonCount = useMemo(() => {
@@ -766,15 +922,13 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   }, [filteredSubtopics]);
 
   // Traffic light click handler
+  // Note: Self-rating Red/Amber does NOT mark slides read or complete tasks — students must read all slides & finish the Traffic Light Quiz.
   const handleTrafficLightSelect = (subtopicCode: string, status: TrafficLightStatus) => {
     if (status === 'green') {
       // Check if student has already passed the 10-question quiz (>= 80%)
       const existingScore = subtopicQuizScores[subtopicCode];
       if (existingScore && existingScore.percentage >= 80) {
         onUpdateTrafficLight(subtopicCode, 'green');
-        if (!completedLessons.includes(subtopicCode)) {
-          onToggleCompleteLesson(subtopicCode);
-        }
       } else {
         // Open the 10-question quiz modal
         startQuizForSubtopic(subtopicCode);
@@ -782,9 +936,6 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     } else {
       // Red or Orange can be selected directly based on student self-assessment
       onUpdateTrafficLight(subtopicCode, status);
-      if (!completedLessons.includes(subtopicCode)) {
-        onToggleCompleteLesson(subtopicCode);
-      }
     }
   };
 
@@ -843,8 +994,8 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     const trafficStatus: TrafficLightStatus = percentage >= 80 ? 'green' : percentage >= 50 ? 'orange' : 'red';
     onUpdateTrafficLight(quizSubtopicCode, trafficStatus);
 
-    // Automatically mark the slide deck as completed so live analytics and syllabus % update instantly
-    if (!completedLessons.includes(quizSubtopicCode)) {
+    // Automatically mark the slide deck completed ONLY when all slides in this subtopic have been genuinely read
+    if (isCurrentSubtopicAllSlidesRead && !completedLessons.includes(quizSubtopicCode)) {
       onToggleCompleteLesson(quizSubtopicCode);
     }
   };
@@ -864,11 +1015,6 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     if (currentDeck && activeSlideIndex < currentDeck.slides.length - 1) {
       const nextIdx = activeSlideIndex + 1;
       setActiveSlideIndex(nextIdx);
-      if (nextIdx === currentDeck.slides.length - 1 && activeDeckIndex === (currentSubtopic?.decks.length || 1) - 1) {
-        if (!completedLessons.includes(currentSubtopic.subtopicCode)) {
-          onToggleCompleteLesson(currentSubtopic.subtopicCode);
-        }
-      }
     } else if (activeDeckIndex < (currentSubtopic?.decks.length || 1) - 1) {
       setActiveDeckIndex(prev => prev + 1);
       setActiveSlideIndex(0);
@@ -1315,6 +1461,61 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
         {/* RIGHT COLUMN: Slide Presentation & Traffic Light Controls */}
         <div className={isSidebarExpanded ? 'lg:col-span-8 space-y-6' : 'lg:col-span-12 space-y-6'}>
+          {/* ASSIGNED TASK CHECKLIST BANNER */}
+          {activeTaskContext && (
+            <div className="rounded-2xl border-2 border-black bg-[#EBF3F5] p-4 sm:p-5 space-y-3 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                    Active Assigned Task Checklist
+                  </span>
+                  <h3 className="text-base font-bold text-slate-900">{activeTaskContext.title}</h3>
+                </div>
+                <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-slate-800 self-start sm:self-center">
+                  Target: {activeTaskContext.targetSubtopics.join(', ')}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                <div className={`p-2.5 rounded-xl border flex items-center justify-between ${
+                  isCurrentSubtopicAllSlidesRead
+                    ? 'bg-emerald-50 border-emerald-400 text-emerald-900 font-bold'
+                    : 'bg-white border-slate-300 text-slate-700'
+                }`}>
+                  <span>1. Read All Slides</span>
+                  <span className="font-mono">
+                    {isCurrentSubtopicAllSlidesRead ? '✓ Done' : `${currentSubtopicReadCount}/${currentSubtopicTotalSlides}`}
+                  </span>
+                </div>
+                <div className={`p-2.5 rounded-xl border flex items-center justify-between ${
+                  subtopicQuizScores[currentSubtopic.subtopicCode]
+                    ? 'bg-emerald-50 border-emerald-400 text-emerald-900 font-bold'
+                    : 'bg-white border-slate-300 text-slate-700'
+                }`}>
+                  <span>2. Traffic Light Quiz</span>
+                  <span className="font-mono">
+                    {subtopicQuizScores[currentSubtopic.subtopicCode]
+                      ? `✓ ${subtopicQuizScores[currentSubtopic.subtopicCode].percentage}%`
+                      : 'Pending'}
+                  </span>
+                </div>
+                {(activeTaskContext.type === 'both' || activeTaskContext.type === 'practice_quiz') && (
+                  <div className="p-2.5 rounded-xl border bg-white border-slate-300 text-slate-800 flex items-center justify-between gap-2">
+                    <span className="font-semibold">3. Practice Quiz ({activeTaskContext.requiredQuizLength} Qs)</span>
+                    {onNavigateToTaskQuiz && (
+                      <button
+                        type="button"
+                        onClick={onNavigateToTaskQuiz}
+                        className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-bold cursor-pointer shrink-0"
+                      >
+                        Open Quiz
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Unit Spotlight Header & Rating */}
           <div className="rounded-2xl border border-[#E2E8F0] p-6 sm:p-7 transition bg-white shadow-xs">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-5 border-b pb-5 mb-5 border-slate-200">
@@ -1369,7 +1570,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                     <span className={`font-bold ${
                       subtopicQuizScores[currentSubtopic.subtopicCode].passed ? 'text-emerald-700' : 'text-amber-700'
                     }`}>
-                      {subtopicQuizScores[currentSubtopic.subtopicCode].score}/10 ({subtopicQuizScores[currentSubtopic.subtopicCode].percentage}%)
+                      {subtopicQuizScores[currentSubtopic.subtopicCode].score}/{subtopicQuizScores[currentSubtopic.subtopicCode].total || 10} ({subtopicQuizScores[currentSubtopic.subtopicCode].percentage}%)
                     </span>
                   </div>
                 )}
@@ -1443,17 +1644,31 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-200">
                 <button
                   onClick={() => onToggleCompleteLesson(currentSubtopic.subtopicCode)}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+                  disabled={!isCurrentSubtopicAllSlidesRead && !completedLessons.includes(currentSubtopic.subtopicCode)}
+                  title={
+                    isCurrentSubtopicAllSlidesRead
+                      ? 'All slides read — toggle lesson completion'
+                      : `Read all ${currentSubtopicTotalSlides} slides first (${currentSubtopicReadCount}/${currentSubtopicTotalSlides} viewed)`
+                  }
+                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition ${
                     completedLessons.includes(currentSubtopic.subtopicCode)
-                      ? 'bg-emerald-700 text-white font-bold'
-                      : 'border border-slate-300 hover:bg-slate-100 text-slate-800 bg-white'
+                      ? 'bg-emerald-700 text-white font-bold cursor-pointer'
+                      : isCurrentSubtopicAllSlidesRead
+                        ? 'border border-slate-300 hover:bg-slate-100 text-slate-800 bg-white cursor-pointer'
+                        : 'border border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
                   }`}
                 >
-                  <Check className="w-3.5 h-3.5" />
+                  {isCurrentSubtopicAllSlidesRead || completedLessons.includes(currentSubtopic.subtopicCode) ? (
+                    <Check className="w-3.5 h-3.5" />
+                  ) : (
+                    <Lock className="w-3.5 h-3.5" />
+                  )}
                   <span>
                     {completedLessons.includes(currentSubtopic.subtopicCode)
-                      ? '✓ Lesson completed'
-                      : 'Mark lesson read'}
+                      ? '✓ All slides read & completed'
+                      : isCurrentSubtopicAllSlidesRead
+                        ? 'Mark lesson read (All slides viewed)'
+                        : `Read all slides (${currentSubtopicReadCount}/${currentSubtopicTotalSlides})`}
                   </span>
                 </button>
 
@@ -1676,15 +1891,43 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                       <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
                       <span>Showing presentation from Google Drive: <strong className="text-slate-800">{activeDriveSlide.name}</strong></span>
                     </div>
-                    <a
-                      href={TARGET_DRIVE_FOLDER_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-slate-700 hover:text-black hover:underline flex items-center gap-1 font-bold"
-                    >
-                      <span>Drive Folder</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {isCurrentSubtopicAllSlidesRead ? (
+                        <span className="px-3 py-1 rounded-lg bg-emerald-50 border border-emerald-400 text-emerald-800 font-bold flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>All {currentSubtopicTotalSlides} Slide Deck{currentSubtopicTotalSlides > 1 ? 's' : ''} Confirmed Read</span>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleConfirmDriveSlidesRead}
+                          disabled={deckDwellSeconds < 20 || currentSubtopicReadCount < currentSubtopicTotalSlides}
+                          className={`px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                            deckDwellSeconds >= 20 && currentSubtopicReadCount >= currentSubtopicTotalSlides
+                              ? 'bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer shadow-xs'
+                              : 'bg-slate-200 text-slate-500 border border-slate-300 cursor-not-allowed'
+                          }`}
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>
+                            {currentSubtopicReadCount < currentSubtopicTotalSlides
+                              ? `View all ${currentSubtopicTotalSlides} parts (${currentSubtopicReadCount}/${currentSubtopicTotalSlides})`
+                              : deckDwellSeconds < 20
+                                ? `Confirm All Slides Read (${Math.max(0, 20 - deckDwellSeconds)}s)`
+                                : 'Confirm All Slides Read'}
+                          </span>
+                        </button>
+                      )}
+                      <a
+                        href={TARGET_DRIVE_FOLDER_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-slate-700 hover:text-black hover:underline flex items-center gap-1 font-bold"
+                      >
+                        <span>Drive Folder</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1720,19 +1963,26 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                 </div>
               )}
 
-              {/* Revision Royale Dwell / Rewards Bar */}
+              {/* Revision Royale Dwell / Rewards Bar (1-minute dwell & all slides clicked requirement) */}
               <div className="p-4 flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#FDFBF7]">
                 <div className="flex items-center gap-3 w-full sm:w-auto">
                   <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-300 flex items-center justify-center text-amber-700 font-bold text-lg shrink-0">
                     🎮
                   </div>
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-bold uppercase tracking-wide text-amber-800">
                         Revision Royale Rewards
                       </span>
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-white text-slate-700 border border-slate-300 font-mono">
-                        {Math.floor(deckDwellSeconds / 60)}:{(deckDwellSeconds % 60).toString().padStart(2, '0')} / {Math.floor(((currentDeck?.slides?.length || 5) * 10) / 60)}:{(((currentDeck?.slides?.length || 5) * 10) % 60).toString().padStart(2, '0')}
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-white text-slate-700 border border-slate-300 font-mono" title="Dwell Time (1 min required)">
+                        ⏱️ {Math.floor(deckDwellSeconds / 60)}:{(deckDwellSeconds % 60).toString().padStart(2, '0')} / 01:00
+                      </span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-mono border ${
+                        hasClickedThroughAllSlides 
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold' 
+                          : 'bg-white text-slate-700 border-slate-300'
+                      }`} title="Slides confirmed">
+                        📑 Decks: {currentSubtopicReadCount} / {currentSubtopicTotalSlides}
                       </span>
                     </div>
                     <p className="text-xs text-slate-600 mt-0.5">
@@ -1740,10 +1990,14 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                         <span className="text-emerald-700 font-bold flex items-center gap-1">
                           <CheckCircle className="w-3.5 h-3.5 inline text-emerald-700" /> Module completed! Complete topic quizzes for additional materials.
                         </span>
-                      ) : deckDwellSeconds < (currentDeck?.slides?.length || 5) * 10 ? (
-                        <span>Dwell Gate: study for at least 10s per slide ({Math.max(0, (currentDeck?.slides?.length || 5) * 10 - deckDwellSeconds)}s remaining) to unlock battle materials.</span>
+                      ) : !hasClickedThroughAllSlides && !isDwellOneMinuteReached ? (
+                        <span>Requirement: Confirm all {currentSubtopicTotalSlides} slide deck{currentSubtopicTotalSlides > 1 ? 's' : ''} read & study for 1 minute ({Math.max(0, 60 - deckDwellSeconds)}s remaining).</span>
+                      ) : !hasClickedThroughAllSlides ? (
+                        <span className="text-amber-700 font-semibold">Almost there: Click &quot;Confirm All Slides Read&quot; above once you finish viewing the slides.</span>
+                      ) : !isDwellOneMinuteReached ? (
+                        <span>Dwell Gate: study for 1 minute ({Math.max(0, 60 - deckDwellSeconds)}s remaining) to unlock battle materials.</span>
                       ) : (
-                        <span className="text-emerald-700 font-bold">Dwell requirement satisfied! Claim +20 Wood, +10 Brick, +5 Metal, +50 XP & +20 Gold.</span>
+                        <span className="text-emerald-700 font-bold">All slides read & 1 minute dwell satisfied! Claim +20 Wood, +10 Brick, +5 Metal, +50 XP & +20 Gold.</span>
                       )}
                     </p>
                   </div>
@@ -1757,9 +2011,9 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                   ) : (
                     <button
                       onClick={handleClaimRevisionRewards}
-                      disabled={claimLoading || deckDwellSeconds < (currentDeck?.slides?.length || 5) * 10}
+                      disabled={!canClaimRevisionRewards}
                       className={`w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
-                        deckDwellSeconds >= (currentDeck?.slides?.length || 5) * 10 && !claimLoading
+                        canClaimRevisionRewards
                           ? 'bg-slate-800 hover:bg-slate-900 text-white shadow-xs'
                           : 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
                       }`}
@@ -1830,15 +2084,6 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                     >
                       {copiedNote ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                       <span className="hidden sm:inline">{copiedNote ? 'Copied' : 'Save notes'}</span>
-                    </button>
-
-                    <button
-                      onClick={() => onAskAITutor(`Explain ${currentSlide.title} for IGCSE 0653 [${currentSubtopic.subtopicCode}]`, currentSubtopic.subtopicCode)}
-                      title="Ask AI Tutor to explain this slide"
-                      className="p-2 rounded-lg text-xs font-bold text-slate-800 bg-white border border-slate-300 hover:bg-slate-100 transition flex items-center gap-1 cursor-pointer"
-                    >
-                      <Sparkles className="w-4 h-4 text-purple-600" />
-                      <span className="hidden sm:inline">Ask Tutor</span>
                     </button>
                   </div>
                 </div>
@@ -2048,19 +2293,26 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                   </button>
                 </div>
 
-                {/* Revision Royale Rewards Bar */}
+                {/* Revision Royale Rewards Bar (1-minute dwell & all slides clicked requirement) */}
                 <div className="p-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#FDFBF7]">
                   <div className="flex items-center gap-3 w-full sm:w-auto">
                     <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-300 flex items-center justify-center text-amber-700 font-bold text-lg shrink-0">
                       🎮
                     </div>
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs font-bold uppercase tracking-wide text-amber-800">
                           Revision Royale Rewards
                         </span>
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-white text-slate-700 border border-slate-300 font-mono">
-                          {Math.floor(deckDwellSeconds / 60)}:{(deckDwellSeconds % 60).toString().padStart(2, '0')} / {Math.floor((currentDeck.slides.length * 10) / 60)}:{((currentDeck.slides.length * 10) % 60).toString().padStart(2, '0')}
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-white text-slate-700 border border-slate-300 font-mono" title="Dwell Time (1 min required)">
+                          ⏱️ {Math.floor(deckDwellSeconds / 60)}:{(deckDwellSeconds % 60).toString().padStart(2, '0')} / 01:00
+                        </span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-mono border ${
+                          hasClickedThroughAllSlides 
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold' 
+                            : 'bg-white text-slate-700 border-slate-300'
+                        }`} title="Slides viewed">
+                          📑 Slides: {visitedSlideIndices.size} / {totalDeckSlidesCount}
                         </span>
                       </div>
                       <p className="text-xs text-slate-600 mt-0.5">
@@ -2068,10 +2320,14 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                           <span className="text-emerald-700 font-bold flex items-center gap-1">
                             <CheckCircle className="w-3.5 h-3.5 inline text-emerald-700" /> Module completed! Complete topic quizzes for additional materials.
                           </span>
-                        ) : deckDwellSeconds < currentDeck.slides.length * 10 ? (
-                          <span>Dwell Gate: spend at least 10s per slide ({Math.max(0, currentDeck.slides.length * 10 - deckDwellSeconds)}s remaining) to claim battle materials.</span>
+                        ) : !hasClickedThroughAllSlides && !isDwellOneMinuteReached ? (
+                          <span>Requirement: Click through all slides ({visitedSlideIndices.size}/{totalDeckSlidesCount}) & study for 1 minute ({Math.max(0, 60 - deckDwellSeconds)}s remaining).</span>
+                        ) : !hasClickedThroughAllSlides ? (
+                          <span className="text-amber-700 font-semibold">Almost there: Click through remaining slides ({visitedSlideIndices.size}/{totalDeckSlidesCount} viewed) to unlock rewards.</span>
+                        ) : !isDwellOneMinuteReached ? (
+                          <span>Dwell Gate: study for 1 minute ({Math.max(0, 60 - deckDwellSeconds)}s remaining) to unlock battle materials.</span>
                         ) : (
-                          <span className="text-emerald-700 font-bold">Dwell requirement satisfied! Claim +20 Wood, +10 Brick, +5 Metal, +50 XP & +20 Gold.</span>
+                          <span className="text-emerald-700 font-bold">All slides viewed & 1 minute dwell satisfied! Claim +20 Wood, +10 Brick, +5 Metal, +50 XP & +20 Gold.</span>
                         )}
                       </p>
                     </div>
@@ -2085,9 +2341,9 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                     ) : (
                       <button
                         onClick={handleClaimRevisionRewards}
-                        disabled={claimLoading || deckDwellSeconds < currentDeck.slides.length * 10}
+                        disabled={!canClaimRevisionRewards}
                         className={`w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
-                          deckDwellSeconds >= currentDeck.slides.length * 10 && !claimLoading
+                          canClaimRevisionRewards
                             ? 'bg-slate-800 hover:bg-slate-900 text-white shadow-xs'
                             : 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
                         }`}
@@ -2320,24 +2576,6 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                             </p>
                           </div>
                         </div>
-
-                        {/* Ask AI Tutor action button */}
-                        <div className="flex items-center justify-end">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsQuizModalOpen(false);
-                              onAskAITutor(
-                                `Explain Cambridge 0653 [${quizSubtopicCode}] question: "${quizQuestions[currentQuestionIndex].question}" and why the answer is "${quizQuestions[currentQuestionIndex].options[quizQuestions[currentQuestionIndex].correctIndex]}"`,
-                                quizQuestions[currentQuestionIndex].topicCode
-                              );
-                            }}
-                            className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-                          >
-                            <Brain className="w-4 h-4 text-purple-700" />
-                            <span>Ask AI Tutor about this question</span>
-                          </button>
-                        </div>
                       </div>
                     )}
                   </div>
@@ -2382,37 +2620,39 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
             )}
 
             {/* If Quiz Completed: Score Summary, Traffic Light Status & Full Review Mode */}
-            {quizCompleted && (
+            {quizCompleted && (() => {
+              const quizPct = Math.round((quizScore / Math.max(1, quizQuestions.length)) * 100);
+              return (
               <div className="space-y-6 py-2">
                 {/* Result Hero Banner */}
                 <div className="text-center space-y-4">
                   <div 
                     className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-3xl font-black shadow-xs"
                     style={{
-                      backgroundColor: quizScore >= 8 ? '#059669' : quizScore >= 5 ? '#d97706' : '#e11d48',
+                      backgroundColor: quizPct >= 80 ? '#059669' : quizPct >= 50 ? '#d97706' : '#e11d48',
                       color: '#ffffff'
                     }}
                   >
-                    {quizScore >= 8 ? '🎉' : quizScore >= 5 ? '⚠️' : '🚨'}
+                    {quizPct >= 80 ? '🎉' : quizPct >= 50 ? '⚠️' : '🚨'}
                   </div>
 
                   <div className="space-y-1">
                     <h4 className="text-2xl font-bold tracking-tight text-slate-800">
-                      {quizScore >= 8 
+                      {quizPct >= 80 
                         ? 'Green Status Awarded (Mastery Certified)' 
-                        : quizScore >= 5 
+                        : quizPct >= 50 
                           ? 'Amber / Orange Grade Assigned' 
                           : 'Red Grade Assigned (Needs Revision)'}
                     </h4>
                     <p className="text-xs sm:text-sm text-slate-600">
-                      You scored <strong className="text-slate-800 font-mono text-base">{quizScore}/{quizQuestions.length}</strong> ({Math.round((quizScore / Math.max(1, quizQuestions.length)) * 100)}%) on [{quizSubtopicCode}].
+                      You scored <strong className="text-slate-800 font-mono text-base">{quizScore}/{quizQuestions.length}</strong> ({quizPct}%) on [{quizSubtopicCode}].
                     </p>
                   </div>
 
                   {/* Cambridge Grade Prediction Pill */}
                   <div className="flex items-center justify-center gap-2 flex-wrap pt-1">
-                    <span className={`text-xs font-mono font-bold px-3 py-1 rounded-xl border ${getCambridgeGrade(Math.round((quizScore / Math.max(1, quizQuestions.length)) * 100)).color}`}>
-                      {getCambridgeGrade(Math.round((quizScore / Math.max(1, quizQuestions.length)) * 100)).label}
+                    <span className={`text-xs font-mono font-bold px-3 py-1 rounded-xl border ${getCambridgeGrade(quizPct).color}`}>
+                      {getCambridgeGrade(quizPct).label}
                     </span>
                     <span className="text-xs font-mono px-3 py-1 rounded-xl bg-white border border-slate-300 text-slate-700">
                       ⏱ Time: {formatQuizTimer(quizTimerSeconds)}
@@ -2421,7 +2661,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                 </div>
 
                 {/* Status Guidance Card */}
-                {quizScore >= 8 ? (
+                {quizPct >= 80 ? (
                   <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-xs text-emerald-800 max-w-lg mx-auto space-y-1">
                     <div className="font-bold text-sm text-emerald-900 flex items-center justify-center gap-1.5">
                       <span>✓ High Mastery Certified (80%+)</span>
@@ -2430,22 +2670,22 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                       Outstanding performance! Your score meets the Cambridge 80% threshold. Green status has been recorded in your Progress Tracker.
                     </p>
                   </div>
-                ) : quizScore >= 5 ? (
+                ) : quizPct >= 50 ? (
                   <div className="p-4 rounded-2xl bg-amber-50 border border-amber-300 text-xs text-amber-800 max-w-lg mx-auto space-y-1">
                     <div className="font-bold text-sm text-amber-900 flex items-center justify-center gap-1.5">
-                      <span>⚠️ Amber / Orange Grade Awarded (50% - 70%)</span>
+                      <span>⚠️ Amber / Orange Grade Awarded (50% - 79%)</span>
                     </div>
                     <p className="text-center text-slate-700">
-                      Good effort! Scoring in the 50%, 60%, or 70% range assigns you an <strong>Amber / Orange grade</strong>. Review the key formulas and explanations in the lesson slides to reach the 80%+ threshold for Green status!
+                      Good effort! Scoring in the 50%–79% range assigns you an <strong>Amber / Orange grade</strong>. Review the key formulas and explanations in the lesson slides to reach the 80%+ threshold for Green status!
                     </p>
                   </div>
                 ) : (
                   <div className="p-4 rounded-2xl bg-rose-50 border border-rose-300 text-xs text-rose-800 max-w-lg mx-auto space-y-1">
                     <div className="font-bold text-sm text-rose-900 flex items-center justify-center gap-1.5">
-                      <span>🚨 Red Grade Assigned (40% or Less)</span>
+                      <span>🚨 Red Grade Assigned (Under 50%)</span>
                     </div>
                     <p className="text-center text-slate-700">
-                      Scoring 40% or less assigns you a <strong>Red grade</strong>. Key syllabus definitions require reinforcement. Please review the interactive lesson slides carefully and retake the quiz.
+                      Scoring below 50% assigns you a <strong>Red grade</strong>. Key syllabus definitions require reinforcement. Please review the interactive lesson slides carefully and retake the quiz.
                     </p>
                   </div>
                 )}
@@ -2551,25 +2791,6 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                                 {q.explanation}
                               </p>
                             </div>
-
-                            {!isCorrect && (
-                              <div className="flex justify-end pt-1">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setIsQuizModalOpen(false);
-                                    onAskAITutor(
-                                      `Explain Cambridge 0653 [${quizSubtopicCode}] question: "${q.question}" and why the answer is "${q.options[q.correctIndex]}"`,
-                                      q.topicCode
-                                    );
-                                  }}
-                                  className="text-xs text-purple-700 hover:text-purple-900 font-bold flex items-center gap-1 cursor-pointer"
-                                >
-                                  <Brain className="w-3.5 h-3.5" />
-                                  <span>Ask AI Tutor to explain this question</span>
-                                </button>
-                              </div>
-                            )}
                           </div>
                         );
                       })}
@@ -2593,7 +2814,8 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                   </button>
                 </div>
               </div>
-            )}
+              );
+            })()}
           </div>
         </div>
       )}

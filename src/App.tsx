@@ -11,7 +11,6 @@ import { AIRecommendations } from './components/AIRecommendations';
 import { InstructorDashboard } from './components/InstructorDashboard';
 import { StudentClassesView } from './components/StudentClassesView';
 import { StudentTasksPanel } from './components/StudentTasksPanel';
-import { AIChatTutor } from './components/AIChatTutor';
 import { StudentLeaderboard } from './components/StudentLeaderboard';
 import { StudentProfileView } from './components/StudentProfileView';
 import { GoogleSignInGate } from './components/GoogleSignInGate';
@@ -25,11 +24,10 @@ import { StudentTaskProgressBar } from './components/StudentTaskProgressBar';
 import { TaskView } from './components/TaskView';
 import { Dashboard } from './components/Dashboard';
 import { subscribeToBattleState, BattleEventState } from './services/firebaseGameService';
-import { ScienceSubject, UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, TaskWithSubmission } from './types';
+import { ScienceSubject, UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, SubtopicSlideProgress, QuizLengthRecord, TaskWithSubmission, ClassTask } from './types';
 import { resolveSubtopicByQuery } from './data/subtopicSlidesData';
 import { logCompletedActivity } from './services/activityService';
 import { 
-  Sparkles, 
   Users,
   ShieldAlert,
   GraduationCap,
@@ -61,8 +59,10 @@ const defaultProgress: StudentProgress = {
   topicConfidence: {},
   trafficLights: {},
   subtopicQuizScores: {},
+  slidesReadBySubtopic: {},
   savedNotes: {},
   quizScores: {},
+  practiceQuizByLength: {},
   lastActive: new Date().toISOString()
 };
 
@@ -73,7 +73,7 @@ export default function App() {
       try {
         const params = new URLSearchParams(window.location.search);
         const tabParam = params.get('tab');
-        if (tabParam) return tabParam;
+        if (tabParam && tabParam !== 'chat') return tabParam;
       } catch (e) {
         // ignore
       }
@@ -83,6 +83,14 @@ export default function App() {
   const [selectedSubject, setSelectedSubject] = useState<ScienceSubject | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [targetLessonCode, setTargetLessonCode] = useState<string | null>(null);
+  const [activeTaskContext, setActiveTaskContext] = useState<{
+    taskId: string;
+    title: string;
+    targetSubtopics: string[];
+    targetSubject?: ScienceSubject | 'all';
+    requiredQuizLength: number;
+    type?: string;
+  } | null>(null);
 
   // Auto-switch tab if URL query parameter changes
   useEffect(() => {
@@ -90,7 +98,7 @@ export default function App() {
     try {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
-      if (tabParam && tabParam !== currentTab) {
+      if (tabParam && tabParam !== 'chat' && tabParam !== currentTab) {
         setCurrentTab(tabParam);
       }
     } catch (e) {
@@ -168,9 +176,6 @@ export default function App() {
 
   // List of enrolled class IDs for live syncing
   const [enrolledClassIds, setEnrolledClassIds] = useState<string[]>([]);
-
-  // Chat query passed between components
-  const [chatInitialQuery, setChatInitialQuery] = useState<string>('');
 
   // Instructor previewing student view mode
   const [isPreviewingAsStudent, setIsPreviewingAsStudent] = useState<boolean>(false);
@@ -308,9 +313,9 @@ export default function App() {
     }
   }, [progress, user, enrolledClassIds]);
 
-  // Migrate past student quiz results with new traffic light parameters (50%, 60%, 70% Amber/Orange; <=40% Red; 80%+ Green)
+  // Migrate past student quiz results with new traffic light parameters & repair legacy raw quiz counts (v3)
   useEffect(() => {
-    const MIGRATION_KEY = 'igcse_traffic_light_v2_migrated';
+    const MIGRATION_KEY = 'igcse_traffic_light_v3_migrated';
     const subScores = progress?.subtopicQuizScores || {};
     const currentLights = progress?.trafficLights || {};
     let needsUpdate = false;
@@ -352,9 +357,39 @@ export default function App() {
   }, []);
 
   // Handler functions for progress updates
+  const handleUpdateSlidesRead = (subtopicCode: string, slideProgress: SubtopicSlideProgress) => {
+    setProgress(prev => {
+      const completedSet = new Set(prev.completedLessons || []);
+      if (slideProgress.allSlidesRead) {
+        completedSet.add(subtopicCode);
+      }
+      const updated: StudentProgress = {
+        ...prev,
+        completedLessons: Array.from(completedSet),
+        slidesReadBySubtopic: {
+          ...(prev.slidesReadBySubtopic || {}),
+          [subtopicCode]: slideProgress
+        },
+        lastActive: new Date().toISOString()
+      };
+      try {
+        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
+      } catch {}
+      if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
+        syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
+        autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'slides', subtopicCode, { progress: updated });
+      }
+      return updated;
+    });
+  };
+
   const handleToggleCompleteLesson = (lessonId: string) => {
     setProgress(prev => {
       const isCompleted = prev.completedLessons.includes(lessonId);
+      // Prevent marking a lesson complete unless all slides in that subtopic have actually been read
+      if (!isCompleted && prev.slidesReadBySubtopic?.[lessonId] && !prev.slidesReadBySubtopic[lessonId].allSlidesRead) {
+        return prev;
+      }
       const newCompleted = isCompleted
         ? prev.completedLessons.filter(id => id !== lessonId)
         : [...prev.completedLessons, lessonId];
@@ -362,15 +397,12 @@ export default function App() {
       try {
         localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
       } catch {}
-      if (user && user.role === 'student' && enrolledClassIds.length > 0) {
-        syncStudentProgressToClasses(user, updated, enrolledClassIds);
+      if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
+        syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
+        autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'slides', lessonId, { progress: updated });
       }
       return updated;
     });
-
-    if (user && user.role === 'student') {
-      autoCheckTaskCompletion(user, enrolledClassIds, 'traffic_light', lessonId);
-    }
   };
 
   const handleUpdateConfidence = (topicCode: string, rating: number) => {
@@ -404,50 +436,77 @@ export default function App() {
     }));
   };
 
-  const handleQuizCompleted = (subject: string, score: number, total: number) => {
+  const handleQuizCompleted = (
+    subject: string,
+    score: number,
+    total: number,
+    meta?: { topics?: string[]; subtopics?: string[]; taskId?: string }
+  ) => {
+    const safeTotal = Math.max(1, total);
+    const pct = Math.round((score / safeTotal) * 100);
+    const nowIso = new Date().toISOString();
+    const recordKey = `${meta?.taskId ? `task_${meta.taskId}` : subject}_len${safeTotal}_${(meta?.subtopics && meta.subtopics.length > 0 ? meta.subtopics.slice().sort().join(',') : (meta?.topics || []).slice().sort().join(',')) || 'general'}`;
+    const lengthRecord: QuizLengthRecord = {
+      score,
+      total: safeTotal,
+      percentage: pct,
+      quizLength: safeTotal,
+      topics: meta?.topics,
+      subtopics: meta?.subtopics,
+      taskId: meta?.taskId,
+      date: nowIso
+    };
+
+    let updatedProgressRef: StudentProgress | null = null;
     setProgress(prev => {
       const updated: StudentProgress = {
         ...prev,
         quizScores: {
           ...prev.quizScores,
-          [subject]: { score, total, date: new Date().toISOString() }
+          [subject]: { score, total: safeTotal, date: nowIso }
         },
-        lastActive: new Date().toISOString()
+        practiceQuizByLength: {
+          ...(prev.practiceQuizByLength || {}),
+          [recordKey]: lengthRecord
+        },
+        lastActive: nowIso
       };
+      updatedProgressRef = updated;
       try {
         localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
       } catch {}
-      if (user && user.role === 'student' && enrolledClassIds.length > 0) {
-        syncStudentProgressToClasses(user, updated, enrolledClassIds);
+      if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
+        syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
       }
       return updated;
     });
 
-    if (user && user.role === 'student') {
-      autoCheckTaskCompletion(user, enrolledClassIds, 'quiz', subject, { quizScore: Math.round((score / total) * 100) });
+    if (user && isEffectiveStudent) {
+      const targetCode = meta?.subtopics?.[0] || meta?.topics?.[0] || subject;
+      autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'quiz', targetCode, {
+        quizScore: pct,
+        quizLength: safeTotal,
+        progress: updatedProgressRef || undefined
+      });
       logCompletedActivity(user.id, {
         type: 'subject_quiz',
-        title: `${subject.charAt(0).toUpperCase() + subject.slice(1)} Practice Arena Quiz`,
-        subtitle: 'Comprehensive Practice Exam',
+        title: `${subject.charAt(0).toUpperCase() + subject.slice(1)} Practice Quiz (${safeTotal} Questions)`,
+        subtitle: meta?.subtopics?.length ? `Topics: ${meta.subtopics.join(', ')}` : 'Practice Quiz Challenge',
         subject: subject as ScienceSubject,
         score,
-        total,
-        percentage: Math.round((score / (total || 1)) * 100),
-        passed: score / (total || 1) >= 0.7,
-        trafficLight: (score / (total || 1) >= 0.8) ? 'green' : (score / (total || 1) >= 0.5) ? 'orange' : 'red',
-        completedAt: new Date().toISOString()
+        total: safeTotal,
+        percentage: pct,
+        passed: score / safeTotal >= 0.7,
+        trafficLight: (score / safeTotal >= 0.8) ? 'green' : (score / safeTotal >= 0.5) ? 'orange' : 'red',
+        completedAt: nowIso
       });
     }
   };
 
   const handleUpdateTrafficLight = (subtopicCode: string, status: TrafficLightStatus) => {
     setProgress(prev => {
-      const completedSet = new Set(prev.completedLessons || []);
-      // If student reviewed slides and completed traffic light rating, mark slide deck as completed
-      completedSet.add(subtopicCode);
       const updated: StudentProgress = {
         ...prev,
-        completedLessons: Array.from(completedSet),
         trafficLights: {
           ...(prev.trafficLights || {}),
           [subtopicCode]: status
@@ -457,24 +516,27 @@ export default function App() {
       try {
         localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
       } catch {}
-      if (user && user.role === 'student' && enrolledClassIds.length > 0) {
-        syncStudentProgressToClasses(user, updated, enrolledClassIds);
+      if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
+        syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
+        autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'traffic_light', subtopicCode, {
+          trafficLight: status,
+          progress: updated
+        });
       }
       return updated;
     });
-
-    if (user && user.role === 'student') {
-      autoCheckTaskCompletion(user, enrolledClassIds, 'traffic_light', subtopicCode, { trafficLight: status });
-    }
   };
 
   const handleSaveSubtopicQuizResult = (subtopicCode: string, result: SubtopicQuizResult) => {
     const assignedLight: TrafficLightStatus = result.percentage >= 80 ? 'green' : result.percentage >= 50 ? 'orange' : 'red';
+    let updatedProgressRef: StudentProgress | null = null;
 
     setProgress(prev => {
       const completedSet = new Set(prev.completedLessons || []);
-      // When traffic light quiz is completed, mark slide deck as completed
-      completedSet.add(subtopicCode);
+      // Only mark lesson completed if all slides have actually been read
+      if (prev.slidesReadBySubtopic?.[subtopicCode]?.allSlidesRead) {
+        completedSet.add(subtopicCode);
+      }
       const updated: StudentProgress = {
         ...prev,
         completedLessons: Array.from(completedSet),
@@ -488,6 +550,7 @@ export default function App() {
         },
         lastActive: new Date().toISOString()
       };
+      updatedProgressRef = updated;
       try {
         localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
       } catch {}
@@ -498,11 +561,16 @@ export default function App() {
     });
 
     if (user && isEffectiveStudent) {
-      autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'quiz', subtopicCode, { quizScore: result.score, trafficLight: assignedLight });
+      autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'quiz', subtopicCode, {
+        quizScore: result.percentage,
+        quizLength: result.total || 10,
+        trafficLight: assignedLight,
+        progress: updatedProgressRef || undefined
+      });
       logCompletedActivity(user.id, {
         type: 'subtopic_quiz',
         title: `${subtopicCode} Knowledge Check`,
-        subtitle: '10-Question Subtopic Quiz',
+        subtitle: `${result.total || 10}-Question Traffic Light Quiz`,
         code: subtopicCode,
         subject: (subtopicCode.startsWith('B') ? 'biology' : subtopicCode.startsWith('C') ? 'chemistry' : 'physics') as ScienceSubject,
         score: result.score,
@@ -515,9 +583,28 @@ export default function App() {
     }
   };
 
-  const handleAskAITutor = (query: string, _topicCode?: string) => {
-    setChatInitialQuery(query);
-    setCurrentTab('chat');
+  const handleOpenTaskInQuizzes = (task: ClassTask | TaskWithSubmission) => {
+    setActiveTaskContext({
+      taskId: task.id,
+      title: task.title,
+      targetSubtopics: task.targetSubtopics || [],
+      targetSubject: task.targetSubject,
+      requiredQuizLength: Math.max(1, Math.min(40, Number(task.requiredQuizLength) || 10)),
+      type: task.type
+    });
+    setCurrentTab('quizzes');
+  };
+
+  const handleOpenTaskInLessons = (task: ClassTask | TaskWithSubmission, subtopicCode?: string) => {
+    setActiveTaskContext({
+      taskId: task.id,
+      title: task.title,
+      targetSubtopics: task.targetSubtopics || [],
+      targetSubject: task.targetSubject,
+      requiredQuizLength: Math.max(1, Math.min(40, Number(task.requiredQuizLength) || 10)),
+      type: task.type
+    });
+    handleOpenLesson(subtopicCode || task.targetSubtopics?.[0]);
   };
 
   const handleOpenLesson = (topicCode?: string) => {
@@ -799,8 +886,16 @@ export default function App() {
               user={effectiveUser || user}
               progress={progress}
               enrolledClassIds={enrolledClassIds}
-              onNavigateToLessons={handleOpenLesson}
-              onNavigateToQuizzes={() => setCurrentTab('quizzes')}
+              onNavigateToLessons={(subtopicCode, task) =>
+                task ? handleOpenTaskInLessons(task, subtopicCode) : handleOpenLesson(subtopicCode)
+              }
+              onNavigateToQuizzes={(_topicCode, task) => {
+                if (task) {
+                  handleOpenTaskInQuizzes(task);
+                } else {
+                  setCurrentTab('quizzes');
+                }
+              }}
               onNavigateToRoyale={() => setCurrentTab('royale')}
             />
           ) : (
@@ -826,13 +921,16 @@ export default function App() {
             targetSubtopicCode={targetLessonCode}
             onClearTargetSubtopicCode={() => setTargetLessonCode(null)}
             completedLessons={progress.completedLessons}
+            slidesReadBySubtopic={progress.slidesReadBySubtopic || {}}
             trafficLights={progress.trafficLights || {}}
             subtopicQuizScores={progress.subtopicQuizScores || {}}
+            activeTaskContext={activeTaskContext}
+            onUpdateSlidesRead={handleUpdateSlidesRead}
             onUpdateTrafficLight={handleUpdateTrafficLight}
             onSaveQuizResult={handleSaveSubtopicQuizResult}
             onToggleCompleteLesson={handleToggleCompleteLesson}
             onSaveNoteFromSlide={handleUpdateNote}
-            onAskAITutor={handleAskAITutor}
+            onNavigateToTaskQuiz={() => setCurrentTab('quizzes')}
             theme={theme}
             onToggleTheme={handleToggleTheme}
           />
@@ -843,8 +941,16 @@ export default function App() {
             <StudentClassesView
               user={effectiveUser || user}
               progress={progress}
-              onNavigateToLessons={handleOpenLesson}
-              onNavigateToQuizzes={() => setCurrentTab('quizzes')}
+              onNavigateToLessons={(subtopicCode, task) =>
+                task ? handleOpenTaskInLessons(task, subtopicCode) : handleOpenLesson(subtopicCode)
+              }
+              onNavigateToQuizzes={(_topicCode, task) => {
+                if (task) {
+                  handleOpenTaskInQuizzes(task);
+                } else {
+                  setCurrentTab('quizzes');
+                }
+              }}
             />
           ) : (
             <InstructorDashboard
@@ -889,14 +995,14 @@ export default function App() {
         {currentTab === 'exams' && (
           <PastExamsVault
             isInstructor={!isEffectiveStudent}
-            onAskAITutor={handleAskAITutor}
           />
         )}
 
         {currentTab === 'quizzes' && (
           <QuizArena
+            taskContext={activeTaskContext}
+            onClearTaskContext={() => setActiveTaskContext(null)}
             onQuizCompleted={handleQuizCompleted}
-            onAskAITutor={handleAskAITutor}
           />
         )}
 
@@ -906,7 +1012,6 @@ export default function App() {
             searchQuery={searchQuery}
             savedNotes={progress.savedNotes || {}}
             onUpdateNote={handleUpdateNote}
-            onAskAITutor={handleAskAITutor}
           />
         )}
 
@@ -948,7 +1053,6 @@ export default function App() {
               if (topicCode) setSearchQuery(topicCode);
               setCurrentTab('quizzes');
             }}
-            onAskAITutor={handleAskAITutor}
             onNavigateToExams={() => setCurrentTab('exams')}
             onNavigateToNotebook={() => setCurrentTab('notebook')}
             onNavigateToGuidelines={() => setCurrentTab('guidelines')}
@@ -1035,7 +1139,7 @@ export default function App() {
 
         {/* MODULE 3, 4, 5: REVISION ROYALE TOURNAMENT, LOBBY & 2D ARENA */}
         {currentTab === 'royale' && (
-          !isEffectiveStudent ? (
+          (user?.email === 'corbanb@gisboyshigh.net' || !isEffectiveStudent) ? (
             battleArenaActive ? (
               <BattleRoyaleArena
                 user={user}
@@ -1045,6 +1149,7 @@ export default function App() {
               <AdminBattleControl
                 currentUser={user}
                 onJoinSpectate={() => setBattleArenaActive(true)}
+                onEnterArena={() => setBattleArenaActive(true)}
                 onClose={() => setCurrentTab('instructor')}
               />
             )
@@ -1122,30 +1227,7 @@ export default function App() {
             </div>
           )
         )}
-
-        {currentTab === 'chat' && (
-          <AIChatTutor
-            user={user}
-            initialTopicQuery={chatInitialQuery}
-          />
-        )}
       </main>
-
-      {/* Floating Bottom AI Chat quick launcher (when not already in chat) */}
-      {currentTab !== 'chat' && (
-        <div className="fixed bottom-6 right-6 z-40">
-          <button
-            onClick={() => {
-              setChatInitialQuery('');
-              setCurrentTab('chat');
-            }}
-            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold text-xs rounded-full shadow-lg hover:shadow-emerald-500/25 hover:scale-105 active:scale-95 transition"
-          >
-            <Sparkles className="w-4 h-4 text-slate-950" />
-            <span>Ask 0653 AI Tutor</span>
-          </button>
-        </div>
-      )}
     </div>
   );
 }

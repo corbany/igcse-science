@@ -3,7 +3,6 @@ import {
   CheckCircle2, 
   Save, 
   FileDown, 
-  Sparkles, 
   BookOpen, 
   AlertCircle, 
   Search,
@@ -19,15 +18,13 @@ interface SyllabusNotebookProps {
   searchQuery: string;
   savedNotes: Record<string, string>;
   onUpdateNote: (topicCode: string, noteContent: string) => void;
-  onAskAITutor: (query: string, topicCode: string) => void;
 }
 
 export const SyllabusNotebook: React.FC<SyllabusNotebookProps> = ({
   selectedSubject,
   searchQuery,
   savedNotes,
-  onUpdateNote,
-  onAskAITutor
+  onUpdateNote
 }) => {
   const [activeCode, setActiveCode] = useState<string>('B2');
   const [saveAlert, setSaveAlert] = useState<string | null>(null);
@@ -173,14 +170,6 @@ export const SyllabusNotebook: React.FC<SyllabusNotebookProps> = ({
                   </div>
                   <h2 className="text-xl font-bold text-slate-800 mt-1.5">{activeItem.title}</h2>
                 </div>
-
-                <button
-                  onClick={() => onAskAITutor(`Generate 3 key revision summary cards with mark scheme points for topic ${activeItem.code} (${activeItem.title}).`, activeItem.code)}
-                  className="text-xs px-3.5 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-black font-bold transition flex items-center gap-1.5 self-start sm:self-auto cursor-pointer shadow-2xs"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-purple-700" />
-                  <span>AI Study Guide</span>
-                </button>
               </div>
 
               {/* Core Objectives */}

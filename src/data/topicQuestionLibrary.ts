@@ -578,36 +578,36 @@ export const TOPIC_QUESTION_LIBRARY: Record<string, QuizQuestion[]> = {
     }
   ],
 
-  // B13 Coordination & Response
+  // B13 Drugs
   'B13': [
     {
       id: 'lib-b13-1',
       subject: 'biology',
       topicCode: 'B13',
-      question: 'What is the correct pathway of an electrical impulse in a simple reflex arc (e.g. withdrawing hand from hot pan)?',
+      question: 'Which of the following is the Cambridge IGCSE definition of a drug?',
       options: [
-        'Stimulus → Receptor → Sensory neurone → Relay neurone in spinal cord → Motor neurone → Effector (muscle) → Response',
-        'Receptor → Motor neurone → Brain → Sensory neurone → Effector',
-        'Stimulus → Effector → Relay neurone → Sensory neurone → Brain',
-        'Effector → Motor neurone → Relay neurone → Receptor → Response'
+        'Any substance taken into the body that modifies or affects chemical reactions in the body',
+        'Any chemical designed to kill pathogenic bacteria without harming human tissues',
+        'Any organic compound required in small quantities for balanced cellular nutrition',
+        'A toxic product synthesized by the liver to eliminate waste from blood'
       ],
       correctIndex: 0,
-      explanation: 'Reflex arcs are involuntary and rapid: Receptor detects stimulus -> Sensory neurone -> Relay neurone in CNS -> Motor neurone -> Effector muscle/gland.',
+      explanation: 'Under Cambridge 0653 syllabus: a drug is defined as any substance taken into the body that modifies or affects chemical reactions in the body.',
       syllabusRef: 'B13.1'
     },
     {
       id: 'lib-b13-2',
       subject: 'biology',
       topicCode: 'B13',
-      question: 'What physiological effects are triggered by the release of adrenaline from the adrenal glands into the bloodstream?',
+      question: 'Why are antibiotics ineffective in treating viral infections such as influenza or the common cold?',
       options: [
-        'Increased heart rate, increased breathing rate, dilated pupils, and conversion of liver glycogen to glucose for muscles',
-        'Decreased heart rate, constricted bronchioles, and accelerated digestion',
-        'Decreased blood glucose concentration and constriction of skeletal muscle arterioles',
-        'Immediate stimulation of sleep cycles and reduced metabolic rate'
+        'Viruses do not possess bacterial cell walls or metabolic machinery and live inside host human cells',
+        'Viruses produce thick capsules of antibodies that digest antibiotics',
+        'Antibiotics only function in an acidic environment found exclusively in bacterial cytoplasm',
+        'Viral antigens are identical to antibiotic molecules, causing competitive inhibition'
       ],
       correctIndex: 0,
-      explanation: 'Adrenaline prepares the body for "fight or flight": boosts cardiac output, widens airways, diverts blood to skeletal muscles, and elevates blood glucose.',
+      explanation: 'Antibiotics target bacterial processes (such as cell wall synthesis or bacterial ribosomes). Viruses have no cell wall or independent metabolism and replicate inside host cells.',
       syllabusRef: 'B13.1'
     }
   ],

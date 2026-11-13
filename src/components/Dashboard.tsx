@@ -243,7 +243,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         onClick={onNavigateToTasks}
                         className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg cursor-pointer"
                       >
-                        Submit Work
+                        View Checklist
                       </button>
                     </div>
                   </div>

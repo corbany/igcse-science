@@ -9,7 +9,6 @@ import {
   HelpCircle, 
   ArrowRight, 
   TrendingUp, 
-  Brain, 
   Clock, 
   Sliders, 
   CheckSquare, 
@@ -27,7 +26,6 @@ import {
   RefreshCw, 
   GraduationCap,
   Flame,
-  MessageSquare,
   FileQuestion
 } from 'lucide-react';
 import { QuizQuestion, ScienceSubject } from '../types';
@@ -41,20 +39,36 @@ import {
   ALL_SUBTOPIC_OPTIONS
 } from '../services/quizService';
 
+export interface ActiveQuizTaskContext {
+  taskId: string;
+  title: string;
+  targetSubtopics: string[];
+  targetSubject?: ScienceSubject | 'all';
+  requiredQuizLength: number;
+  type?: string;
+}
+
 interface QuizArenaProps {
-  onQuizCompleted: (subject: string, score: number, total: number) => void;
-  onAskAITutor: (query: string, topicCode: string) => void;
+  onQuizCompleted: (
+    subject: string,
+    score: number,
+    total: number,
+    meta?: { topics?: string[]; subtopics?: string[]; taskId?: string }
+  ) => void;
   weakTopics?: string[];
   onOpenLesson?: (topicCode: string) => void;
+  taskContext?: ActiveQuizTaskContext | null;
+  onClearTaskContext?: () => void;
 }
 
 type QuizPhase = 'config' | 'generating' | 'active' | 'completed';
 
 export const QuizArena: React.FC<QuizArenaProps> = ({ 
   onQuizCompleted, 
-  onAskAITutor, 
   weakTopics = [],
-  onOpenLesson 
+  onOpenLesson,
+  taskContext = null,
+  onClearTaskContext
 }) => {
   // Phase state
   const [phase, setPhase] = useState<QuizPhase>('config');
@@ -87,6 +101,38 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
   const [reviewFilter, setReviewFilter] = useState<'all' | 'incorrect' | 'correct'>('all');
 
   const timerRef = useRef<any>(null);
+
+  // Sync quiz configuration automatically when opened from an Assigned Task
+  useEffect(() => {
+    if (!taskContext) return;
+    const exactLen = Math.max(1, Math.min(40, Number(taskContext.requiredQuizLength) || 10));
+    setNumQuestions(exactLen);
+    setPhase('config');
+
+    const targets = (taskContext.targetSubtopics || []).map(s => s.trim().toUpperCase()).filter(Boolean);
+    if (targets.length > 0) {
+      const parentTopics = Array.from(new Set(targets.map(s => s.split('.')[0].toUpperCase())));
+      const validTopicCodes = parentTopics.filter(tp => ALL_SYLLABUS_TOPICS.some(t => t.code.toUpperCase() === tp));
+      if (validTopicCodes.length > 0) {
+        setSelectedTopics(validTopicCodes);
+        const expandMap: Record<string, boolean> = {};
+        validTopicCodes.forEach(c => { expandMap[c] = true; });
+        setExpandedTopics(prev => ({ ...prev, ...expandMap }));
+      }
+      const matchedSubs = ALL_SUBTOPIC_OPTIONS
+        .filter(sub => targets.some(t => sub.code.toUpperCase() === t || sub.code.toUpperCase().startsWith(t + '.')))
+        .map(sub => sub.code);
+      setSelectedSubtopics(matchedSubs.length > 0 ? matchedSubs : targets);
+    }
+
+    if (taskContext.targetSubject && taskContext.targetSubject !== 'all') {
+      setActiveSubjectTab(taskContext.targetSubject);
+    } else if (targets.length > 0) {
+      const firstParent = targets[0].split('.')[0].toUpperCase();
+      const topicObj = ALL_SYLLABUS_TOPICS.find(t => t.code.toUpperCase() === firstParent);
+      if (topicObj) setActiveSubjectTab(topicObj.subject);
+    }
+  }, [taskContext?.taskId]);
 
   // Timer effect
   useEffect(() => {
@@ -285,7 +331,11 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
       if (firstTopic) primarySubject = firstTopic.subject;
     }
 
-    onQuizCompleted(primarySubject, score, questions.length);
+    onQuizCompleted(primarySubject, score, questions.length, {
+      topics: selectedTopics,
+      subtopics: selectedSubtopics,
+      taskId: taskContext?.taskId
+    });
   };
 
   // Format seconds to mm:ss
@@ -370,6 +420,55 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Assigned Task Exact Quiz Length Guidance Banner */}
+          {taskContext && (
+            <div className={`rounded-xl border-2 p-4 sm:p-5 space-y-2.5 shadow-xs ${
+              numQuestions === taskContext.requiredQuizLength
+                ? 'bg-emerald-50 border-emerald-600 text-emerald-950'
+                : 'bg-amber-50 border-amber-600 text-amber-950'
+            }`}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-white border border-slate-300 text-slate-800">
+                      Assigned Task Target
+                    </span>
+                    <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded bg-slate-800 text-white">
+                      Exact Quiz Length Required: {taskContext.requiredQuizLength} Questions
+                    </span>
+                  </div>
+                  <h2 className="text-base font-bold text-slate-900">{taskContext.title}</h2>
+                  <p className="text-xs text-slate-700">
+                    {numQuestions === taskContext.requiredQuizLength
+                      ? `✓ Ready! Your ${taskContext.requiredQuizLength}-question quiz score (%) will be recorded specifically for this task.`
+                      : `⚠️ You currently selected ${numQuestions} questions. To complete this task, you must choose the exact quiz length of ${taskContext.requiredQuizLength} questions so your percentage is recorded for that length.`}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {numQuestions !== taskContext.requiredQuizLength && (
+                    <button
+                      type="button"
+                      onClick={() => setNumQuestions(taskContext.requiredQuizLength)}
+                      className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold cursor-pointer"
+                    >
+                      Set Exact Length ({taskContext.requiredQuizLength} Qs)
+                    </button>
+                  )}
+                  {onClearTaskContext && (
+                    <button
+                      type="button"
+                      onClick={onClearTaskContext}
+                      className="px-3 py-2 rounded-lg bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-bold cursor-pointer"
+                    >
+                      Clear Task
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Configuration Card: Question Count & Curriculum Tier */}
           <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6">
@@ -928,18 +1027,7 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
                   </div>
 
                   {/* Actions */}
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <button
-                      onClick={() => onAskAITutor(
-                        `Explain Cambridge 0653 ${currentQ.topicCode} question: "${currentQ.question}" and why the answer is "${currentQ.options[currentQ.correctIndex]}"`,
-                        currentQ.topicCode
-                      )}
-                      className="px-4 py-2 rounded-lg bg-[#FDFBF7] hover:bg-slate-100 border border-slate-300 text-slate-800 text-sm font-bold flex items-center gap-2 transition cursor-pointer"
-                    >
-                      <Brain className="w-4 h-4 text-slate-700" />
-                      <span>Ask AI Tutor</span>
-                    </button>
-
+                  <div className="flex items-center justify-end gap-3 flex-wrap">
                     <button
                       onClick={handleNextQuestion}
                       className="px-6 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold flex items-center gap-2 transition cursor-pointer"
@@ -980,6 +1068,22 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
               <p className="text-base text-slate-600 max-w-md mx-auto pt-1">
                 {gradeInfo.feedback}
               </p>
+              <div className="pt-2 flex items-center justify-center gap-2 flex-wrap">
+                <span className="px-3 py-1 rounded-lg bg-[#EBF3F5] border border-slate-300 text-xs font-bold text-slate-800">
+                  Recorded {gradeInfo.percentage}% for {questions.length}-Question Quiz Length
+                </span>
+                {taskContext && (
+                  <span className={`px-3 py-1 rounded-lg border text-xs font-bold ${
+                    questions.length === taskContext.requiredQuizLength
+                      ? 'bg-emerald-50 border-emerald-400 text-emerald-800'
+                      : 'bg-amber-50 border-amber-400 text-amber-800'
+                  }`}>
+                    {questions.length === taskContext.requiredQuizLength
+                      ? `✓ Matches Task Length (${taskContext.requiredQuizLength} Qs)`
+                      : `Task Required ${taskContext.requiredQuizLength} Qs (Completed ${questions.length} Qs)`}
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Subject Breakdown Cards */}
@@ -1142,19 +1246,6 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
                     <p className="text-sm text-slate-700 bg-[#FDFBF7] p-3 rounded-md border border-slate-200 leading-relaxed">
                       <strong className="text-slate-800">Explanation: </strong> {q.explanation}
                     </p>
-
-                    <div className="flex justify-end pt-1">
-                      <button
-                        onClick={() => onAskAITutor(
-                          `Explain Cambridge 0653 ${q.topicCode} question: "${q.question}" and why the answer is "${q.options[q.correctIndex]}"`,
-                          q.topicCode
-                        )}
-                        className="text-xs text-slate-700 hover:text-black flex items-center gap-1 font-bold transition cursor-pointer"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>Ask AI Tutor to explain this question</span>
-                      </button>
-                    </div>
                   </div>
                 );
               })}

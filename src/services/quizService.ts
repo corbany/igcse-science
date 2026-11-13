@@ -1,5 +1,6 @@
 import { QuizQuestion, ScienceSubject } from '../types';
 import { generateDynamicSyllabusQuestions } from '../data/syllabusQuestionsBank';
+import { isValidQuizQuestion } from '../data/quizSanitizer';
 
 export interface SyllabusTopicOption {
   code: string;
@@ -22,7 +23,7 @@ export const ALL_SYLLABUS_TOPICS: SyllabusTopicOption[] = [
   { code: 'B10', subject: 'biology', title: 'Diseases & Immunity', keyConcepts: 'Pathogens, virus structure, antibodies, vaccines' },
   { code: 'B11', subject: 'biology', title: 'Gas Exchange in Humans', keyConcepts: 'Alveoli features, breathing mechanism, lung volumes' },
   { code: 'B12', subject: 'biology', title: 'Respiration', keyConcepts: 'Aerobic equation, energy uses, mitochondria' },
-  { code: 'B13', subject: 'biology', title: 'Coordination & Response', keyConcepts: 'Nervous system, reflex arc, hormones, eye, homeostasis' },
+  { code: 'B13', subject: 'biology', title: 'Drugs', keyConcepts: 'Definition of a drug, antibiotics for bacterial infections, why antibiotics do not destroy viruses, antibiotic resistance, MRSA' },
   { code: 'B14', subject: 'biology', title: 'Reproduction', keyConcepts: 'Asexual vs sexual, flower pollination, human menstrual cycle' },
   { code: 'B15', subject: 'biology', title: 'Organisms & Environment', keyConcepts: 'Sun energy input, food chains, trophic levels, carbon cycle' },
   { code: 'B16', subject: 'biology', title: 'Ecosystems & Environment', keyConcepts: 'Food chains, 10% energy transfer, carbon cycle, deforestation' },
@@ -133,15 +134,15 @@ export async function generateAIQuiz(params: GenerateQuizParams): Promise<QuizGe
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.quiz) && data.quiz.length > 0) {
-        // Enforce strict syllabus compliance: purge any genetics questions
-        const filtered = (data.quiz as QuizQuestion[]).filter(q => !isGeneticsQuestion(q));
+        // Enforce strict syllabus compliance & filter malformed questions
+        const filtered = (data.quiz as QuizQuestion[]).filter(q => !isGeneticsQuestion(q) && isValidQuizQuestion(q));
         const unique = deduplicateQuestionsList(filtered);
 
         if (unique.length < clampedNum) {
           const needed = clampedNum - unique.length;
           const seenStems = new Set(unique.map(q => q.question.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()));
           const supplement = generateClientFallbackQuiz(effectiveRequestTopics, needed * 2, params.tier)
-            .filter(q => !isGeneticsQuestion(q));
+            .filter(q => !isGeneticsQuestion(q) && isValidQuizQuestion(q));
           
           for (const sq of supplement) {
             const norm = sq.question.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -165,7 +166,7 @@ export async function generateAIQuiz(params: GenerateQuizParams): Promise<QuizGe
 
   // Fallback to high-fidelity client-side generation covering all 33 topics
   const fallbackQuestions = generateClientFallbackQuiz(effectiveRequestTopics, clampedNum, params.tier)
-    .filter(q => !isGeneticsQuestion(q));
+    .filter(q => !isGeneticsQuestion(q) && isValidQuizQuestion(q));
   return {
     questions: deduplicateQuestionsList(fallbackQuestions).slice(0, clampedNum),
     source: 'syllabus-engine'
@@ -179,7 +180,7 @@ export function generateClientFallbackQuiz(topics: string[], count: number, tier
   const cleanTopics = topics.length > 0 ? topics : ALL_SYLLABUS_TOPICS.map(t => t.code);
   const uniqueSeed = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const questions = generateDynamicSyllabusQuestions(cleanTopics, count, tier, uniqueSeed);
-  return deduplicateQuestionsList(questions.filter(q => !isGeneticsQuestion(q)));
+  return deduplicateQuestionsList(questions.filter(q => !isGeneticsQuestion(q) && isValidQuizQuestion(q)));
 }
 
 function createQuestionTemplate(
@@ -392,9 +393,14 @@ function createQuestionTemplate(
           exp: 'Aerobic respiration consumes glucose and oxygen to release cellular energy, yielding carbon dioxide and water.'
         },
         'B13': {
-          q: 'In a spinal reflex arc, what is the correct order of components following a painful stimulus?',
-          opts: ['Receptor -> Sensory neurone -> Relay neurone -> Motor neurone -> Effector', 'Receptor -> Motor neurone -> Relay neurone -> Sensory neurone -> Brain', 'Effector -> Sensory neurone -> Relay neurone -> Motor neurone -> Receptor', 'Receptor -> Brain -> Sensory neurone -> Effector'],
-          exp: 'A reflex arc bypasses conscious brain processing: Receptor -> Sensory neurone -> Relay neurone in spinal cord -> Motor neurone -> Effector muscle.'
+          q: 'Which statement correctly explains why penicillin antibiotics are effective against pathogenic bacteria but completely ineffective against viral infections?',
+          opts: [
+            'Antibiotics disrupt bacterial cell wall formation or metabolism, whereas viruses replicate inside host cells and have no cell walls',
+            'Viruses have thick peptidoglycan cell walls that prevent antibiotic absorption',
+            'Bacteria produce specific antibodies that neutralize the antibiotic molecules',
+            'Antibiotics only work at human body temperature and viruses lower body temperature'
+          ],
+          exp: 'Antibiotics target bacterial structures such as cell walls and bacterial ribosomes. Viruses lack cellular structures and metabolic machinery, reproducing exclusively inside host human cells.'
         },
         'B14': {
           q: 'On which day of a typical 28-day human menstrual cycle does ovulation usually occur?',
@@ -765,6 +771,6 @@ export function estimateCambridgeGrade(score: number, total: number): {
   } else if (pct >= 35) {
     return { grade: 'E', percentage: pct, feedback: 'Needs reinforcement in foundational equations and definitions.' };
   } else {
-    return { grade: 'U', percentage: pct, feedback: 'Significant revision required. Ask AI Tutor for step-by-step guidance.' };
+    return { grade: 'U', percentage: pct, feedback: 'Significant revision required. Review the lesson slides and key definitions for step-by-step guidance.' };
   }
 }

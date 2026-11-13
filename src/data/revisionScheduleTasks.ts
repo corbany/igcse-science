@@ -13,7 +13,7 @@ export interface TopicRevisionTaskConfig {
   creativeTasks: {
     task: string;
     type: 'website_tool' | 'hands_on' | 'feynman' | 'sketch' | 'audit';
-    toolTarget?: 'quiz' | 'ai_tutor' | 'exams' | 'notebook' | 'guidelines';
+    toolTarget?: 'quiz' | 'exams' | 'notebook' | 'guidelines';
     aiPrompt?: string;
   }[];
 }
@@ -33,9 +33,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
     },
     creativeTasks: [
       {
-        task: 'Ask AI Chat Tutor: "Give me 3 tricky Cambridge exam scenarios that test the difference between excretion and egestion, and quiz me on them."',
+        task: 'Syllabus Notebook Active Recall: "Give me 3 tricky Cambridge exam scenarios that test the difference between excretion and egestion, and quiz me on them."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Give me 3 tricky Cambridge exam scenarios that test the difference between excretion and egestion, and quiz me on them.'
       },
       {
@@ -64,9 +64,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Generate 2 multi-step Cambridge Paper 4 magnification calculation questions with millimetre to micrometre conversions, and grade my working step-by-step."',
+        task: 'Syllabus Notebook Active Recall: "Generate 2 multi-step Cambridge Paper 4 magnification calculation questions with millimetre to micrometre conversions, and grade my working step-by-step."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Generate 2 multi-step Cambridge Paper 4 magnification calculation questions with millimetre to micrometre conversions, and grade my working step-by-step.'
       },
       {
@@ -91,9 +91,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'hands_on'
       },
       {
-        task: 'Ask AI Chat Tutor: "Explain the role of mitochondria and carrier proteins in active transport across root hair cell membranes according to Cambridge mark schemes."',
+        task: 'Syllabus Notebook Active Recall: "Explain the role of mitochondria and carrier proteins in active transport across root hair cell membranes according to Cambridge mark schemes."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Explain the role of mitochondria and carrier proteins in active transport across root hair cell membranes according to Cambridge mark schemes.'
       },
       {
@@ -118,9 +118,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Test me with 3 mystery food sample scenarios containing mixed nutrients, and ask which tests would turn positive."',
+        task: 'Syllabus Notebook Active Recall: "Test me with 3 mystery food sample scenarios containing mixed nutrients, and ask which tests would turn positive."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Test me with 3 mystery food sample scenarios containing mixed nutrients, and ask which tests would turn positive.'
       },
       {
@@ -145,9 +145,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'feynman'
       },
       {
-        task: 'Ask AI Chat Tutor: "Give me a 4-mark Cambridge Paper 4 extended question on the effect of pH and temperature on amylase, and critique my answer for missing keywords."',
+        task: 'Syllabus Notebook Active Recall: "Give me a 4-mark Cambridge Paper 4 extended question on the effect of pH and temperature on amylase, and critique my answer for missing keywords."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Give me a 4-mark Cambridge Paper 4 extended question on the effect of pH and temperature on amylase, and critique my answer for missing keywords.'
       },
       {
@@ -171,9 +171,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'hands_on'
       },
       {
-        task: 'Ask AI Chat Tutor: "Explain how to interpret a graph with two limiting factors curves (e.g. 0.04% CO₂ vs 0.1% CO₂ under varying light intensity) for Cambridge Paper 4."',
+        task: 'Syllabus Notebook Active Recall: "Explain how to interpret a graph with two limiting factors curves (e.g. 0.04% CO₂ vs 0.1% CO₂ under varying light intensity) for Cambridge Paper 4."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Explain how to interpret a graph with two limiting factors curves (e.g. 0.04% CO₂ vs 0.1% CO₂ under varying light intensity) for Cambridge Paper 4.'
       },
       {
@@ -198,9 +198,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Why does emulsification of fats by bile salts speed up lipase action? Give the exact 2-mark Cambridge examiner phrasing."',
+        task: 'Syllabus Notebook Active Recall: "Why does emulsification of fats by bile salts speed up lipase action? Give the exact 2-mark Cambridge examiner phrasing."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Why does emulsification of fats by bile salts speed up lipase action? Give the exact 2-mark Cambridge examiner phrasing.'
       },
       {
@@ -225,9 +225,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'hands_on'
       },
       {
-        task: 'Ask AI Chat Tutor: "How does high humidity decrease transpiration rate? Explain using water vapor concentration gradient for Paper 4 Extended."',
+        task: 'Syllabus Notebook Active Recall: "How does high humidity decrease transpiration rate? Explain using water vapor concentration gradient for Paper 4 Extended."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'How does high humidity decrease transpiration rate? Explain using water vapor concentration gradient for Paper 4 Extended.'
       },
       {
@@ -256,9 +256,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'hands_on'
       },
       {
-        task: 'Ask AI Chat Tutor: "Explain why the muscular wall of the left ventricle is much thicker than the right ventricle in Cambridge mark schemes."',
+        task: 'Syllabus Notebook Active Recall: "Explain why the muscular wall of the left ventricle is much thicker than the right ventricle in Cambridge mark schemes."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Explain why the muscular wall of the left ventricle is much thicker than the right ventricle in Cambridge mark schemes.'
       }
     ]
@@ -278,9 +278,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Test me on active vs passive immunity with 3 real-world medical examples and tell me if my reasoning is correct."',
+        task: 'Syllabus Notebook Active Recall: "Test me on active vs passive immunity with 3 real-world medical examples and tell me if my reasoning is correct."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Test me on active vs passive immunity with 3 real-world medical examples and tell me if my reasoning is correct.'
       },
       {
@@ -305,9 +305,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'hands_on'
       },
       {
-        task: 'Ask AI Chat Tutor: "Generate a table comparing the percentage composition of inspired air vs expired air (oxygen, carbon dioxide, nitrogen) and explain each difference."',
+        task: 'Syllabus Notebook Active Recall: "Generate a table comparing the percentage composition of inspired air vs expired air (oxygen, carbon dioxide, nitrogen) and explain each difference."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Generate a table comparing the percentage composition of inspired air vs expired air (oxygen, carbon dioxide, nitrogen) and explain each difference.'
       },
       {
@@ -332,9 +332,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'feynman'
       },
       {
-        task: 'Ask AI Chat Tutor: "Why is less energy released per glucose molecule in anaerobic respiration compared to aerobic respiration? Give the 2-mark Cambridge answer."',
+        task: 'Syllabus Notebook Active Recall: "Why is less energy released per glucose molecule in anaerobic respiration compared to aerobic respiration? Give the 2-mark Cambridge answer."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Why is less energy released per glucose molecule in anaerobic respiration compared to aerobic respiration? Give the 2-mark Cambridge answer.'
       },
       {
@@ -346,27 +346,27 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
   },
   'B13': {
     code: 'B13',
-    title: 'Coordination & Response',
+    title: 'Drugs',
     subject: 'biology',
     slideRecap: {
-      slideRange: 'Slides 2–4',
-      deckTitle: 'Reflex Arc Pathway, Synapses & Eye Accommodation',
-      keyConcepts: '5-step reflex pathway (Stimulus ➔ Receptor ➔ Sensory Neurone ➔ Relay Neurone ➔ Motor Neurone ➔ Effector); synapse neurotransmitter diffusion; ciliary muscles and suspensory ligaments in the eye.'
+      slideRange: 'Slides 1–3',
+      deckTitle: 'Antibiotics, Painkillers & MRSA Resistance',
+      keyConcepts: 'Definition of a drug (substance modifying chemical reactions in body); antibiotics kill bacteria; antibiotics do not destroy viruses; antibiotic resistance and MRSA natural selection; prudent antibiotic usage.'
     },
     creativeTasks: [
       {
-        task: 'Ruler Drop Reaction Test: Have a partner hold a 30 cm ruler just above your open thumb and forefinger; drop it without warning and catch it; record the drop distance in cm, convert to reaction time, and trace the reflex pathway.',
-        type: 'hands_on'
-      },
-      {
-        task: 'Eye Accommodation Cheat-Card: Write the "Near vs Distant Object" rule on an index card: ciliary muscle contraction, suspensory ligament tension, and lens convexity.',
+        task: 'Antibiotic vs Virus Infographic: Draw a comparison diagram showing why antibiotics can destroy bacterial cell walls and metabolic machinery, but have no effect on viruses replicating inside host cells.',
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Explain how neurotransmitters ensure that nerve impulses travel in one direction only across a synapse for Cambridge Paper 4."',
+        task: 'MRSA Natural Selection Timeline: Create a 4-step flowchart showing how random mutation, antibiotic overuse, survival of resistant strains, and reproduction lead to antibiotic-resistant superbugs.',
+        type: 'hands_on'
+      },
+      {
+        task: 'Syllabus Notebook Active Recall: "Explain the difference between antibiotics and painkillers and why doctors must not prescribe antibiotics for common colds or flu according to Cambridge 0653."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
-        aiPrompt: 'Explain how neurotransmitters ensure that nerve impulses travel in one direction only across a synapse for Cambridge Paper 4.'
+        toolTarget: 'notebook',
+        aiPrompt: 'Explain the difference between antibiotics and painkillers and why doctors must not prescribe antibiotics for common colds or flu according to Cambridge 0653.'
       }
     ]
   },
@@ -385,9 +385,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Compare insect-pollinated flowers and wind-pollinated flowers in a 4-row table covering petals, stamens, stigmas, and pollen grains."',
+        task: 'Syllabus Notebook Active Recall: "Compare insect-pollinated flowers and wind-pollinated flowers in a 4-row table covering petals, stamens, stigmas, and pollen grains."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Compare insect-pollinated flowers and wind-pollinated flowers in a 4-row table covering petals, stamens, stigmas, and pollen grains.'
       },
       {
@@ -412,9 +412,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Explain with 3 distinct reasons why food chains rarely exceed 4 or 5 trophic levels in an ecosystem."',
+        task: 'Syllabus Notebook Active Recall: "Explain with 3 distinct reasons why food chains rarely exceed 4 or 5 trophic levels in an ecosystem."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Explain with 3 distinct reasons why food chains rarely exceed 4 or 5 trophic levels in an ecosystem.'
       },
       {
@@ -439,9 +439,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Explain how burning fossil fuels and deforestation alter carbon sink reserves, using Cambridge command words."',
+        task: 'Syllabus Notebook Active Recall: "Explain how burning fossil fuels and deforestation alter carbon sink reserves, using Cambridge command words."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Explain how burning fossil fuels and deforestation alter carbon sink reserves, using Cambridge command words.'
       },
       {
@@ -474,9 +474,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "In the reaction between NH₃ gas and HCl gas in a glass tube, explain why the white ring of NH₄Cl forms closer to the HCl end using molecular mass."',
+        task: 'Syllabus Notebook Active Recall: "In the reaction between NH₃ gas and HCl gas in a glass tube, explain why the white ring of NH₄Cl forms closer to the HCl end using molecular mass."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'In the reaction between NH₃ gas and HCl gas in a glass tube, explain why the white ring of NH₄Cl forms closer to the HCl end using molecular mass.'
       }
     ]
@@ -500,9 +500,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Explain why giant ionic compounds conduct electricity when molten or dissolved, but NOT when solid, in Cambridge Paper 4 mark schemes."',
+        task: 'Syllabus Notebook Active Recall: "Explain why giant ionic compounds conduct electricity when molten or dissolved, but NOT when solid, in Cambridge Paper 4 mark schemes."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Explain why giant ionic compounds conduct electricity when molten or dissolved, but NOT when solid, in Cambridge Paper 4 mark schemes.'
       }
     ]
@@ -522,9 +522,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'audit'
       },
       {
-        task: 'Ask AI Chat Tutor: "Give me 5 tricky Cambridge 0653 chemical formula deduction questions from ion charges, and check my answers."',
+        task: 'Syllabus Notebook Active Recall: "Give me 5 tricky Cambridge 0653 chemical formula deduction questions from ion charges, and check my answers."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Give me 5 tricky Cambridge 0653 chemical formula deduction questions from ion charges, and check my answers.'
       },
       {
@@ -549,9 +549,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "In the electrolysis of concentrated aqueous NaCl, explain why hydrogen gas forms at the cathode instead of sodium metal, and why the remaining solution is alkaline."',
+        task: 'Syllabus Notebook Active Recall: "In the electrolysis of concentrated aqueous NaCl, explain why hydrogen gas forms at the cathode instead of sodium metal, and why the remaining solution is alkaline."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'In the electrolysis of concentrated aqueous NaCl, explain why hydrogen gas forms at the cathode instead of sodium metal, and why the remaining solution is alkaline.'
       },
       {
@@ -580,9 +580,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Provide a 4-mark Cambridge Paper 4 bond energy calculation problem for the combustion of methane: CH₄ + 2O₂ ➔ CO₂ + 2H₂O, and grade my step-by-step math."',
+        task: 'Syllabus Notebook Active Recall: "Provide a 4-mark Cambridge Paper 4 bond energy calculation problem for the combustion of methane: CH₄ + 2O₂ ➔ CO₂ + 2H₂O, and grade my step-by-step math."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Provide a 4-mark Cambridge Paper 4 bond energy calculation problem for the combustion of methane: CH₄ + 2O₂ ➔ CO₂ + 2H₂O, and grade my step-by-step math.'
       }
     ]
@@ -602,9 +602,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'hands_on'
       },
       {
-        task: 'Ask AI Chat Tutor: "Explain why increasing temperature by 10°C often doubles the rate of reaction, focusing on the proportion of particles exceeding activation energy."',
+        task: 'Syllabus Notebook Active Recall: "Explain why increasing temperature by 10°C often doubles the rate of reaction, focusing on the proportion of particles exceeding activation energy."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Explain why increasing temperature by 10°C often doubles the rate of reaction, focusing on the proportion of particles exceeding activation energy.'
       },
       {
@@ -629,9 +629,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Classify these 6 oxides: Na₂O, SO₂, Al₂O₃, CO, MgO, ZnO as basic, acidic, amphoteric, or neutral, and quiz me on their reactions with acids and bases."',
+        task: 'Syllabus Notebook Active Recall: "Classify these 6 oxides: Na₂O, SO₂, Al₂O₃, CO, MgO, ZnO as basic, acidic, amphoteric, or neutral, and quiz me on their reactions with acids and bases."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Classify these 6 oxides: Na₂O, SO₂, Al₂O₃, CO, MgO, ZnO as basic, acidic, amphoteric, or neutral, and quiz me on their reactions with acids and bases.'
       },
       {
@@ -656,9 +656,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'audit'
       },
       {
-        task: 'Ask AI Chat Tutor: "Explain the trend in reactivity down Group 1 in terms of atomic radius, shielding, and ease of losing the outer valence electron for Paper 4 Extended."',
+        task: 'Syllabus Notebook Active Recall: "Explain the trend in reactivity down Group 1 in terms of atomic radius, shielding, and ease of losing the outer valence electron for Paper 4 Extended."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Explain the trend in reactivity down Group 1 in terms of atomic radius, shielding, and ease of losing the outer valence electron for Paper 4 Extended.'
       },
       {
@@ -683,9 +683,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Explain the difference between barrier methods, galvanising, and sacrificial protection for rust prevention in Cambridge mark schemes."',
+        task: 'Syllabus Notebook Active Recall: "Explain the difference between barrier methods, galvanising, and sacrificial protection for rust prevention in Cambridge mark schemes."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Explain the difference between barrier methods, galvanising, and sacrificial protection for rust prevention in Cambridge mark schemes.'
       },
       {
@@ -710,9 +710,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Explain the distinction between testing for the presence of water with anhydrous cobalt(II) chloride vs proving water is pure by its boiling point at 100°C."',
+        task: 'Syllabus Notebook Active Recall: "Explain the distinction between testing for the presence of water with anhydrous cobalt(II) chloride vs proving water is pure by its boiling point at 100°C."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Explain the distinction between testing for the presence of water with anhydrous cobalt(II) chloride vs proving water is pure by its boiling point at 100°C.'
       },
       {
@@ -737,9 +737,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Explain the chemical mechanism of bromine water decolourisation by ethene with structural formula diagrams and balanced equation."',
+        task: 'Syllabus Notebook Active Recall: "Explain the chemical mechanism of bromine water decolourisation by ethene with structural formula diagrams and balanced equation."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Explain the chemical mechanism of bromine water decolourisation by ethene with structural formula diagrams and balanced equation.'
       },
       {
@@ -764,9 +764,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Give me 3 Paper 6 unknown salt identification puzzles where I have to deduce the cation and anion from experimental observations, and tell me if I get them right."',
+        task: 'Syllabus Notebook Active Recall: "Give me 3 Paper 6 unknown salt identification puzzles where I have to deduce the cation and anion from experimental observations, and tell me if I get them right."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Give me 3 Paper 6 unknown salt identification puzzles where I have to deduce the cation and anion from experimental observations, and tell me if I get them right.'
       },
       {
@@ -795,9 +795,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'hands_on'
       },
       {
-        task: 'Ask AI Chat Tutor: "Give me a multi-stage Cambridge Paper 4 physics problem involving a car accelerating, cruising, and braking; test me on calculating both acceleration and total distance from area under the graph."',
+        task: 'Syllabus Notebook Active Recall: "Give me a multi-stage Cambridge Paper 4 physics problem involving a car accelerating, cruising, and braking; test me on calculating both acceleration and total distance from area under the graph."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Give me a multi-stage Cambridge Paper 4 physics problem involving a car accelerating, cruising, and braking; test me on calculating both acceleration and total distance from area under the graph.'
       },
       {
@@ -826,9 +826,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Explain the mechanism of convection in water when heated at the base of a beaker in terms of particle spacing and fluid density changes for Paper 4."',
+        task: 'Syllabus Notebook Active Recall: "Explain the mechanism of convection in water when heated at the base of a beaker in terms of particle spacing and fluid density changes for Paper 4."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Explain the mechanism of convection in water when heated at the base of a beaker in terms of particle spacing and fluid density changes for Paper 4.'
       }
     ]
@@ -852,9 +852,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Provide 2 multi-step Cambridge Paper 4 refraction calculation problems using Snell\'s law n = sin i / sin r, and grade my angle calculations."',
+        task: 'Syllabus Notebook Active Recall: "Provide 2 multi-step Cambridge Paper 4 refraction calculation problems using Snell\'s law n = sin i / sin r, and grade my angle calculations."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Provide 2 multi-step Cambridge Paper 4 refraction calculation problems using Snell\'s law n = sin i / sin r, and grade my angle calculations.'
       }
     ]
@@ -874,9 +874,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Why is the combined resistance of resistors in parallel ALWAYS smaller than the resistance of the smallest individual resistor? Explain conceptually and mathematically."',
+        task: 'Syllabus Notebook Active Recall: "Why is the combined resistance of resistors in parallel ALWAYS smaller than the resistance of the smallest individual resistor? Explain conceptually and mathematically."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Why is the combined resistance of resistors in parallel ALWAYS smaller than the resistance of the smallest individual resistor? Explain conceptually and mathematically.'
       },
       {
@@ -901,9 +901,9 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Ask AI Chat Tutor: "Give me an orbital speed calculation problem for a satellite orbiting Earth using v = 2πr / T with radius in kilometres and period in hours, and check my unit conversions."',
+        task: 'Syllabus Notebook Active Recall: "Give me an orbital speed calculation problem for a satellite orbiting Earth using v = 2πr / T with radius in kilometres and period in hours, and check my unit conversions."',
         type: 'website_tool',
-        toolTarget: 'ai_tutor',
+        toolTarget: 'notebook',
         aiPrompt: 'Give me an orbital speed calculation problem for a satellite orbiting Earth using v = 2πr / T with radius in kilometres and period in hours, and check my unit conversions.'
       },
       {
@@ -973,7 +973,7 @@ export function getRevisionTasksForTopic(topicCode: string, weekNum: number = 1,
  * Detects interactive quick action metadata from a task description
  */
 export function detectTaskAction(taskText: string, topicCode: string): {
-  type: 'slides' | 'quiz' | 'ai_tutor' | 'exams' | 'notebook' | 'guidelines' | 'creative';
+  type: 'slides' | 'quiz' | 'exams' | 'notebook' | 'guidelines' | 'creative';
   label: string;
   badge: string;
   badgeColor: string;
@@ -999,16 +999,12 @@ export function detectTaskAction(taskText: string, topicCode: string): {
     };
   }
 
-  if (t.includes('ask ai') || t.includes('ai chat tutor')) {
-    // Extract the quoted prompt if present
-    const promptMatch = taskText.match(/["“](.+?)["”]/);
-    const prompt = promptMatch ? promptMatch[1] : `Explain key concepts and exam mark scheme points for Cambridge 0653 ${topicCode}`;
+  if (t.includes('ask ai') || t.includes('ai chat tutor') || t.includes('active recall')) {
     return {
-      type: 'ai_tutor',
-      label: 'Ask AI Chat Tutor',
-      prompt,
-      badge: '🤖 AI Chat Tutor',
-      badgeColor: 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+      type: 'notebook',
+      label: 'Open Syllabus Notebook',
+      badge: '📓 Active Recall',
+      badgeColor: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30'
     };
   }
 

@@ -1,6 +1,13 @@
-import { QuizQuestion, ScienceSubject } from '../types';
-import { allSubtopicsData, getSubtopicByCode, SubtopicTopicGroup } from './subtopicSlidesData';
+import { QuizQuestion } from '../types';
 import { TOPIC_QUESTION_LIBRARY, generateParametricQuestion } from './topicQuestionLibrary';
+import { CURATED_BIO_QUESTIONS } from './curatedQuestionsBio';
+import { CURATED_CHEM_QUESTIONS } from './curatedQuestionsChem';
+import { CURATED_PHY_QUESTIONS } from './curatedQuestionsPhy';
+import { predefinedSubtopicQuizzes } from './predefinedSubtopicQuizzes';
+import { BIOLOGY_SUBTOPIC_QUESTIONS } from './subtopicQuestionsBiology';
+import { CHEMISTRY_SUBTOPIC_QUESTIONS } from './subtopicQuestionsChemistry';
+import { PHYSICS_SUBTOPIC_QUESTIONS } from './subtopicQuestionsPhysics';
+import { isValidQuizQuestion } from './quizSanitizer';
 
 /**
  * High-Variety Cambridge IGCSE Combined Science 0653 Subtopic Question Bank & Engine.
@@ -848,27 +855,15 @@ export const CURATED_SUBTOPIC_BANKS: Record<string, QuizQuestion[]> = {
 
 export function buildComprehensiveSubtopicPool(subtopicCode: string): QuizQuestion[] {
   const norm = subtopicCode.trim().toUpperCase();
-  const subtopic = getSubtopicByCode(norm) || allSubtopicsData.find(s => s.subtopicCode.toUpperCase() === norm);
   const questions: QuizQuestion[] = [];
   const seenStems = new Set<string>();
 
   const normalizeStem = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
 
   const addUnique = (q: QuizQuestion): boolean => {
-    if (!q || !q.question || !q.options || q.options.length < 4) return false;
+    if (!isValidQuizQuestion(q)) return false;
     const normStem = normalizeStem(q.question);
     if (normStem.length < 15 || seenStems.has(normStem)) return false;
-
-    // Reject non-syllabus genetics questions
-    const fullText = `${q.question} ${q.options.join(' ')} ${q.explanation}`.toLowerCase();
-    if (/\b(monohybrid|punnett|allele|heterozygous|homozygous|genotype|phenotype|dihybrid|mendel)\b/i.test(fullText)) {
-      return false;
-    }
-
-    // Reject mole calculation questions in C3
-    if (/\b(moles?|molar mass|avogadro|dm3 of gas at rtp|mol\/dm3)\b/i.test(fullText)) {
-      return false;
-    }
 
     seenStems.add(normStem);
     questions.push({
@@ -878,9 +873,19 @@ export function buildComprehensiveSubtopicPool(subtopicCode: string): QuizQuesti
     return true;
   };
 
-  // 1. Add handcrafted questions from CURATED_SUBTOPIC_BANKS if present
-  if (CURATED_SUBTOPIC_BANKS[norm]) {
-    for (const q of CURATED_SUBTOPIC_BANKS[norm]) {
+  // 1. Add handcrafted questions from curated banks matching exact subtopic
+  const allCuratedMaps: Record<string, QuizQuestion[]>[] = [
+    CURATED_SUBTOPIC_BANKS,
+    predefinedSubtopicQuizzes,
+    CURATED_BIO_QUESTIONS,
+    CURATED_CHEM_QUESTIONS,
+    CURATED_PHY_QUESTIONS,
+    BIOLOGY_SUBTOPIC_QUESTIONS,
+    CHEMISTRY_SUBTOPIC_QUESTIONS,
+    PHYSICS_SUBTOPIC_QUESTIONS
+  ];
+  for (const bank of allCuratedMaps) {
+    for (const q of bank[norm] || []) {
       addUnique(q);
     }
   }
@@ -897,191 +902,39 @@ export function buildComprehensiveSubtopicPool(subtopicCode: string): QuizQuesti
     }
   }
 
-  // 3. Generate Parametric Questions across multiple seeds (1 to 15)
-  for (let seed = 1; seed <= 15; seed++) {
-    const param = generateParametricQuestion(topicCode, norm, seed);
-    if (param) {
+  // 3. Add all TOPIC_QUESTION_LIBRARY & sibling curated questions for the same parent topic if needed
+  if (questions.length < 12) {
+    for (const tq of topicQuestions) {
       addUnique({
-        ...param,
-        id: makeQId(norm, 'param', seed)
+        ...tq,
+        id: makeQId(norm, 'topic', questions.length + 1)
       });
+    }
+    for (const bank of allCuratedMaps) {
+      for (const [k, list] of Object.entries(bank)) {
+        if (k.toUpperCase().startsWith(`${topicCode}.`)) {
+          for (const sq of list) {
+            addUnique(sq);
+            if (questions.length >= 16) break;
+          }
+        }
+        if (questions.length >= 16) break;
+      }
+      if (questions.length >= 16) break;
     }
   }
 
-  // 4. Extract and generate from Subtopic Slide Decks if available
-  if (subtopic && subtopic.decks) {
-    const decks = subtopic.decks;
-    const subject = subtopic.subject;
-    const title = subtopic.title;
-
-    // A. Generate from learning objectives
-    decks.forEach((deck, dIdx) => {
-      (deck.objectives || []).forEach((obj, oIdx) => {
-        if (obj.length > 20) {
-          const stem = `Which statement accurately describes the Cambridge learning objective: "${obj}"?`;
-          const correct = `In [${norm}] ${title}, students are required to: ${obj}`;
-          const distractors = subject === 'biology' ? [
-            `This process occurs exclusively in prokaryotes without involvement of enzymes`,
-            `The rate is constant and independent of temperature or substrate concentration`,
-            `The energy change violates thermodynamic conservation principles in cells`
-          ] : subject === 'chemistry' ? [
-            `Mass decreases during the process because activation energy destroys covalent bonds`,
-            `The products always form an insoluble precipitate with zero reaction rate`,
-            `The chemical reaction proceeds spontaneously at absolute zero with no energy transfer`
-          ] : [
-            `The measured physical quantity is independent of mass, gravity, and distance`,
-            `Work done equals zero regardless of applied resultant force or distance moved`,
-            `Energy is created from nothing during the physical transformation`
-          ];
-
-          addUnique({
-            id: makeQId(norm, 'obj', `${dIdx}-${oIdx}`),
-            subject,
-            topicCode,
-            question: stem,
-            options: [correct, ...distractors],
-            correctIndex: 0,
-            explanation: `Cambridge 0653 learning objective for ${norm}: ${obj}.`,
-            syllabusRef: norm
-          });
-        }
-      });
-
-      // B. Generate from starter questions & answers
-      if (deck.starterLookBack && deck.starterLookBack.question && deck.starterLookBack.answer) {
-        const distractors = subject === 'biology' ? [
-          'It is a mechanical breakdown process requiring no biochemical enzymes',
-          'It occurs exclusively in plant guard cells during nighttime respiration',
-          'It produces carbon monoxide and lactic acid under aerobic conditions'
-        ] : subject === 'chemistry' ? [
-          'It forms non-conductive covalent molecules with very low melting points',
-          'It requires boiling at 1000°C before any chemical bonds can be broken',
-          'It releases alpha particles and neutralizes all strong acids'
-        ] : [
-          'It accelerates at 9.8 m/s regardless of applied force or mass',
-          'It creates kinetic energy without doing any mechanical work',
-          'It produces an echo that travels faster than 3.0 × 10⁸ m/s'
-        ];
-
+  // 4. Parametric Calculation Questions strictly for calculation-appropriate topics
+  if (['B2', 'C3', 'P1', 'P3', 'P4', 'P5'].includes(topicCode)) {
+    for (let seed = 1; seed <= 8; seed++) {
+      const param = generateParametricQuestion(topicCode, norm, seed);
+      if (param) {
         addUnique({
-          id: makeQId(norm, 'starter', dIdx),
-          subject,
-          topicCode,
-          question: `[Prior Knowledge Check] ${deck.starterLookBack.question}`,
-          options: [deck.starterLookBack.answer, ...distractors],
-          correctIndex: 0,
-          explanation: `Syllabus guidance: ${deck.starterLookBack.answer}`,
-          syllabusRef: norm
+          ...param,
+          id: makeQId(norm, 'param', seed)
         });
       }
-
-      // C. Generate from classroom slides theory bullets
-      deck.slides.forEach((slide, sIdx) => {
-        slide.content.forEach((line, lIdx) => {
-          if (line.includes(':') && line.length > 30) {
-            const parts = line.replace(/^[•\-*]\s*/, '').split(':');
-            const term = parts[0].trim();
-            const def = parts.slice(1).join(':').trim();
-
-            if (term.length >= 3 && term.length <= 40 && def.length >= 25 && !term.toLowerCase().includes('http')) {
-              // Plausible distractors from sibling concepts
-              const distractors = subject === 'biology' ? [
-                'Diffusion of sucrose through xylem vessels under root pressure',
-                'Active pumping of carbon dioxide across epidermal cell walls',
-                'Denaturation of structural cellulose at human body temperature'
-              ] : subject === 'chemistry' ? [
-                'Homogeneous catalysis of saturated hydrocarbons during cracking',
-                'Endothermic condensation of noble gases into giant covalent lattices',
-                'Neutralization of neutral basic oxides with amphoteric salts'
-              ] : [
-                'Refraction of longitudinal sound waves at the critical angle',
-                'Gravitational potential energy conversion with zero work done',
-                'Electrical resistance decrease with increasing wire length'
-              ];
-
-              addUnique({
-                id: makeQId(norm, 'def', `${sIdx}-${lIdx}`),
-                subject,
-                topicCode,
-                question: `According to Cambridge 0653 [${norm}], what is defined as: "${def}"?`,
-                options: [term, ...distractors],
-                correctIndex: 0,
-                explanation: `In the syllabus for ${norm}, "${term}" is defined as: ${def}.`,
-                syllabusRef: norm
-              });
-            }
-          }
-        });
-      });
-    });
-  }
-
-  // 5. Generate additional formula and misconception variants if pool is under 30
-  let extraCounter = 1;
-  while (questions.length < 35 && extraCounter <= 25) {
-    const isPhy = norm.startsWith('P');
-    const isChem = norm.startsWith('C');
-    const isBio = norm.startsWith('B');
-
-    if (isPhy) {
-      const dist = 50 + extraCounter * 10;
-      const time = 5 + (extraCounter % 5);
-      const speed = Number((dist / time).toFixed(1));
-      addUnique({
-        id: makeQId(norm, 'extra-speed', extraCounter),
-        subject: 'physics',
-        topicCode,
-        question: `An electric trolley travels a distance of ${dist} metres in ${time} seconds along a track. What is its average speed?`,
-        options: [
-          `${speed} m/s`,
-          `${(speed * 2).toFixed(1)} m/s`,
-          `${(dist * time)} m/s`,
-          `${(speed / 2).toFixed(1)} m/s`
-        ],
-        correctIndex: 0,
-        explanation: `Average speed v = distance d ÷ time t = ${dist} m ÷ ${time} s = ${speed} m/s.`,
-        syllabusRef: norm
-      });
-    } else if (isChem) {
-      const rMass = (2.0 + extraCounter * 0.5).toFixed(1);
-      const oMass = (1.5 + (extraCounter % 4) * 0.4).toFixed(1);
-      const prodMass = (Number(rMass) + Number(oMass)).toFixed(1);
-      addUnique({
-        id: makeQId(norm, 'extra-mass', extraCounter),
-        subject: 'chemistry',
-        topicCode,
-        question: `According to the Law of Conservation of Mass in a sealed reaction vessel, when ${rMass} g of reactant A reacts completely with ${oMass} g of reactant B, what mass of product is produced?`,
-        options: [
-          `${prodMass} g`,
-          `${(Number(prodMass) * 1.5).toFixed(1)} g`,
-          `${(Math.abs(Number(rMass) - Number(oMass))).toFixed(1)} g`,
-          `${(Number(rMass) * 2).toFixed(1)} g`
-        ],
-        correctIndex: 0,
-        explanation: `Law of Conservation of Mass: Total mass of products = Total mass of reactants = ${rMass} g + ${oMass} g = ${prodMass} g. (In Cambridge 0653, mole calculations are not required).`,
-        syllabusRef: norm
-      });
-    } else {
-      const imageMm = 20 + extraCounter * 3;
-      const mag = 100 + extraCounter * 50;
-      const actualUm = Number(((imageMm * 1000) / mag).toFixed(1));
-      addUnique({
-        id: makeQId(norm, 'extra-mag', extraCounter),
-        subject: 'biology',
-        topicCode,
-        question: `A biological specimen diagram has an observed width of ${imageMm} mm when viewed at magnification ×${mag}. What is the actual width in micrometres (μm)?`,
-        options: [
-          `${actualUm} μm`,
-          `${(actualUm * 10).toFixed(1)} μm`,
-          `${(actualUm / 10).toFixed(2)} μm`,
-          `${(imageMm * mag)} μm`
-        ],
-        correctIndex: 0,
-        explanation: `Actual size A = Image size I ÷ Magnification M = (${imageMm} × 1000 μm) ÷ ${mag} = ${actualUm} μm.`,
-        syllabusRef: norm
-      });
     }
-    extraCounter++;
   }
 
   return questions;

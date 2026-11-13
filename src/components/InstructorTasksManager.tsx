@@ -54,6 +54,7 @@ import {
 } from '../services/firestoreService';
 import { CAMBRIDGE_0653_TOPIC_SUBTOPICS } from '../services/googleDriveService';
 import { allSubtopicsData, SubtopicTopicGroup } from '../data/subtopicSlidesData';
+import { EmailDispatchModal } from './EmailDispatchModal';
 
 interface InstructorTasksManagerProps {
   currentUser: UserProfile;
@@ -98,6 +99,8 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
   });
   const [newSubtopicInput, setNewSubtopicInput] = useState<string>('');
   const [selectedSubtopics, setSelectedSubtopics] = useState<string[]>(['B1.1']);
+  const [newRequiredQuizLength, setNewRequiredQuizLength] = useState<number>(10);
+  const [newRequireSlidesAndTL, setNewRequireSlidesAndTL] = useState<boolean>(true);
 
   // Subtopic Selector Filter States
   const [subtopicFilterSubject, setSubtopicFilterSubject] = useState<'all' | 'biology' | 'chemistry' | 'physics'>('all');
@@ -120,23 +123,9 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
   const [copiedLinkTaskId, setCopiedLinkTaskId] = useState<string | null>(null);
   const [additionalEmailsInput, setAdditionalEmailsInput] = useState<string>('');
 
-  // SMTP Settings & 1-Click Email Dispatch state
+  // Email Dispatch & 1-Click Modal state
   const [showSmtpModal, setShowSmtpModal] = useState<boolean>(false);
-  const [smtpModalTab, setSmtpModalTab] = useState<'config' | 'logs' | 'guide'>('config');
-  const [emailLogs, setEmailLogs] = useState<any[]>([]);
-  const [loadingEmailLogs, setLoadingEmailLogs] = useState<boolean>(false);
-  const [showPassword, setShowPassword] = useState<boolean>(false);
   const [smtpStatus, setSmtpStatus] = useState<{ configured: boolean; host: string; port: number; secure: boolean; user: string; from: string; hasPassword?: boolean } | null>(null);
-  const [smtpForm, setSmtpForm] = useState<{ host: string; port: number; secure: boolean; user: string; pass: string; from: string }>({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    user: currentUser.email || 'corbanb@gisboyshigh.net',
-    pass: '',
-    from: `"Mr. Corban" <${currentUser.email || 'corbanb@gisboyshigh.net'}>`
-  });
-  const [smtpTesting, setSmtpTesting] = useState<boolean>(false);
-  const [smtpTestResult, setSmtpTestResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [lastEmailAction, setLastEmailAction] = useState<{
     taskId: string;
     taskTitle: string;
@@ -151,43 +140,31 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
     recipients?: { studentName: string; studentEmail: string }[];
   } | null>(null);
 
-  const fetchEmailLogs = async () => {
-    setLoadingEmailLogs(true);
-    try {
-      const res = await fetch('/api/email-logs');
-      if (res.ok) {
-        const data = await res.json();
-        setEmailLogs(data.logs || []);
-      }
-    } catch {
-    } finally {
-      setLoadingEmailLogs(false);
-    }
-  };
-
-  const handleClearEmailLogs = async () => {
-    try {
-      await fetch('/api/clear-email-logs', { method: 'POST' });
-      setEmailLogs([]);
-    } catch {}
-  };
-
   const loadSmtpStatus = async () => {
+    // Check if browser-direct EmailJS is configured in localStorage
+    try {
+      const savedEmailJs = localStorage.getItem('igcse_emailjs_config');
+      if (savedEmailJs) {
+        const parsed = JSON.parse(savedEmailJs);
+        if (parsed.serviceId && parsed.templateId && parsed.publicKey) {
+          setSmtpStatus({
+            configured: true,
+            host: 'EmailJS Browser API',
+            port: 443,
+            secure: true,
+            user: parsed.senderName || currentUser.email || 'Instructor',
+            from: parsed.senderName || 'Instructor'
+          });
+          return;
+        }
+      }
+    } catch {}
+
     try {
       const res = await fetch('/api/smtp-config');
       if (res.ok) {
         const data = await res.json();
         setSmtpStatus(data);
-        if (data.configured) {
-          setSmtpForm({
-            host: data.host || 'smtp.gmail.com',
-            port: data.port || 587,
-            secure: Boolean(data.secure),
-            user: data.user || currentUser.email || 'corbanb@gisboyshigh.net',
-            pass: '',
-            from: data.from || `"Mr. Corban" <${data.user || currentUser.email || 'corbanb@gisboyshigh.net'}>`
-          });
-        }
       }
     } catch {}
   };
@@ -195,49 +172,6 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
   useEffect(() => {
     loadSmtpStatus();
   }, []);
-
-  const handleTestSmtp = async () => {
-    setSmtpTesting(true);
-    setSmtpTestResult(null);
-    try {
-      const res = await fetch('/api/test-smtp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipientEmail: currentUser.email || 'corbanb@gisboyshigh.net' })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setSmtpTestResult({ type: 'success', text: data.message || `Test email dispatched to ${currentUser.email}!` });
-      } else {
-        setSmtpTestResult({ type: 'error', text: data.error || 'SMTP test connection failed.' });
-      }
-    } catch (err: any) {
-      setSmtpTestResult({ type: 'error', text: err?.message || 'Failed to reach SMTP test endpoint.' });
-    } finally {
-      setSmtpTesting(false);
-    }
-  };
-
-  const handleSaveSmtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const res = await fetch('/api/smtp-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(smtpForm)
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setFeedbackNotice({ type: 'success', text: '✅ SMTP settings successfully updated and activated!' });
-        loadSmtpStatus();
-        setShowSmtpModal(false);
-      } else {
-        setSmtpTestResult({ type: 'error', text: data.error || 'Failed to save SMTP configuration.' });
-      }
-    } catch (err: any) {
-      setSmtpTestResult({ type: 'error', text: err?.message || 'Error saving SMTP configuration.' });
-    }
-  };
 
   // Unique topics across allSubtopicsData for dropdown filtering
   const uniqueTopics = useMemo(() => {
@@ -277,29 +211,32 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
     });
   }, [subtopicFilterSubject, subtopicFilterTopic, subtopicSearchQuery]);
 
-  // Helper to auto-fill title & description based on selected subtopic and activity type
-  const autoFillTitleAndDescription = (type: TaskType, codes: string[]) => {
+  // Helper to auto-fill title & description based on selected subtopic, activity type, and exact quiz length
+  const autoFillTitleAndDescription = (type: TaskType, codes: string[], quizLen: number = newRequiredQuizLength) => {
     if (codes.length === 0) return;
     const primaryCode = codes[0];
     const subtopicInfo = allSubtopicsData.find(s => s.subtopicCode.toUpperCase() === primaryCode.toUpperCase());
     const titlePart = subtopicInfo ? `${primaryCode} ${subtopicInfo.title}` : primaryCode;
+    const safeLen = Math.max(1, Math.min(40, Number(quizLen) || 10));
     
     if (type === 'both') {
-      setNewTitle(`Read ${titlePart} & Complete Practice Quiz`);
+      setNewTitle(`Read ${titlePart} Slides, Traffic Light Quiz & ${safeLen}-Q Practice Quiz`);
       setNewDescription(
-        `1. Open and review the lesson slides for ${titlePart}.\n` +
-        `2. Rate your understanding using the Traffic Light system (Green, Amber, or Red).\n` +
-        `3. Complete the practice quiz challenge on this subtopic to evaluate your understanding.`
+        `1. Open and read through ALL lesson slides for ${titlePart}.\n` +
+        `2. Complete the 10-question Traffic Light Mastery Quiz inside Lesson Slides.\n` +
+        `3. Complete the Practice Quiz choosing the exact quiz length of ${safeLen} questions (your % for ${safeLen} Qs will be recorded).`
       );
     } else if (type === 'slides_traffic_light') {
-      setNewTitle(`Read ${titlePart} & Set Traffic Light`);
+      setNewTitle(`Read ${titlePart} & Complete Traffic Light Quiz`);
       setNewDescription(
-        `Review the lesson slides for ${titlePart}. Update your confidence traffic light rating (Green / Amber / Red) when you finish studying.`
+        `1. Read through ALL lesson slides for ${titlePart}.\n` +
+        `2. Complete the Traffic Light Mastery Quiz to verify your understanding.`
       );
     } else if (type === 'practice_quiz') {
-      setNewTitle(`Practice Quiz: ${titlePart}`);
+      setNewTitle(`${safeLen}-Question Practice Quiz: ${titlePart}`);
       setNewDescription(
-        `Complete the 10-question practice quiz on ${titlePart} before the deadline to assess your exam readiness.`
+        `1. Read all assigned slides for ${titlePart} and complete the Traffic Light Quiz.\n` +
+        `2. Complete the ${safeLen}-question practice quiz (choose exact length ${safeLen} in the Quiz Engine) before the deadline.`
       );
     }
   };
@@ -482,6 +419,8 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
         targetSubtopics: selectedSubtopics,
         targetSubject: effectiveSubject,
         targetStudentIds: targetAudienceType === 'specific_students' ? selectedStudentIds : undefined,
+        requiredQuizLength: Math.max(1, Math.min(40, Number(newRequiredQuizLength) || 10)),
+        requireSlidesAndTrafficLight: newRequireSlidesAndTL,
         dueDate: new Date(newDueDate).toISOString(),
         instructorId: currentUser.id,
         instructorName: currentUser.name,
@@ -534,7 +473,9 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
       // Reset form to clean default
       setSelectedSubtopics(['B1.1']);
-      autoFillTitleAndDescription('both', ['B1.1']);
+      setNewRequiredQuizLength(10);
+      setNewRequireSlidesAndTL(true);
+      autoFillTitleAndDescription('both', ['B1.1'], 10);
       setSelectedStudentIds([]);
       setTargetAudienceType('entire_class');
     } catch (err: any) {
@@ -798,10 +739,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
             )}
 
             <button
-              onClick={() => {
-                setShowSmtpModal(true);
-                fetchEmailLogs();
-              }}
+              onClick={() => setShowSmtpModal(true)}
               className="px-3.5 py-1.5 rounded-xl bg-white dark:bg-black hover:bg-slate-50 dark:hover:bg-zinc-900 text-[#1E293B] dark:text-white font-semibold text-xs flex items-center gap-1.5 border-2 border-black dark:border-white transition ml-auto"
             >
               <Settings className="w-3.5 h-3.5" />
@@ -834,12 +772,9 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
           <div className="flex items-center gap-2.5 flex-wrap">
             <button
-              onClick={() => {
-                setShowSmtpModal(true);
-                fetchEmailLogs();
-              }}
+              onClick={() => setShowSmtpModal(true)}
               className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#FDFBF7] dark:bg-black hover:bg-white dark:hover:bg-zinc-900 text-[#1E293B] dark:text-slate-200 border-2 border-black dark:border-white font-semibold text-xs transition shadow-xs shrink-0"
-              title="Configure SMTP mail server or inspect email delivery logs"
+              title="Configure EmailJS or inspect email delivery logs"
             >
               <Mail className="w-4 h-4 text-slate-700 dark:text-slate-300" />
               <span>Email Delivery</span>
@@ -1036,6 +971,12 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         <span className="text-[11px] font-semibold text-[#1E293B] dark:text-slate-300 bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 px-2.5 py-0.5 rounded-md">
                           {task.className}
                         </span>
+
+                        {(task.type === 'both' || task.type === 'practice_quiz' || task.type === 'exam_paper') && (
+                          <span className="text-[11px] font-mono font-bold text-sky-900 dark:text-sky-200 bg-sky-50 dark:bg-sky-950/50 border border-sky-300 dark:border-sky-700 px-2.5 py-0.5 rounded-md">
+                            Quiz Length: {task.requiredQuizLength || 10} Qs
+                          </span>
+                        )}
 
                         {/* Audience scope */}
                         {task.targetStudentIds && task.targetStudentIds.length > 0 ? (
@@ -1285,56 +1226,73 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                                   </td>
 
                                   <td className="py-2.5 text-[#1E293B] dark:text-slate-300">
-                                    {task.type === 'both' ? (
-                                      <div className="flex flex-col gap-1">
-                                        <div className="flex items-center gap-1.5">
-                                          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Slides:</span>
-                                          {sub.trafficLight ? (
-                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700">
-                                              <span className={`w-2 h-2 rounded-full ${
-                                                sub.trafficLight === 'green' ? 'bg-emerald-500' :
-                                                sub.trafficLight === 'orange' ? 'bg-amber-500' : 'bg-rose-500'
-                                              }`}></span>
-                                              <span>{sub.trafficLight === 'orange' ? 'Amber/Orange' : sub.trafficLight === 'green' ? 'Green' : 'Red'} Grade</span>
-                                            </span>
-                                          ) : sub.slidesCompleted ? (
-                                            <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-medium">✓ Completed</span>
-                                          ) : (
-                                            <span className="text-[10px] text-slate-500">Pending rating</span>
+                                    {(() => {
+                                      const reqLen = task.requiredQuizLength || sub.requiredQuizLength || 10;
+                                      const needsPQ = task.type === 'both' || task.type === 'practice_quiz' || task.type === 'exam_paper';
+                                      const tlPct = sub.trafficLightQuizScore;
+                                      const hasTLQuiz = Boolean(sub.trafficLightQuizCompleted || tlPct !== undefined);
+                                      const pqPct = sub.practiceQuizScore ?? (sub.quizCompleted ? sub.quizScore : undefined);
+                                      const pqLen = sub.practiceQuizLength || reqLen;
+
+                                      return (
+                                        <div className="flex flex-col gap-1">
+                                          {/* 1. Slide reading status */}
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Slides:</span>
+                                            {sub.slidesCompleted ? (
+                                              <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-bold">
+                                                ✓ All Read{sub.slidesTotalCount ? ` (${sub.slidesReadCount || sub.slidesTotalCount}/${sub.slidesTotalCount})` : ''}
+                                              </span>
+                                            ) : (sub.slidesReadCount || 0) > 0 ? (
+                                              <span className="text-[10px] text-amber-700 dark:text-amber-300 font-semibold">
+                                                Reading ({sub.slidesReadCount}/{sub.slidesTotalCount || '?'})
+                                              </span>
+                                            ) : (
+                                              <span className="text-[10px] text-slate-500">Pending Slides</span>
+                                            )}
+                                          </div>
+
+                                          {/* 2. Traffic Light Quiz status */}
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">TL Quiz:</span>
+                                            {hasTLQuiz ? (
+                                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700">
+                                                {sub.trafficLight && (
+                                                  <span className={`w-2 h-2 rounded-full ${
+                                                    sub.trafficLight === 'green' ? 'bg-emerald-500' :
+                                                    sub.trafficLight === 'orange' ? 'bg-amber-500' : 'bg-rose-500'
+                                                  }`}></span>
+                                                )}
+                                                <span>
+                                                  {sub.trafficLight === 'green' ? 'Green' : sub.trafficLight === 'orange' ? 'Amber' : sub.trafficLight === 'red' ? 'Red' : 'Done'}
+                                                  {tlPct !== undefined ? ` (${tlPct}%)` : ''}
+                                                </span>
+                                              </span>
+                                            ) : sub.trafficLight ? (
+                                              <span className="text-[10px] text-amber-700 dark:text-amber-300">
+                                                Self-rating: {sub.trafficLight === 'orange' ? 'Amber' : sub.trafficLight} (TL Quiz pending)
+                                              </span>
+                                            ) : (
+                                              <span className="text-[10px] text-slate-500">Pending TL Quiz</span>
+                                            )}
+                                          </div>
+
+                                          {/* 3. Exact-length Practice Quiz status */}
+                                          {needsPQ && (
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Practice Quiz:</span>
+                                              {pqPct !== undefined ? (
+                                                <span className="font-bold text-sky-800 dark:text-sky-300 text-[10px] bg-sky-50 dark:bg-sky-950/40 px-1.5 py-0.5 rounded border border-sky-300 dark:border-sky-700">
+                                                  {pqPct}% ({pqLen} Qs)
+                                                </span>
+                                              ) : (
+                                                <span className="text-[10px] text-slate-500">Pending ({reqLen} Qs)</span>
+                                              )}
+                                            </div>
                                           )}
                                         </div>
-                                        <div className="flex items-center gap-1.5">
-                                          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Quiz:</span>
-                                          {sub.quizScore !== undefined ? (
-                                            <span className="font-bold text-sky-800 dark:text-sky-300 text-[10px] bg-sky-50 dark:bg-sky-950/40 px-1.5 py-0.5 rounded border border-sky-300 dark:border-sky-700">
-                                              {sub.quizScore}% Score
-                                            </span>
-                                          ) : (
-                                            <span className="text-[10px] text-slate-500">Pending quiz</span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div>
-                                        {sub.trafficLight && (
-                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700">
-                                            <span className={`w-2.5 h-2.5 rounded-full ${
-                                              sub.trafficLight === 'green' ? 'bg-emerald-500' :
-                                              sub.trafficLight === 'orange' ? 'bg-amber-500' : 'bg-rose-500'
-                                            }`}></span>
-                                            <span>{sub.trafficLight === 'orange' ? 'Amber/Orange' : sub.trafficLight === 'green' ? 'Green' : 'Red'} Grade</span>
-                                          </span>
-                                        )}
-                                        {sub.quizScore !== undefined && (
-                                          <span className="font-bold text-sky-800 dark:text-sky-400 text-xs">
-                                            Quiz Score: {sub.quizScore}%
-                                          </span>
-                                        )}
-                                        {!sub.trafficLight && sub.quizScore === undefined && (
-                                          <span className="text-slate-500 italic">No submissions yet</span>
-                                        )}
-                                      </div>
-                                    )}
+                                      );
+                                    })()}
                                   </td>
 
                                   <td className="py-2.5 text-right text-slate-500 dark:text-slate-400 font-mono text-[11px]">
@@ -1505,7 +1463,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                       <div>
                         <div className="font-bold text-sm text-[#1E293B] dark:text-white">Practice Quiz Challenge</div>
                         <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
-                          Student completes the 10-question Cambridge syllabus quiz to test retention and exam skills.
+                          Student reads all slides, completes the Traffic Light Quiz, and finishes a {newRequiredQuizLength}-question Practice Quiz.
                         </div>
                       </div>
                     </div>
@@ -1517,6 +1475,74 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     )}
                   </div>
                 </div>
+              </div>
+
+              {/* Exact Quiz Length & Strict Completion Gate */}
+              <div className="p-3.5 rounded-2xl bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <label className="font-bold text-[#1E293B] dark:text-white block">
+                      Exact Quiz Length Required (Questions) *
+                    </label>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                      Students are instructed to select this exact length and their % score is recorded specifically for this quiz length.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <input
+                      type="number"
+                      min={1}
+                      max={40}
+                      value={newRequiredQuizLength}
+                      onChange={e => {
+                        const val = parseInt(e.target.value, 10);
+                        if (!isNaN(val)) {
+                          const clamped = Math.max(1, Math.min(40, val));
+                          setNewRequiredQuizLength(clamped);
+                          if (selectedSubtopics.length > 0) {
+                            autoFillTitleAndDescription(newType, selectedSubtopics, clamped);
+                          }
+                        }
+                      }}
+                      className="w-16 px-2 py-1 text-center font-mono font-bold text-xs rounded-lg bg-white dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-white"
+                    />
+                    <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Qs (1–40)</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {[5, 10, 15, 20, 30, 40].map(len => (
+                    <button
+                      key={len}
+                      type="button"
+                      onClick={() => {
+                        setNewRequiredQuizLength(len);
+                        if (selectedSubtopics.length > 0) {
+                          autoFillTitleAndDescription(newType, selectedSubtopics, len);
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                        newRequiredQuizLength === len
+                          ? 'bg-slate-900 text-white border-black dark:bg-white dark:text-black'
+                          : 'bg-white text-slate-700 border-slate-300 hover:border-black dark:bg-black dark:text-slate-300'
+                      }`}
+                    >
+                      {len} Questions
+                    </button>
+                  ))}
+                </div>
+
+                <label className="flex items-center gap-2 pt-1.5 border-t border-slate-200 dark:border-zinc-800 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={newRequireSlidesAndTL}
+                    onChange={e => setNewRequireSlidesAndTL(e.target.checked)}
+                    className="w-4 h-4 accent-slate-900 cursor-pointer"
+                  />
+                  <span className="text-[11px] font-semibold text-[#1E293B] dark:text-slate-200">
+                    Require students to read all assigned slides & complete Traffic Light Quiz before marking task complete
+                  </span>
+                </label>
               </div>
 
               {/* Class Target */}
@@ -1999,13 +2025,10 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         </div>
                         <button
                           type="button"
-                          onClick={() => {
-                            setShowSmtpModal(true);
-                            fetchEmailLogs();
-                          }}
+                          onClick={() => setShowSmtpModal(true)}
                           className="px-2.5 py-1 rounded-lg bg-white dark:bg-black text-[#1E293B] dark:text-slate-200 font-bold text-[11px] border border-black dark:border-white transition shrink-0"
                         >
-                          Setup SMTP
+                          Setup EmailJS
                         </button>
                       </div>
                     )}
@@ -2064,475 +2087,28 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
         </div>
       )}
 
-      {/* SMTP Configuration & Delivery Logs Modal */}
-      {showSmtpModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-black border-2 border-black dark:border-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col">
-            {/* Modal Header */}
-            <div className="p-5 sm:p-6 border-b border-[#E2E8F0] dark:border-zinc-800 flex items-center justify-between bg-[#FDFBF7] dark:bg-black">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-xl bg-[#EBF3F5] dark:bg-zinc-900 text-[#1E293B] dark:text-white border-2 border-black dark:border-white">
-                  <Mail className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base sm:text-lg font-bold text-[#1E293B] dark:text-white flex items-center gap-2">
-                    <span>Task Email Dispatch & Server Settings</span>
-                  </h3>
-                  <p className="text-xs text-slate-600 dark:text-slate-400">
-                    Ensure student task emails deliver reliably via SMTP or 1-Click Gmail.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  setShowSmtpModal(false);
-                  setSmtpTestResult(null);
-                }}
-                className="p-2 rounded-xl text-slate-500 hover:text-black dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Modal Navigation Tabs */}
-            <div className="flex items-center gap-1 px-5 pt-3 border-b border-[#E2E8F0] dark:border-zinc-800 bg-[#FDFBF7] dark:bg-black text-xs">
-              <button
-                type="button"
-                onClick={() => setSmtpModalTab('config')}
-                className={`px-4 py-2.5 rounded-t-xl font-bold transition flex items-center gap-2 border-b-2 ${
-                  smtpModalTab === 'config'
-                    ? 'border-black dark:border-white text-[#1E293B] dark:text-white bg-white dark:bg-black'
-                    : 'border-transparent text-slate-500 hover:text-black dark:hover:text-white'
-                }`}
-              >
-                <Settings className="w-3.5 h-3.5" />
-                <span>SMTP Server Setup</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setSmtpModalTab('logs');
-                  fetchEmailLogs();
-                }}
-                className={`px-4 py-2.5 rounded-t-xl font-bold transition flex items-center gap-2 border-b-2 ${
-                  smtpModalTab === 'logs'
-                    ? 'border-black dark:border-white text-[#1E293B] dark:text-white bg-white dark:bg-black'
-                    : 'border-transparent text-slate-500 hover:text-black dark:hover:text-white'
-                }`}
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>Delivery Logs</span>
-                {emailLogs.length > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-200 dark:bg-zinc-800 text-black dark:text-white font-mono">
-                    {emailLogs.length}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSmtpModalTab('guide')}
-                className={`px-4 py-2.5 rounded-t-xl font-bold transition flex items-center gap-2 border-b-2 ${
-                  smtpModalTab === 'guide'
-                    ? 'border-black dark:border-white text-[#1E293B] dark:text-white bg-white dark:bg-black'
-                    : 'border-transparent text-slate-500 hover:text-black dark:hover:text-white'
-                }`}
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                <span>Google Setup Guide</span>
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-5 sm:p-6 overflow-y-auto space-y-4 text-xs bg-white dark:bg-black">
-              {smtpModalTab === 'config' && (
-                <form onSubmit={handleSaveSmtp} className="space-y-4">
-                  {/* Status Banner */}
-                  <div className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 ${
-                    smtpStatus?.configured
-                      ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300'
-                      : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300'
-                  }`}>
-                    <div className="flex items-center gap-2.5">
-                      {smtpStatus?.configured ? (
-                        <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                      ) : (
-                        <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
-                      )}
-                      <div>
-                        <div className="font-bold text-xs">
-                          {smtpStatus?.configured 
-                            ? `Active SMTP Server: ${smtpStatus.host}:${smtpStatus.port}`
-                            : 'SMTP Mail Server Not Configured'}
-                        </div>
-                        <div className="text-[11px] opacity-90">
-                          {smtpStatus?.configured
-                            ? `Automated background task emails are sent from "${smtpStatus.user}".`
-                            : 'Tasks currently use 1-Click Gmail and Mail App dispatching until SMTP is configured below.'}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Preset quick buttons */}
-                  <div className="space-y-1">
-                    <span className="text-[11px] text-slate-600 dark:text-slate-400 font-semibold">Quick Presets:</span>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSmtpForm({
-                            host: 'smtp.gmail.com',
-                            port: 587,
-                            secure: false,
-                            user: currentUser.email || 'corbanb@gisboyshigh.net',
-                            pass: smtpForm.pass,
-                            from: `"Mr. Corban" <${currentUser.email || 'corbanb@gisboyshigh.net'}>`
-                          });
-                        }}
-                        className="px-3 py-1.5 rounded-xl bg-[#FDFBF7] dark:bg-black hover:bg-white text-[#1E293B] dark:text-slate-200 border-2 border-black dark:border-white font-medium text-xs transition"
-                      >
-                        ⚡ Google Workspace / Gmail (587 TLS)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSmtpForm({
-                            host: 'smtp.gmail.com',
-                            port: 465,
-                            secure: true,
-                            user: currentUser.email || 'corbanb@gisboyshigh.net',
-                            pass: smtpForm.pass,
-                            from: `"Mr. Corban" <${currentUser.email || 'corbanb@gisboyshigh.net'}>`
-                          });
-                        }}
-                        className="px-3 py-1.5 rounded-xl bg-[#FDFBF7] dark:bg-black hover:bg-white text-[#1E293B] dark:text-slate-200 border-2 border-black dark:border-white font-medium text-xs transition"
-                      >
-                        🔒 Google SSL (465 SSL)
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="font-semibold text-[#1E293B] dark:text-slate-200">SMTP Host Server</label>
-                      <input
-                        type="text"
-                        required
-                        value={smtpForm.host}
-                        onChange={e => setSmtpForm({ ...smtpForm, host: e.target.value })}
-                        placeholder="smtp.gmail.com"
-                        className="w-full px-3 py-2 rounded-xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 font-mono text-xs focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <label className="font-semibold text-[#1E293B] dark:text-slate-200">Port & Security</label>
-                        <label className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-400 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={smtpForm.secure}
-                            onChange={e => setSmtpForm({ ...smtpForm, secure: e.target.checked })}
-                            className="rounded bg-white border-black text-black focus:ring-0"
-                          />
-                          <span>SSL (Port 465)</span>
-                        </label>
-                      </div>
-                      <input
-                        type="number"
-                        required
-                        value={smtpForm.port}
-                        onChange={e => setSmtpForm({ ...smtpForm, port: parseInt(e.target.value, 10) || 587 })}
-                        placeholder="587"
-                        className="w-full px-3 py-2 rounded-xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 font-mono text-xs focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="font-semibold text-[#1E293B] dark:text-slate-200">User / Sender Email Address</label>
-                      <input
-                        type="email"
-                        required
-                        value={smtpForm.user}
-                        onChange={e => setSmtpForm({ ...smtpForm, user: e.target.value })}
-                        placeholder="corbanb@gisboyshigh.net"
-                        className="w-full px-3 py-2 rounded-xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 font-mono text-xs focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <label className="font-semibold text-[#1E293B] dark:text-slate-200">
-                          Password / Google App Password
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="text-[10px] text-black dark:text-white underline font-semibold"
-                        >
-                          {showPassword ? 'Hide' : 'Show'}
-                        </button>
-                      </div>
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={smtpForm.pass}
-                        onChange={e => setSmtpForm({ ...smtpForm, pass: e.target.value })}
-                        placeholder={smtpStatus?.hasPassword ? '(Password configured — leave empty to keep)' : '16-character Google App Password'}
-                        className="w-full px-3 py-2 rounded-xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 font-mono text-xs focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Important Google Workspace notice */}
-                  <div className="p-3.5 rounded-xl bg-[#EBF3F5] dark:bg-zinc-900 border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-200 text-[11px] space-y-1">
-                    <div className="font-bold flex items-center gap-1.5 text-black dark:text-white">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Note for Google Workspace / Gmail Accounts:</span>
-                    </div>
-                    <p className="leading-relaxed text-slate-700 dark:text-slate-300">
-                      Google blocks regular account passwords for SMTP. You must use a <strong>16-character Google App Password</strong> generated at{' '}
-                      <a
-                        href="https://myaccount.google.com/apppasswords"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-black dark:text-white underline font-bold"
-                      >
-                        myaccount.google.com/apppasswords
-                      </a>{' '}
-                      (requires 2-Step Verification enabled).
-                    </p>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="font-semibold text-[#1E293B] dark:text-slate-200">From Header Display Name</label>
-                    <input
-                      type="text"
-                      value={smtpForm.from}
-                      onChange={e => setSmtpForm({ ...smtpForm, from: e.target.value })}
-                      placeholder={`"Mr. Corban" <${currentUser.email || 'corbanb@gisboyshigh.net'}>`}
-                      className="w-full px-3 py-2 rounded-xl bg-[#FDFBF7] dark:bg-black border-2 border-black dark:border-white text-[#1E293B] dark:text-slate-100 placeholder-slate-400 font-mono text-xs focus:outline-none"
-                    />
-                  </div>
-
-                  {/* Test Result Message */}
-                  {smtpTestResult && (
-                    <div className={`p-3.5 rounded-xl border flex items-start gap-2.5 ${
-                      smtpTestResult.type === 'success'
-                        ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200'
-                        : 'bg-rose-50 dark:bg-rose-950/50 border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-200'
-                    }`}>
-                      {smtpTestResult.type === 'success' ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                      ) : (
-                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                      )}
-                      <div className="space-y-1">
-                        <div className="font-bold">{smtpTestResult.type === 'success' ? 'Connection Successful' : 'Connection Failed'}</div>
-                        <div className="text-[11px] leading-relaxed">{smtpTestResult.text}</div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Buttons */}
-                  <div className="pt-2 border-t border-[#E2E8F0] dark:border-zinc-800 flex items-center justify-between gap-3">
-                    <button
-                      type="button"
-                      disabled={smtpTesting}
-                      onClick={handleTestSmtp}
-                      className="px-4 py-2 rounded-xl bg-[#FDFBF7] dark:bg-black hover:bg-white text-[#1E293B] dark:text-slate-200 border-2 border-black dark:border-white font-semibold text-xs flex items-center gap-2 transition disabled:opacity-50"
-                    >
-                      {smtpTesting ? (
-                        <div className="w-3.5 h-3.5 border-2 border-black dark:border-white border-t-transparent rounded-full animate-spin"></div>
-                      ) : (
-                        <Send className="w-3.5 h-3.5" />
-                      )}
-                      <span>Test Connection ({currentUser.email || 'corbanb@gisboyshigh.net'})</span>
-                    </button>
-
-                    <button
-                      type="submit"
-                      className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-black border-2 border-black font-bold text-xs shadow-xs transition"
-                    >
-                      Save & Activate SMTP
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {smtpModalTab === 'logs' && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-[#1E293B] dark:text-slate-200">
-                      Recent Task Email Delivery Logs ({emailLogs.length})
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={fetchEmailLogs}
-                        disabled={loadingEmailLogs}
-                        className="px-2.5 py-1 rounded-lg bg-[#FDFBF7] dark:bg-black hover:bg-white text-[#1E293B] dark:text-slate-200 font-medium text-xs flex items-center gap-1 border border-black dark:border-white"
-                      >
-                        <RefreshCw className={`w-3 h-3 ${loadingEmailLogs ? 'animate-spin' : ''}`} />
-                        <span>Refresh</span>
-                      </button>
-                      {emailLogs.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={handleClearEmailLogs}
-                          className="px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 text-rose-800 dark:text-rose-300 font-medium text-xs border border-rose-300"
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {loadingEmailLogs ? (
-                    <div className="p-8 text-center text-slate-500">
-                      <div className="w-6 h-6 border-2 border-black dark:border-white border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-                      <span>Loading delivery logs...</span>
-                    </div>
-                  ) : emailLogs.length === 0 ? (
-                    <div className="p-8 rounded-2xl bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-800 text-center space-y-2">
-                      <Mail className="w-8 h-8 text-slate-400 mx-auto" />
-                      <div className="font-semibold text-[#1E293B] dark:text-white text-sm">No delivery logs recorded yet</div>
-                      <p className="text-slate-600 dark:text-slate-400 text-xs max-w-sm mx-auto">
-                        When you assign a task or click &quot;Send Email Reminder&quot;, delivery records and server responses will appear here in real-time.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
-                      {emailLogs.map(log => (
-                        <div
-                          key={log.id}
-                          className={`p-3 rounded-xl border space-y-1 ${
-                            log.status === 'sent'
-                              ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-700'
-                              : log.status === 'failed'
-                              ? 'bg-rose-50 dark:bg-rose-950/30 border-rose-300 dark:border-rose-700'
-                              : 'bg-[#FDFBF7] dark:bg-zinc-900 border-slate-300 dark:border-zinc-800'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-bold text-[#1E293B] dark:text-white text-xs">{log.taskTitle}</span>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                              log.status === 'sent'
-                                ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
-                                : log.status === 'failed'
-                                ? 'bg-rose-100 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 border-rose-300 dark:border-rose-700'
-                                : 'bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700'
-                            }`}>
-                              {log.status === 'sent' ? '✓ Delivered via SMTP' : log.status === 'failed' ? '✕ Failed' : 'Ready for 1-Click Send'}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400">
-                            <span>To: <strong className="text-black dark:text-white">{log.recipientName}</strong> ({log.recipientEmail})</span>
-                            <span className="font-mono text-[10px]">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-                          </div>
-
-                          {log.info && (
-                            <div className="text-[10px] text-slate-600 dark:text-slate-400 font-mono">{log.info}</div>
-                          )}
-
-                          {log.error && (
-                            <div className="text-[11px] text-rose-800 dark:text-rose-300 bg-rose-100 dark:bg-rose-950/60 p-2 rounded-lg border border-rose-300 dark:border-rose-800 mt-1">
-                              <strong>Error:</strong> {log.error}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {smtpModalTab === 'guide' && (
-                <div className="space-y-4 text-xs leading-relaxed text-[#1E293B] dark:text-slate-200">
-                  <div className="p-4 rounded-2xl bg-[#EBF3F5] dark:bg-zinc-900 border-2 border-black dark:border-white space-y-2">
-                    <h4 className="font-bold text-sm text-black dark:text-white flex items-center gap-2">
-                      <Sparkles className="w-4 h-4" />
-                      <span>Why Were Task Emails Not Going Through?</span>
-                    </h4>
-                    <p className="text-slate-700 dark:text-slate-300">
-                      Standard automated email dispatch requires an authenticated SMTP server. For Google accounts (including <strong>@gisboyshigh.net</strong> and personal Gmail), Google enforces 2-Step Verification and requires a dedicated <strong>Google App Password</strong>. Using your normal Google login password causes Google to reject the connection with code <strong>535 Authentication Failed</strong>.
-                    </p>
-                  </div>
-
-                  <div className="space-y-3">
-                    <h4 className="font-bold text-black dark:text-white text-sm">Two Easy Ways to Notify Students:</h4>
-
-                    {/* Option 1: 1-Click Gmail */}
-                    <div className="p-4 rounded-2xl bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-800 space-y-2">
-                      <div className="flex items-center gap-2 font-bold text-black dark:text-white text-xs">
-                        <span className="w-5 h-5 rounded-full bg-slate-900 text-white dark:bg-white dark:text-black flex items-center justify-center text-[11px]">1</span>
-                        <span>Zero-Configuration: 1-Click Gmail & Mail App (Fastest)</span>
-                      </div>
-                      <p className="text-slate-700 dark:text-slate-300 text-xs pl-7">
-                        When you create a task or click &quot;Send Email Reminder&quot;, the system automatically prepares a <strong>1-Click Open in Gmail</strong> button. Clicking it instantly launches your Gmail compose window with:
-                      </p>
-                      <ul className="list-disc pl-11 text-slate-600 dark:text-slate-400 space-y-1 text-xs">
-                        <li>All assigned students pre-populated into <strong>BCC</strong> for privacy.</li>
-                        <li>Formatted assignment title, subtopics, due date, and direct portal link.</li>
-                        <li>You simply review and click Send in Gmail! No server configuration needed.</li>
-                      </ul>
-                    </div>
-
-                    {/* Option 2: Automated SMTP */}
-                    <div className="p-4 rounded-2xl bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-800 space-y-2">
-                      <div className="flex items-center gap-2 font-bold text-black dark:text-white text-xs">
-                        <span className="w-5 h-5 rounded-full bg-slate-900 text-white dark:bg-white dark:text-black flex items-center justify-center text-[11px]">2</span>
-                        <span>Automated Background Delivery via Google App Password</span>
-                      </div>
-                      <p className="text-slate-700 dark:text-slate-300 text-xs pl-7">
-                        To enable seamless background auto-delivery straight from your email address:
-                      </p>
-                      <ol className="list-decimal pl-11 text-slate-700 dark:text-slate-300 space-y-1 text-xs">
-                        <li>Make sure 2-Step Verification is active on your Google / GIS Boys High account.</li>
-                        <li>
-                          Visit{' '}
-                          <a
-                            href="https://myaccount.google.com/apppasswords"
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-black dark:text-white underline font-bold"
-                          >
-                            myaccount.google.com/apppasswords
-                          </a>
-                        </li>
-                        <li>Create a new App Password named <strong>&quot;IGCSE Science Hub&quot;</strong>.</li>
-                        <li>Copy the 16-letter password and paste it into the <strong>Password</strong> field in the SMTP Setup tab.</li>
-                        <li>Click <strong>&quot;Test Connection&quot;</strong> to confirm, then <strong>&quot;Save & Activate SMTP&quot;</strong>.</li>
-                      </ol>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-[#E2E8F0] dark:border-zinc-800 bg-[#FDFBF7] dark:bg-black flex items-center justify-between">
-              <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                Cambridge 0653 Science Revision Hub • Instructor Notification System
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowSmtpModal(false);
-                  setSmtpTestResult(null);
-                }}
-                className="px-4 py-1.5 rounded-xl bg-white dark:bg-black hover:bg-slate-50 text-[#1E293B] dark:text-slate-200 font-semibold text-xs border-2 border-black dark:border-white transition"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Email Dispatch Modal with EmailJS & 1-Click Fallback */}
+      <EmailDispatchModal
+        isOpen={showSmtpModal}
+        onClose={() => setShowSmtpModal(false)}
+        currentUser={currentUser}
+        currentTask={
+          lastEmailAction
+            ? {
+                id: lastEmailAction.taskId,
+                title: lastEmailAction.taskTitle,
+                dueDate: new Date(Date.now() + 86400000 * 3).toLocaleDateString(),
+                instructions: 'Please log in to your Cambridge 0653 revision hub and complete the assigned task before the deadline.'
+              }
+            : tasks[0] || null
+        }
+        studentRecipients={
+          lastEmailAction?.recipients?.map(r => ({
+            studentName: r.studentName,
+            studentEmail: r.studentEmail
+          })) || []
+        }
+      />
     </div>
   );
 };

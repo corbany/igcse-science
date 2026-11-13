@@ -13,7 +13,7 @@ import {
   Calendar,
   FileText
 } from 'lucide-react';
-import { UserProfile, StudentProgress } from '../types';
+import { UserProfile, StudentProgress, TaskWithSubmission } from '../types';
 import { 
   ClassItem, 
   joinClassWithCode, 
@@ -25,8 +25,8 @@ import { StudentLeaderboard } from './StudentLeaderboard';
 interface StudentClassesViewProps {
   user: UserProfile;
   progress: StudentProgress;
-  onNavigateToLessons?: (subtopicCode?: string) => void;
-  onNavigateToQuizzes?: (topicCode?: string) => void;
+  onNavigateToLessons?: (subtopicCode?: string, task?: TaskWithSubmission) => void;
+  onNavigateToQuizzes?: (topicCode?: string, task?: TaskWithSubmission) => void;
   initialTab?: 'tasks' | 'classes' | 'leaderboard';
 }
 

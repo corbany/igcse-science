@@ -1,8 +1,15 @@
 import { QuizQuestion, ScienceSubject } from '../types';
 import { allSubtopicsData } from './subtopicSlidesData';
-import { getQuizForSubtopic } from './subtopicQuizzes';
+import { getQuizForSubtopic, randomizeQuizQuestions } from './subtopicQuizzes';
 import { march2026Paper12Core } from './examPapers/march2026Paper12Core';
 import { march2026Paper22Extended } from './examPapers/march2026Paper22Extended';
+import { specimen2025Paper2 } from './examPapers/specimen2025Paper2';
+import { TOPIC_QUESTION_LIBRARY, generateParametricQuestion } from './topicQuestionLibrary';
+import { predefinedSubtopicQuizzes } from './predefinedSubtopicQuizzes';
+import { CURATED_BIO_QUESTIONS } from './curatedQuestionsBio';
+import { CURATED_CHEM_QUESTIONS } from './curatedQuestionsChem';
+import { CURATED_PHY_QUESTIONS } from './curatedQuestionsPhy';
+import { isValidQuizQuestion } from './quizSanitizer';
 
 export interface DynamicTopicMeta {
   code: string;
@@ -26,7 +33,7 @@ export const SYLLABUS_TOPICS_META: Record<string, DynamicTopicMeta> = {
   'B10': { code: 'B10', subject: 'biology', title: 'Diseases & Immunity', syllabusRef: 'B10.1' },
   'B11': { code: 'B11', subject: 'biology', title: 'Gas Exchange in Humans', syllabusRef: 'B11.1' },
   'B12': { code: 'B12', subject: 'biology', title: 'Respiration', syllabusRef: 'B12.1' },
-  'B13': { code: 'B13', subject: 'biology', title: 'Coordination & Response', syllabusRef: 'B13.1' },
+  'B13': { code: 'B13', subject: 'biology', title: 'Drugs', syllabusRef: 'B13.1' },
   'B14': { code: 'B14', subject: 'biology', title: 'Reproduction', syllabusRef: 'B14.1' },
   'B15': { code: 'B15', subject: 'biology', title: 'Organisms & Environment', syllabusRef: 'B15.1' },
   'B16': { code: 'B16', subject: 'biology', title: 'Human Influences on Ecosystems', syllabusRef: 'B16.1' },
@@ -383,29 +390,40 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
     }
   ],
 
-  // B13 Coordination & Response
+  // B13 Drugs
   'B13': [
     {
-      stem: 'What is the correct sequence of components in a spinal reflex arc?',
-      correct: 'Receptor → Sensory neurone → Relay neurone (CNS) → Motor neurone → Effector',
+      stem: 'According to the Cambridge 0653 syllabus, what is the precise scientific definition of a drug?',
+      correct: 'Any substance taken into the body that modifies or affects chemical reactions in the body',
       distractors: [
-        'Effector → Motor neurone → Relay neurone → Sensory neurone → Receptor',
-        'Receptor → Motor neurone → Brain → Sensory neurone → Muscle',
-        'Stimulus → Relay neurone → Sensory neurone → Effector → Motor neurone'
+        'Any synthetic chemical manufactured in a laboratory to kill bacterial pathogens',
+        'A nutrient that provides energy and raw materials for growth and repair',
+        'A substance produced exclusively by white blood cells to neutralize antigens'
       ],
-      explanation: 'In a reflex arc, a receptor detects the stimulus, sending impulses via sensory neurone to relay neurone in the CNS, then motor neurone to effector.',
+      explanation: 'A drug is defined as any substance taken into the body that modifies or affects chemical reactions in the body.',
       ref: 'B13.1'
     },
     {
-      stem: 'Which hormone is secreted by adrenal glands in response to danger ("fight or flight") and what is its physiological effect?',
-      correct: 'Adrenaline; increases heart rate, breathing rate, and blood glucose concentration',
+      stem: 'Why do antibiotics such as penicillin kill bacteria but have no therapeutic effect against viral infections such as influenza?',
+      correct: 'Antibiotics target bacterial cell walls and cell processes; viruses lack cell walls and reproduce inside host human cells',
       distractors: [
-        'Insulin; decreases heart rate and converts glucose to glycogen',
-        'Glucagon; slows breathing rate and constricts pupils',
-        'Estrogen; causes immediate muscle relaxation and lowers blood pressure'
+        'Viruses are too small to be detected by the immune system or antibiotics',
+        'Antibiotics only function in blood plasma whereas viruses live only in red blood cells',
+        'Viruses rapidly produce antitoxins that break down antibiotic molecules'
       ],
-      explanation: 'Adrenaline prepares the body for vigorous action by increasing heart rate, dilating bronchioles, and elevating blood glucose.',
-      ref: 'B13.2'
+      explanation: 'Antibiotics disrupt bacterial cell walls or metabolic processes. Viruses lack cellular structures and host their replication inside human cells.',
+      ref: 'B13.1'
+    },
+    {
+      stem: 'How does the overuse or premature termination of antibiotic treatments lead to the development of resistant strains such as MRSA?',
+      correct: 'Random mutations produce resistant bacteria, which survive antibiotic exposure and reproduce without competition (natural selection)',
+      distractors: [
+        'The antibiotic directly alters human DNA so antibodies no longer attack bacteria',
+        'Bacteria become accustomed to the taste of the antibiotic and metabolize it for energy',
+        'Viruses transfer resistance genes directly into human red blood cells'
+      ],
+      explanation: 'Natural selection: surviving resistant bacteria with random mutations replicate and pass on resistance genes when antibiotics are overused or courses left unfinished.',
+      ref: 'B13.1'
     }
   ],
 
@@ -971,8 +989,36 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
 };
 
 /**
+ * Helper to calculate fair, even integer quotas across a list of selected topics.
+ * Guarantees difference between any two selected topics is at most 1 question.
+ */
+export function calculateTopicQuotas(topics: string[], totalCount: number): Map<string, number> {
+  const quotas = new Map<string, number>();
+  if (!topics || topics.length === 0 || totalCount <= 0) return quotas;
+
+  const K = topics.length;
+  // If requested count is less than or equal to topic count, pick totalCount distinct topics
+  if (totalCount <= K) {
+    // Preserve topic order but distribute 1 to each of the first totalCount topics
+    for (let i = 0; i < K; i++) {
+      quotas.set(topics[i], i < totalCount ? 1 : 0);
+    }
+    return quotas;
+  }
+
+  const base = Math.floor(totalCount / K);
+  const remainder = totalCount % K;
+
+  for (let i = 0; i < K; i++) {
+    quotas.set(topics[i], base + (i < remainder ? 1 : 0));
+  }
+  return quotas;
+}
+
+/**
  * Generate a set of unique dynamic syllabus questions for the selected topics.
- * GUARANTEES ZERO REPEAT QUESTIONS WITHIN THE RESULTING QUIZ.
+ * GUARANTEES AN EVEN PROPORTION OF QUESTIONS ACROSS ALL CHOSEN TOPICS
+ * AND ZERO REPEAT QUESTIONS WITHIN THE PRACTICE QUIZ.
  */
 export function generateDynamicSyllabusQuestions(
   topics: string[],
@@ -982,55 +1028,70 @@ export function generateDynamicSyllabusQuestions(
 ): QuizQuestion[] {
   const safeCount = Math.min(40, Math.max(1, count));
   const rawTopics = topics.length > 0 ? topics : Object.keys(SYLLABUS_TOPICS_META);
-  const questions: QuizQuestion[] = [];
-  const seenStems = new Set<string>();
   const uniqueToken = seed || `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const globalSeenStems = new Set<string>();
 
   const normalizeStem = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
 
-  const addUnique = (q: QuizQuestion): boolean => {
-    if (!q || !q.question || !q.options || q.options.length < 4) return false;
+  // Support parent topics ("B1"), specific subtopics ("B1.1"), or mixed selections evenly
+  const activeTopicCodes = rawTopics.length > 0 ? Array.from(new Set(rawTopics)) : Object.keys(SYLLABUS_TOPICS_META);
+
+  // 1. Calculate the exact, fair quota for each chosen topic/subtopic (even distribution)
+  const topicQuotas = calculateTopicQuotas(activeTopicCodes, safeCount);
+
+  // 2. Prepare official exam papers pool
+  const normTier = (tier || 'Extended').toLowerCase();
+  const candidateExamPapers = [
+    ...(normTier === 'extended' ? [march2026Paper22Extended, specimen2025Paper2] : 
+        normTier === 'foundation' || normTier === 'core' ? [march2026Paper12Core] : 
+        [march2026Paper12Core, march2026Paper22Extended, specimen2025Paper2])
+  ];
+
+  // Map to store gathered questions per topic bucket
+  const topicBuckets = new Map<string, QuizQuestion[]>();
+  for (const code of activeTopicCodes) {
+    topicBuckets.set(code, []);
+  }
+
+  const addToBucket = (topicCode: string, q: QuizQuestion): boolean => {
+    if (!isValidQuizQuestion(q)) return false;
     const norm = normalizeStem(q.question);
-    if (norm.length < 15 || seenStems.has(norm)) return false;
-    seenStems.add(norm);
-    questions.push(q);
+    if (norm.length < 15 || globalSeenStems.has(norm)) return false;
+    
+    const bucket = topicBuckets.get(topicCode);
+    if (!bucket) return false;
+    const targetQuota = topicQuotas.get(topicCode) || 0;
+    if (bucket.length >= targetQuota) return false;
+
+    globalSeenStems.add(norm);
+    bucket.push(q);
     return true;
   };
 
-  // Check for specific subtopics (e.g. "B1.1", "C4.1") vs parent topics ("B1", "C4")
-  const specificSubtopics = rawTopics.filter(t => t.includes('.'));
-  const parentTopics = rawTopics.filter(t => !t.includes('.'));
-  const validTopics = parentTopics.length > 0 ? parentTopics : (specificSubtopics.length === 0 ? Object.keys(SYLLABUS_TOPICS_META) : []);
+  // 3. For each topic, collect questions specifically for that topic until its quota is satisfied
+  for (const topicCode of activeTopicCodes) {
+    const quota = topicQuotas.get(topicCode) || 0;
+    if (quota <= 0) continue;
 
-  // 0. If specific subtopics are requested, draw directly from their high-variety pools first
-  if (specificSubtopics.length > 0) {
-    for (const subCode of specificSubtopics) {
-      const subQuestions = getQuizForSubtopic(subCode, { count: Math.ceil(safeCount / specificSubtopics.length) + 2 });
-      for (const q of subQuestions) {
-        addUnique(q);
-        if (questions.length >= safeCount) break;
-      }
-      if (questions.length >= safeCount) break;
-    }
-  }
+    const isExactSubtopic = topicCode.includes('.');
+    const parentCode = isExactSubtopic ? topicCode.split('.')[0].toUpperCase() : topicCode.toUpperCase();
+    const meta = SYLLABUS_TOPICS_META[parentCode] || SYLLABUS_TOPICS_META['B1'];
 
-  // 1. Gather questions from TOPIC_TEMPLATES for each selected topic
-  for (const topicCode of validTopics) {
-    const meta = SYLLABUS_TOPICS_META[topicCode] || SYLLABUS_TOPICS_META['B1'];
-    const templates = TOPIC_TEMPLATES[topicCode] || [];
-
+    // 3a. Sourced from TOPIC_TEMPLATES (only when not restricted to another exact subtopic)
+    const templates = TOPIC_TEMPLATES[parentCode] || [];
     for (let tIdx = 0; tIdx < templates.length; tIdx++) {
+      if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
       const template = templates[tIdx];
-      // Generate multiple variations if template supports dynamic variables
+      if (isExactSubtopic && template.ref && template.ref.toUpperCase() !== topicCode.toUpperCase()) continue;
       const iterations = template.generateVars ? 3 : 1;
       for (let v = 0; v < iterations; v++) {
+        if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
         const vars = template.generateVars ? template.generateVars() : null;
         const stem = typeof template.stem === 'function' ? template.stem(vars) : template.stem;
         const correctAns = typeof template.correct === 'function' ? template.correct(vars) : template.correct;
         const distractors = typeof template.distractors === 'function' ? template.distractors(vars) : template.distractors;
         const explanation = typeof template.explanation === 'function' ? template.explanation(vars) : template.explanation;
 
-        // Build 4 options and shuffle
         const rawOptions = [correctAns, ...distractors.slice(0, 3)];
         const shuffled = [...rawOptions];
         for (let j = shuffled.length - 1; j > 0; j--) {
@@ -1039,10 +1100,10 @@ export function generateDynamicSyllabusQuestions(
         }
         const correctIndex = shuffled.indexOf(correctAns);
 
-        addUnique({
-          id: `ai-gen-${topicCode.toLowerCase()}-${uniqueToken}-${questions.length + 1}`,
+        addToBucket(topicCode, {
+          id: `tpl-${parentCode.toLowerCase()}-${uniqueToken}-${tIdx}-${v}`,
           subject: meta.subject,
-          topicCode: meta.code,
+          topicCode: parentCode,
           topicTitle: meta.title,
           syllabusRef: template.ref || meta.syllabusRef,
           question: stem,
@@ -1052,134 +1113,124 @@ export function generateDynamicSyllabusQuestions(
         });
       }
     }
-  }
 
-  // 1.5 Draw authentic MCQs directly from March 2026 Core Paper 12 & Extended Paper 22
-  const normTier = (tier || 'Extended').toLowerCase();
-  const candidateExamPapers = [
-    ...(normTier === 'extended' ? [march2026Paper22Extended] : 
-        normTier === 'foundation' || normTier === 'core' ? [march2026Paper12Core] : 
-        [march2026Paper12Core, march2026Paper22Extended])
-  ];
-
-  for (const paper of candidateExamPapers) {
-    for (const q of paper.questions) {
-      const qTopic = q.syllabusCode ? q.syllabusCode.split('.')[0] : '';
-      if (validTopics.includes(qTopic) && q.options && q.options.length === 4) {
-        const optTexts = q.options.map(opt => typeof opt === 'string' ? opt : (opt as any).text);
-        const letter = q.correctAnswer || 'A';
-        const correctIdx = ['A', 'B', 'C', 'D'].indexOf(letter);
-        const meta = SYLLABUS_TOPICS_META[qTopic] || { subject: q.subject, title: 'Cambridge IGCSE 0653', code: qTopic, syllabusRef: q.syllabusCode || `${qTopic}.1` };
-
-        addUnique({
-          id: `exam-drive-${q.id}-${uniqueToken}`,
-          subject: q.subject,
-          topicCode: qTopic,
-          topicTitle: meta.title,
-          syllabusRef: q.syllabusCode,
-          question: q.questionText,
-          options: optTexts,
-          correctIndex: correctIdx >= 0 ? correctIdx : 0,
-          explanation: q.explanation || `Correct answer is Option ${letter}. Sourced from official Cambridge IGCSE 0653 ${paper.tier} Multiple Choice examination.`
-        });
+    // 3b. Sourced from Curated Banks & TOPIC_QUESTION_LIBRARY
+    const curatedSources: Record<string, QuizQuestion[]>[] = [
+      predefinedSubtopicQuizzes,
+      CURATED_BIO_QUESTIONS,
+      CURATED_CHEM_QUESTIONS,
+      CURATED_PHY_QUESTIONS
+    ];
+    for (const bank of curatedSources) {
+      if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
+      for (const [k, list] of Object.entries(bank)) {
+        if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
+        const matches = isExactSubtopic
+          ? k.toUpperCase() === topicCode.toUpperCase()
+          : k.toUpperCase().startsWith(`${parentCode}.`);
+        if (!matches) continue;
+        for (const cq of list) {
+          if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
+          addToBucket(topicCode, {
+            ...cq,
+            topicCode: parentCode,
+            topicTitle: meta.title,
+            id: `cur-${k.toLowerCase()}-${uniqueToken}-${(topicBuckets.get(topicCode)?.length || 0) + 1}`
+          });
+        }
       }
     }
-  }
 
-  // 2. Gather authentic questions from all subtopics matching the requested topics
-  for (const topicCode of validTopics) {
-    const matchingSubtopics = allSubtopicsData.filter(s => 
-      s.topicCode === topicCode || s.subtopicCode.startsWith(`${topicCode}.`)
+    const topicLib = TOPIC_QUESTION_LIBRARY[parentCode] || [];
+    for (const tq of topicLib) {
+      if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
+      if (isExactSubtopic && tq.syllabusRef && tq.syllabusRef.toUpperCase() !== topicCode.toUpperCase()) continue;
+      addToBucket(topicCode, {
+        ...tq,
+        topicCode: parentCode,
+        topicTitle: meta.title,
+        id: `lib-${parentCode.toLowerCase()}-${uniqueToken}-${(topicBuckets.get(topicCode)?.length || 0) + 1}`
+      });
+    }
+
+    // 3c. Sourced from Cambridge examination papers
+    for (const paper of candidateExamPapers) {
+      if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
+      for (const q of paper.questions) {
+        if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
+        const qTopic = q.syllabusCode ? q.syllabusCode.split('.')[0].toUpperCase() : '';
+        const matches = isExactSubtopic
+          ? q.syllabusCode?.toUpperCase() === topicCode.toUpperCase()
+          : qTopic === parentCode;
+        if (matches && q.options && q.options.length === 4) {
+          const optTexts = q.options.map(opt => typeof opt === 'string' ? opt : (opt as any).text);
+          const letter = q.correctAnswer || 'A';
+          const correctIdx = ['A', 'B', 'C', 'D'].indexOf(letter);
+
+          addToBucket(topicCode, {
+            id: `exam-${q.id}-${uniqueToken}`,
+            subject: q.subject,
+            topicCode: parentCode,
+            topicTitle: meta.title,
+            syllabusRef: q.syllabusCode,
+            question: q.questionText,
+            options: optTexts,
+            correctIndex: correctIdx >= 0 ? correctIdx : 0,
+            explanation: q.explanation || `Correct answer is Option ${letter}. Sourced from official Cambridge IGCSE 0653 ${paper.tier} Multiple Choice examination.`
+          });
+        }
+      }
+    }
+
+    // 3d. Sourced from clean subtopics engine
+    const matchingSubtopics = allSubtopicsData.filter(s =>
+      isExactSubtopic
+        ? s.subtopicCode.toUpperCase() === topicCode.toUpperCase()
+        : (s.topicCode === parentCode || s.subtopicCode.startsWith(`${parentCode}.`))
     );
-
     for (const sub of matchingSubtopics) {
-      const subQuiz = getQuizForSubtopic(sub.subtopicCode);
+      if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
+      const subQuiz = getQuizForSubtopic(sub.subtopicCode, { count: 12 });
       for (const q of subQuiz) {
-        addUnique({
+        if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
+        addToBucket(topicCode, {
           ...q,
-          id: `sub-${sub.subtopicCode.toLowerCase()}-${uniqueToken}-${questions.length + 1}`
+          topicCode: parentCode,
+          topicTitle: meta.title,
+          id: `sub-${sub.subtopicCode.toLowerCase()}-${uniqueToken}-${(topicBuckets.get(topicCode)?.length || 0) + 1}`
         });
-        if (questions.length >= safeCount * 2) break;
       }
-      if (questions.length >= safeCount * 2) break;
+    }
+
+    // 3e. Formula parametric variations ONLY for formula-based topics (B2, C3, P1, P3, P4, P5)
+    if (['B2', 'C3', 'P1', 'P3', 'P4', 'P5'].includes(parentCode)) {
+      for (let paramCounter = 1; (topicBuckets.get(topicCode)?.length || 0) < quota && paramCounter <= 20; paramCounter++) {
+        const paramQ = generateParametricQuestion(parentCode, isExactSubtopic ? topicCode : `${parentCode}.1`, paramCounter);
+        if (paramQ) {
+          addToBucket(topicCode, {
+            ...paramQ,
+            topicTitle: meta.title,
+            id: `param-${parentCode.toLowerCase()}-${uniqueToken}-${paramCounter}`
+          });
+        }
+      }
     }
   }
 
-  // 3. If questions are still fewer than safeCount (e.g. single small topic), generate unique parametric calculations
-  let pCounter = 1;
-  while (questions.length < safeCount && pCounter <= 50) {
-    const topicCode = validTopics[(questions.length + pCounter) % validTopics.length];
-    const meta = SYLLABUS_TOPICS_META[topicCode] || SYLLABUS_TOPICS_META['B1'];
+  // 4. Interleave questions round-robin across chosen topics for perfectly even progression
+  const finalInterleaved: QuizQuestion[] = [];
+  const maxBucketLen = Math.max(0, ...Array.from(topicBuckets.values()).map(b => b.length));
 
-    if (meta.subject === 'physics') {
-      const mass = (10 + pCounter * 5);
-      const velocity = (2 + pCounter);
-      const ke = 0.5 * mass * velocity * velocity;
-      addUnique({
-        id: `param-ke-${uniqueToken}-${pCounter}`,
-        subject: 'physics',
-        topicCode,
-        topicTitle: meta.title,
-        syllabusRef: `${topicCode}.1`,
-        question: `An object of mass ${mass} kg is travelling with a constant speed of ${velocity} m/s in investigation #${pCounter}. What is its kinetic energy?`,
-        options: [
-          `${ke.toLocaleString()} J`,
-          `${(ke * 2).toLocaleString()} J`,
-          `${(ke / 2).toLocaleString()} J`,
-          `${(mass * velocity).toLocaleString()} J`
-        ],
-        correctIndex: 0,
-        explanation: `Kinetic energy KE = 0.5 × m × v² = 0.5 × ${mass} × ${velocity}² = ${ke} J.`
-      });
-    } else if (meta.subject === 'chemistry') {
-      // In Cambridge 0653 Combined Science, mole calculations from mass or concentration are excluded.
-      // Tests Law of Conservation of Mass & reacting masses:
-      const mgMass = (1.2 * pCounter).toFixed(1);
-      const oMass = (0.8 * pCounter).toFixed(1);
-      const mgoMass = (Number(mgMass) + Number(oMass)).toFixed(1);
-      addUnique({
-        id: `param-mass-conservation-${uniqueToken}-${pCounter}`,
-        subject: 'chemistry',
-        topicCode,
-        topicTitle: meta.title,
-        syllabusRef: `${topicCode}.1`,
-        question: `According to the Law of Conservation of Mass, when ${mgMass} g of magnesium ribbon burns completely in ${oMass} g of oxygen gas, what mass of magnesium oxide is formed?`,
-        options: [
-          `${mgoMass} g`,
-          `${(Number(mgoMass) * 1.5).toFixed(1)} g`,
-          `${Math.abs(Number(mgMass) - Number(oMass)).toFixed(1)} g`,
-          `${(Number(mgMass) * 2).toFixed(1)} g`
-        ],
-        correctIndex: 0,
-        explanation: `By the Law of Conservation of Mass, the total mass of products equals the total mass of reactants: ${mgMass} g + ${oMass} g = ${mgoMass} g. (In Cambridge 0653 Combined Science, mole calculations from mass or concentration are not required).`
-      });
-    } else {
-      const imageMm = (20 + pCounter * 4);
-      const mag = (200 + pCounter * 50);
-      const actualUm = ((imageMm * 1000) / mag).toFixed(1);
-      addUnique({
-        id: `param-mag-${uniqueToken}-${pCounter}`,
-        subject: 'biology',
-        topicCode,
-        topicTitle: meta.title,
-        syllabusRef: `${topicCode}.1`,
-        question: `Under a light microscope, a biological specimen image measures ${imageMm} mm across at magnification ×${mag} (Slide specimen #${pCounter}). What is the actual dimension?`,
-        options: [
-          `${actualUm} μm`,
-          `${(Number(actualUm) * 10).toFixed(1)} μm`,
-          `${(Number(actualUm) / 10).toFixed(2)} μm`,
-          `${(imageMm * mag).toLocaleString()} μm`
-        ],
-        correctIndex: 0,
-        explanation: `Actual size = Image size ÷ Magnification = (${imageMm} × 1000 μm) ÷ ${mag} = ${actualUm} μm.`
-      });
+  for (let r = 0; r < maxBucketLen; r++) {
+    for (const code of activeTopicCodes) {
+      const bucket = topicBuckets.get(code);
+      if (bucket && r < bucket.length) {
+        finalInterleaved.push(bucket[r]);
+        if (finalInterleaved.length >= safeCount) break;
+      }
     }
-    pCounter++;
+    if (finalInterleaved.length >= safeCount) break;
   }
 
-  // Shuffle final list so topics and difficulty are interleaved realistically
-  const shuffledFinal = questions.sort(() => Math.random() - 0.5);
-
-  // Return exactly the requested count, all guaranteed unique
-  return shuffledFinal.slice(0, safeCount);
+  return randomizeQuizQuestions(finalInterleaved.slice(0, safeCount));
 }

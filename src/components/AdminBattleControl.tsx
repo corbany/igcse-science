@@ -296,13 +296,13 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
           </div>
 
           <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
-            {onEnterArena && (
+            {handleEnterArena && (
               <button
-                onClick={onEnterArena}
-                className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-black text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                onClick={handleEnterArena}
+                className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white border border-black text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
               >
-                <Eye className="w-4 h-4 text-emerald-700" />
-                <span>Spectate / Play Arena</span>
+                <Eye className="w-4 h-4 text-emerald-400" />
+                <span>Test Game Arena & Map</span>
               </button>
             )}
             {onClose && (
