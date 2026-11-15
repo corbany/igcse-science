@@ -333,17 +333,22 @@ export function evaluateStudentBadges(
   ]);
   const slideDeckCount = completedDecksSet.size;
 
-  // Quiz analytics
+  // Quiz analytics (include subtopic checks, all recorded practice quiz lengths, and legacy subject quizzes)
   const subtopicResults = Object.values(progress.subtopicQuizScores || {});
-  const practiceResults = Object.values(progress.quizScores || {}).map(q => ({
-    percentage: Math.round((q.score / (q.total || 1)) * 100),
-    score: q.score,
-    total: q.total
-  }));
+  const lengthRecords = Object.values(progress.practiceQuizByLength || {});
+  const recordedLengthDates = new Set(lengthRecords.map(r => r?.date).filter(Boolean));
+  const legacyPracticeResults = Object.values(progress.quizScores || {})
+    .filter(q => q && !recordedLengthDates.has(q.date))
+    .map(q => ({
+      percentage: Math.round((q.score / (q.total || 1)) * 100),
+      score: q.score,
+      total: q.total
+    }));
 
   const allPercentages = [
     ...subtopicResults.map(r => r.percentage),
-    ...practiceResults.map(r => r.percentage)
+    ...lengthRecords.map(r => r.percentage),
+    ...legacyPracticeResults.map(r => r.percentage)
   ];
 
   const greenLightQuizzesCount = allPercentages.filter(p => p >= 80).length;
@@ -458,12 +463,13 @@ export function evaluateStudentBadges(
     }
 
     const previouslyUnlockedAt = earnedMap.get(badge.id);
+    const finalUnlocked = isUnlocked || Boolean(previouslyUnlockedAt);
 
     return {
       ...badge,
-      unlockedAt: isUnlocked ? (previouslyUnlockedAt || nowIso) : undefined,
+      unlockedAt: finalUnlocked ? (previouslyUnlockedAt || nowIso) : undefined,
       progress: {
-        current: currentVal,
+        current: finalUnlocked ? maxVal : currentVal,
         max: maxVal,
         label: progressLabel
       }
@@ -473,7 +479,7 @@ export function evaluateStudentBadges(
   const unlockedBadges = evaluatedBadges.filter(b => !!b.unlockedAt);
   const lockedBadges = evaluatedBadges.filter(b => !b.unlockedAt);
 
-  // Compute Total XP
+  // Compute Total XP (strictly non-decreasing against bestTotalXP)
   let totalXP = 0;
   // XP from slide decks (50 XP each)
   totalXP += slideDeckCount * 50;
@@ -485,6 +491,7 @@ export function evaluateStudentBadges(
   unlockedBadges.forEach(b => {
     totalXP += b.xpReward;
   });
+  totalXP = Math.max(totalXP, progress.bestTotalXP || 0);
 
   return {
     allBadges: evaluatedBadges,

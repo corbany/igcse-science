@@ -93,18 +93,38 @@ export async function getClassStudentLeaderboard(
     ]);
     currentStudentDecks = completedSet.size;
 
-    // Calculate cumulative total quiz score
+    // Calculate cumulative total quiz score monotonically
     const subtopicScores = Object.values(currentProgress.subtopicQuizScores || {});
     const quizScores = Object.values(currentProgress.quizScores || {});
+    const practiceLengthScores = Object.values(currentProgress.practiceQuizByLength || {});
+    const lengthDates = new Set(practiceLengthScores.map(r => r?.date).filter(Boolean));
+    const unrecordedMainScores = quizScores.filter(q => q && !lengthDates.has(q.date));
 
-    currentStudentTotalQuizScore = subtopicScores.reduce((acc, s) => acc + (s.score || 0), 0) +
-                                   quizScores.reduce((acc, q) => acc + (q.score || 0), 0);
-    currentStudentQuizzesCount = subtopicScores.length + quizScores.length;
+    const legacySum =
+      subtopicScores.reduce((acc, s) => acc + (s?.score || 0), 0) +
+      quizScores.reduce((acc, q) => acc + (q?.score || 0), 0);
+    const cumulativeWithLengthSum =
+      subtopicScores.reduce((acc, s) => acc + (s?.score || 0), 0) +
+      practiceLengthScores.reduce((acc, r) => acc + (r?.score || 0), 0) +
+      unrecordedMainScores.reduce((acc, q) => acc + (q?.score || 0), 0);
+
+    currentStudentTotalQuizScore = Math.max(
+      currentProgress.cumulativeQuizPoints || 0,
+      legacySum,
+      cumulativeWithLengthSum
+    );
+    currentStudentQuizzesCount = Math.max(
+      currentProgress.cumulativeQuizzesCount || 0,
+      subtopicScores.length + quizScores.length,
+      subtopicScores.length + practiceLengthScores.length + unrecordedMainScores.length
+    );
+    currentStudentEvaluatedXP = Math.max(currentStudentEvaluatedXP, currentProgress.bestTotalXP || 0);
 
     // Private accuracy for current user's eyes only
     const allPercentages = [
       ...subtopicScores.map(q => q.percentage),
-      ...quizScores.map(q => Math.round((q.score / (q.total || 1)) * 100))
+      ...practiceLengthScores.map(r => r.percentage),
+      ...unrecordedMainScores.map(q => Math.round((q.score / (q.total || 1)) * 100))
     ];
     if (allPercentages.length > 0) {
       currentStudentAccuracy = Math.round(allPercentages.reduce((a, b) => a + b, 0) / allPercentages.length);
@@ -121,60 +141,82 @@ export async function getClassStudentLeaderboard(
       ? (s.studentId === currentUser.id || s.email.toLowerCase() === currentUser.email.toLowerCase())
       : false;
 
-    // Evaluate badges for classmate
-    let badgesCount = s.badgesCount || 0;
-    let unlockedBadges: StudentBadge[] = [];
-    let xp = s.xp || 0;
-    let streak = s.streakDays || 1;
-    let decks = s.completedLessonsCount || (s.completedLessons?.length || 0);
+    const streak = Math.max(s.streakDays || 1, 1);
+    const completedSet = new Set([
+      ...(s.completedLessons || []),
+      ...Object.keys(s.trafficLights || {}),
+      ...Object.keys(s.subtopicQuizScores || {})
+    ]);
+    let decks = Math.max(s.completedLessonsCount || 0, completedSet.size);
 
-    // Compute raw cumulative total quiz score
-    let totalScore = s.totalQuizScore || 0;
-    let quizCount = s.quizzesCompletedCount || 0;
-
+    // Compute cumulative total quiz score monotonically
     const scores = Object.values(s.quizScores || {});
     const subscores = Object.values(s.subtopicQuizScores || {});
+    const lengthScores = Object.values(s.practiceQuizByLength || {});
+    const peerLengthDates = new Set(lengthScores.map(r => r?.date).filter(Boolean));
+    const peerUnrecordedMain = scores.filter(q => q && !peerLengthDates.has(q.date));
 
-    if (totalScore === 0) {
-      totalScore = subscores.reduce((a, b) => a + (b.score || 0), 0) +
-                   scores.reduce((a, b) => a + (b.score || 0), 0);
-      quizCount = subscores.length + scores.length;
-    }
+    const peerLegacySum =
+      subscores.reduce((a, b) => a + (b?.score || 0), 0) +
+      scores.reduce((a, b) => a + (b?.score || 0), 0);
+    const peerLengthSum =
+      subscores.reduce((a, b) => a + (b?.score || 0), 0) +
+      lengthScores.reduce((a, b) => a + (b?.score || 0), 0) +
+      peerUnrecordedMain.reduce((a, b) => a + (b?.score || 0), 0);
 
-    // Evaluate badges from progress if not pre-computed
-    if (badgesCount === 0 || unlockedBadges.length === 0) {
-      const peerProgress: StudentProgress = {
-        completedLessons: s.completedLessons || [],
-        trafficLights: s.trafficLights || {},
-        subtopicQuizScores: s.subtopicQuizScores || {},
-        quizScores: s.quizScores || {},
-        topicConfidence: s.topicConfidence || {},
-        savedNotes: {},
-        currentStreak: s.streakDays || 1,
-        featuredBadgeId: s.featuredBadgeId
-      };
-      const peerBadgeEval = evaluateStudentBadges(peerProgress, {
-        id: s.studentId,
-        name: s.name,
-        email: s.email,
-        role: 'student',
-        tier: s.tier || 'Extended'
-      });
-      badgesCount = Math.max(badgesCount, peerBadgeEval.unlockedBadges.length);
-      unlockedBadges = peerBadgeEval.unlockedBadges;
-      if (xp === 0) xp = peerBadgeEval.totalXP;
-    }
+    let totalScore = Math.max(
+      s.totalQuizScore || 0,
+      s.cumulativeQuizPoints || 0,
+      peerLegacySum,
+      peerLengthSum
+    );
+    let quizCount = Math.max(
+      s.quizzesCompletedCount || 0,
+      s.cumulativeQuizzesCount || 0,
+      subscores.length + scores.length,
+      subscores.length + lengthScores.length + peerUnrecordedMain.length
+    );
+
+    // Evaluate badges & XP monotonically for classmate
+    const peerProgress: StudentProgress = {
+      completedLessons: s.completedLessons || [],
+      slidesReadBySubtopic: s.slidesReadBySubtopic || {},
+      trafficLights: s.trafficLights || {},
+      subtopicQuizScores: s.subtopicQuizScores || {},
+      quizScores: s.quizScores || {},
+      practiceQuizByLength: s.practiceQuizByLength || {},
+      topicConfidence: s.topicConfidence || {},
+      savedNotes: {},
+      currentStreak: streak,
+      earnedBadges: s.earnedBadges,
+      featuredBadgeId: s.featuredBadgeId,
+      cumulativeQuizPoints: totalScore,
+      cumulativeQuizzesCount: quizCount,
+      bestTotalXP: s.bestTotalXP || s.xp || 0
+    };
+    const peerBadgeEval = evaluateStudentBadges(peerProgress, {
+      id: s.studentId,
+      name: s.name,
+      email: s.email,
+      role: 'student',
+      tier: s.tier || 'Extended'
+    });
+
+    let badgesCount = Math.max(s.badgesCount || 0, s.earnedBadges?.length || 0, peerBadgeEval.unlockedBadges.length);
+    let unlockedBadges: StudentBadge[] = peerBadgeEval.unlockedBadges;
+    let xp = Math.max(s.xp || 0, s.bestTotalXP || 0, peerBadgeEval.totalXP);
+    let finalStreak = streak;
 
     if (isCurrent) {
       xp = Math.max(xp, currentStudentEvaluatedXP);
-      streak = Math.max(streak, currentStudentStreak);
+      finalStreak = Math.max(finalStreak, currentStudentStreak);
       badgesCount = Math.max(badgesCount, currentStudentBadgesCount);
       decks = Math.max(decks, currentStudentDecks);
       totalScore = Math.max(totalScore, currentStudentTotalQuizScore);
       quizCount = Math.max(quizCount, currentStudentQuizzesCount);
-      unlockedBadges = currentStudentUnlockedBadges;
-    } else if (xp === 0) {
-      xp = (decks * 50) + (totalScore * 15) + (streak * 25) + (badgesCount * 120);
+      if (currentStudentUnlockedBadges.length >= unlockedBadges.length) {
+        unlockedBadges = currentStudentUnlockedBadges;
+      }
     }
 
     const featuredBadgeDef = BADGE_DEFINITIONS.find(b => b.id === (s.featuredBadgeId || 'streak_1'));
@@ -186,7 +228,7 @@ export async function getClassStudentLeaderboard(
       tier: s.tier || 'Extended',
       xp,
       rank: 0,
-      streakDays: streak,
+      streakDays: finalStreak,
       completedLessonsCount: decks,
       badgesCount,
       totalQuizScore: totalScore,

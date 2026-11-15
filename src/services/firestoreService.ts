@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebaseAuth';
 import { UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, SubtopicSlideProgress, QuizLengthRecord, ScienceSubject, ExamTier, ClassTask, TaskSubmission, TaskWithSubmission, TaskProgressStatus } from '../types';
+import { evaluateStudentBadges } from './badgeService';
 
 // The owner/primary educator email who always has instructor access
 export const INITIAL_INSTRUCTOR_EMAILS = [
@@ -82,12 +83,18 @@ export interface ClassStudentItem {
   trafficLights: Record<string, TrafficLightStatus>;
   weakTopics: string[];
   badgesCount?: number;
+  earnedBadges?: { badgeId: string; unlockedAt: string }[];
   totalQuizScore?: number;
+  cumulativeQuizPoints?: number;
+  cumulativeQuizzesCount?: number;
   quizzesCompletedCount?: number;
   xp?: number;
+  bestTotalXP?: number;
   featuredBadgeId?: string;
   streakDays?: number;
 }
+
+const hydratedRemoteMaxByClassStudent = new Map<string, Partial<ClassStudentItem>>();
 
 export interface InstructorInviteItem {
   id: string;
@@ -1056,37 +1063,144 @@ export async function syncStudentProgressToClasses(
 
   const subScores = Object.values(progress.subtopicQuizScores || {});
   const mainScores = Object.values(progress.quizScores || {});
-  const totalQuizScore = subScores.reduce((acc, s) => acc + (s.score || 0), 0) + mainScores.reduce((acc, q) => acc + (q.score || 0), 0);
-  const quizzesCompletedCount = subScores.length + mainScores.length;
+  const lengthRecords = Object.values(progress.practiceQuizByLength || {});
+  const lengthDates = new Set(lengthRecords.map(r => r?.date).filter(Boolean));
+  const unrecordedMain = mainScores.filter(q => q && !lengthDates.has(q.date));
+
+  const legacyQuizSum =
+    subScores.reduce((acc, s) => acc + (s?.score || 0), 0) +
+    mainScores.reduce((acc, q) => acc + (q?.score || 0), 0);
+  const lengthAwareSum =
+    subScores.reduce((acc, s) => acc + (s?.score || 0), 0) +
+    lengthRecords.reduce((acc, r) => acc + (r?.score || 0), 0) +
+    unrecordedMain.reduce((acc, q) => acc + (q?.score || 0), 0);
+
+  const badgeEval = evaluateStudentBadges(progress, student);
 
   for (const classId of enrolledClassIds) {
     // Update local cache
     const studentKey = `${LOCAL_STUDENTS_PREFIX}${classId}`;
     const localStudents = getLocalItem<ClassStudentItem[]>(studentKey, []);
     const idx = localStudents.findIndex(s => s.studentId === student.id);
+    const existingLocal = idx >= 0 ? localStudents[idx] : undefined;
+
+    // Fetch existing Firestore record at most once per session so cross-device high scores are never overwritten
+    const cacheKey = `${classId}_${student.id}`;
+    let remoteMax = hydratedRemoteMaxByClassStudent.get(cacheKey);
+    if (!remoteMax) {
+      try {
+        const studentDocRef = doc(db, 'classes', classId, 'students', student.id);
+        const snap = await getDoc(studentDocRef);
+        if (snap.exists()) {
+          remoteMax = snap.data() as ClassStudentItem;
+        } else {
+          remoteMax = {};
+        }
+      } catch {
+        remoteMax = {};
+      }
+      hydratedRemoteMaxByClassStudent.set(cacheKey, remoteMax);
+    }
+
+    const totalQuizScore = Math.max(
+      remoteMax.totalQuizScore || 0,
+      remoteMax.cumulativeQuizPoints || 0,
+      existingLocal?.totalQuizScore || 0,
+      existingLocal?.cumulativeQuizPoints || 0,
+      progress.cumulativeQuizPoints || 0,
+      legacyQuizSum,
+      lengthAwareSum
+    );
+    const quizzesCompletedCount = Math.max(
+      remoteMax.quizzesCompletedCount || 0,
+      remoteMax.cumulativeQuizzesCount || 0,
+      existingLocal?.quizzesCompletedCount || 0,
+      existingLocal?.cumulativeQuizzesCount || 0,
+      progress.cumulativeQuizzesCount || 0,
+      subScores.length + mainScores.length,
+      subScores.length + lengthRecords.length + unrecordedMain.length
+    );
+
+    const badgeMap = new Map<string, string>();
+    (remoteMax.earnedBadges || []).forEach(b => { if (b?.badgeId) badgeMap.set(b.badgeId, b.unlockedAt); });
+    (existingLocal?.earnedBadges || []).forEach(b => { if (b?.badgeId) badgeMap.set(b.badgeId, b.unlockedAt); });
+    (progress.earnedBadges || []).forEach(b => { if (b?.badgeId) badgeMap.set(b.badgeId, b.unlockedAt); });
+    badgeEval.unlockedBadges.forEach(b => {
+      if (!badgeMap.has(b.id)) badgeMap.set(b.id, b.unlockedAt || new Date().toISOString());
+    });
+    const mergedEarnedBadges = Array.from(badgeMap.entries()).map(([badgeId, unlockedAt]) => ({ badgeId, unlockedAt }));
+
+    const badgesCount = Math.max(
+      remoteMax.badgesCount || 0,
+      existingLocal?.badgesCount || 0,
+      mergedEarnedBadges.length,
+      badgeEval.unlockedBadges.length
+    );
+    const monotonicXP = Math.max(
+      remoteMax.xp || 0,
+      remoteMax.bestTotalXP || 0,
+      existingLocal?.xp || 0,
+      existingLocal?.bestTotalXP || 0,
+      progress.bestTotalXP || 0,
+      badgeEval.totalXP,
+      student.xp || 0
+    );
+    const completedLessonsCount = Math.max(
+      remoteMax.completedLessonsCount || 0,
+      existingLocal?.completedLessonsCount || 0,
+      completedDecks.length
+    );
+
+    const mergedQuizScores: Record<string, { score: number; total: number; date: string }> = {
+      ...(remoteMax.quizScores || {}),
+      ...(existingLocal?.quizScores || {})
+    };
+    Object.entries(progress.quizScores || {}).forEach(([subj, nextRec]) => {
+      const prevRec = mergedQuizScores[subj];
+      if (!prevRec) {
+        mergedQuizScores[subj] = nextRec;
+      } else {
+        const prevPct = prevRec.score / Math.max(1, prevRec.total);
+        const nextPct = nextRec.score / Math.max(1, nextRec.total);
+        if (nextPct > prevPct || (nextPct === prevPct && nextRec.score >= prevRec.score)) {
+          mergedQuizScores[subj] = nextRec;
+        }
+      }
+    });
+
     const updatedRecord: ClassStudentItem = {
       studentId: student.id,
       name: student.name,
       email: student.email,
       tier: student.tier,
-      joinedAt: idx >= 0 ? localStudents[idx].joinedAt : new Date().toISOString(),
+      joinedAt: existingLocal?.joinedAt || remoteMax.joinedAt || new Date().toISOString(),
       lastActive: new Date().toISOString(),
-      completedLessonsCount: completedDecks.length,
+      completedLessonsCount,
       completedLessons: completedDecks,
       slidesReadBySubtopic: progress.slidesReadBySubtopic || {},
-      quizScores: progress.quizScores || {},
-      practiceQuizByLength: progress.practiceQuizByLength || {},
+      quizScores: mergedQuizScores,
+      practiceQuizByLength: {
+        ...(remoteMax.practiceQuizByLength || {}),
+        ...(existingLocal?.practiceQuizByLength || {}),
+        ...(progress.practiceQuizByLength || {})
+      },
       subtopicQuizScores: progress.subtopicQuizScores || {},
       topicConfidence: progress.topicConfidence || {},
       trafficLights: progress.trafficLights || {},
       weakTopics,
       totalQuizScore,
+      cumulativeQuizPoints: totalQuizScore,
       quizzesCompletedCount,
-      badgesCount: progress.earnedBadges?.length || (localStudents[idx]?.badgesCount || 0),
+      cumulativeQuizzesCount: quizzesCompletedCount,
+      badgesCount,
+      earnedBadges: mergedEarnedBadges,
       featuredBadgeId: progress.featuredBadgeId || student.featuredBadgeId,
-      streakDays: progress.currentStreak || 1,
-      xp: student.xp || 0
+      streakDays: Math.max(progress.currentStreak || 1, existingLocal?.streakDays || 1, remoteMax.streakDays || 1),
+      xp: monotonicXP,
+      bestTotalXP: monotonicXP
     };
+
+    hydratedRemoteMaxByClassStudent.set(cacheKey, updatedRecord);
 
     if (idx >= 0) {
       localStudents[idx] = updatedRecord;

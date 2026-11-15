@@ -229,6 +229,9 @@ export interface StudentProgress {
   activeDates?: string[];
   earnedBadges?: { badgeId: string; unlockedAt: string }[];
   featuredBadgeId?: string;
+  cumulativeQuizPoints?: number;
+  cumulativeQuizzesCount?: number;
+  bestTotalXP?: number;
 }
 
 export interface LeaderboardEntry {

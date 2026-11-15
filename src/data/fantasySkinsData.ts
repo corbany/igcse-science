@@ -1,4 +1,4 @@
-import { ItemRarity, ShopItem } from '../services/firebaseGameService';
+import type { ItemRarity, ShopItem } from '../services/firebaseGameService';
 
 export interface FrameRect {
   x: number;
@@ -757,10 +757,10 @@ export const FANTASY_SKIN_ALIASES: Record<string, string> = {
   bloodskeleton: 'cultist',
   shadowgoblin: 'rogue',
   fireorc: 'dragon_slayer',
-  orc: 'berserker',
+  orc: 'dragon_slayer',
   villager: 'discoverer',
   mage: 'white_mage',
-  berserker: 'orc',
+  berserker: 'dark_knight',
   archangel: 'knight_hero',
 
   // Legacy student avatar aliases

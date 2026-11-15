@@ -39,9 +39,14 @@ import {
   ArrowRightLeft,
   Swords,
   Edit3,
-  Trophy
+  Trophy,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  ClipboardCheck
 } from 'lucide-react';
 import { InstructorTasksManager } from './InstructorTasksManager';
+import { TaskAnalyticsPage } from './TaskAnalyticsPage';
 import { 
   getActiveGoogleSlideSubtopics, 
   saveGoogleSlidesOverride, 
@@ -112,7 +117,7 @@ interface InstructorDashboardProps {
   onNavigateToLessons?: () => void;
   onNavigateToRoyale?: () => void;
   onNavigateToLeaderboard?: () => void;
-  initialTab?: 'classes' | 'tasks' | 'cohort' | 'roster' | 'invites' | 'drive' | 'slides';
+  initialTab?: 'classes' | 'tasks' | 'task_analytics' | 'cohort' | 'roster' | 'invites' | 'drive' | 'slides';
 }
 
 export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({ 
@@ -123,7 +128,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   onNavigateToLeaderboard,
   initialTab = 'classes'
 }) => {
-  const [dashboardTab, setDashboardTab] = useState<'classes' | 'tasks' | 'cohort' | 'roster' | 'invites' | 'drive' | 'slides'>(() => {
+  const [dashboardTab, setDashboardTab] = useState<'classes' | 'tasks' | 'task_analytics' | 'cohort' | 'roster' | 'invites' | 'drive' | 'slides'>(() => {
     return (initialTab === 'cohort' || initialTab === 'roster') ? 'cohort' : initialTab;
   });
 
@@ -150,6 +155,56 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   // Student individual analysis modal state
   const [selectedStudentForAnalysis, setSelectedStudentForAnalysis] = useState<ClassStudentItem | null>(null);
   const [analysisSubjectFilter, setAnalysisSubjectFilter] = useState<'all' | 'biology' | 'chemistry' | 'physics'>('all');
+  const [modalQuizSort, setModalQuizSort] = useState<{ column: 'topic' | 'subject' | 'score' | 'percentage' | 'result' | 'date' | null; direction: 'asc' | 'desc' }>({ column: null, direction: 'asc' });
+  const [modalQuizFilters, setModalQuizFilters] = useState<{ topic: string; result: 'all' | 'passed' | 'review'; scoreRange: 'all' | 'high' | 'mid' | 'low' }>({
+    topic: '',
+    result: 'all',
+    scoreRange: 'all'
+  });
+
+  // Class Analysis (Enrolled Students table) per-column sort & filter state
+  type ClassSortCol = 'name' | 'tier' | 'decks' | 'syllabus' | 'trafficLights' | 'quizScores' | 'weakTopics' | 'lastActive';
+  const [classSort, setClassSort] = useState<{ column: ClassSortCol | null; direction: 'asc' | 'desc' }>({ column: null, direction: 'asc' });
+  const [classColFilters, setClassColFilters] = useState<{
+    student: string;
+    tier: 'all' | 'Core' | 'Extended';
+    decks: 'all' | 'zero' | 'low' | 'mid' | 'high';
+    syllabus: 'all' | 'zero' | 'low' | 'mid' | 'high';
+    trafficLights: 'all' | 'has_green' | 'has_amber' | 'has_red' | 'unrated';
+    quizScores: 'all' | 'high' | 'mid' | 'low' | 'none' | 'has_bio' | 'has_chem' | 'has_phys';
+    weakTopics: string;
+    lastActive: 'all' | 'today' | 'week' | 'month' | 'older';
+  }>({
+    student: '',
+    tier: 'all',
+    decks: 'all',
+    syllabus: 'all',
+    trafficLights: 'all',
+    quizScores: 'all',
+    weakTopics: '',
+    lastActive: 'all'
+  });
+
+  // Cohort / Student Analysis table per-column sort & filter state
+  type CohortSortCol = 'name' | 'tier' | 'slideDecks' | 'syllabusPct' | 'bioScore' | 'chemScore' | 'physScore' | 'weakArea' | 'status';
+  const [cohortSort, setCohortSort] = useState<{ column: CohortSortCol | null; direction: 'asc' | 'desc' }>({ column: null, direction: 'asc' });
+  const [cohortColFilters, setCohortColFilters] = useState<{
+    name: string;
+    slideDecks: 'all' | 'zero' | 'low' | 'mid' | 'high';
+    syllabusPct: 'all' | 'zero' | 'low' | 'mid' | 'high';
+    bioScore: 'all' | 'high' | 'mid' | 'low' | 'zero';
+    chemScore: 'all' | 'high' | 'mid' | 'low' | 'zero';
+    physScore: 'all' | 'high' | 'mid' | 'low' | 'zero';
+    weakArea: string;
+  }>({
+    name: '',
+    slideDecks: 'all',
+    syllabusPct: 'all',
+    bioScore: 'all',
+    chemScore: 'all',
+    physScore: 'all',
+    weakArea: ''
+  });
 
   // Create class modal state
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
@@ -347,11 +402,23 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
     setShowMoveModal(true);
   };
 
-  const toggleSelectAllStudents = () => {
-    if (selectedStudentIdsForBatch.size === classStudents.length) {
-      setSelectedStudentIdsForBatch(new Set());
+  const toggleSelectAllStudents = (visibleStudentIds?: string[]) => {
+    const targetIds = visibleStudentIds && visibleStudentIds.length > 0
+      ? visibleStudentIds
+      : classStudents.map(s => s.studentId);
+    const allSelected = targetIds.length > 0 && targetIds.every(id => selectedStudentIdsForBatch.has(id));
+    if (allSelected) {
+      setSelectedStudentIdsForBatch(prev => {
+        const next = new Set(prev);
+        targetIds.forEach(id => next.delete(id));
+        return next;
+      });
     } else {
-      setSelectedStudentIdsForBatch(new Set(classStudents.map(s => s.studentId)));
+      setSelectedStudentIdsForBatch(prev => {
+        const next = new Set(prev);
+        targetIds.forEach(id => next.add(id));
+        return next;
+      });
     }
   };
 
@@ -710,13 +777,322 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
     });
   }, [classStudents]);
 
-  const filteredStudents = rosterStudents.filter(student => {
-    const matchSearch = student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      student.weakArea.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchTier = tierFilter === 'all' || student.tier === tierFilter;
-    const matchStatus = statusFilter === 'all' || student.status === statusFilter;
-    return matchSearch && matchTier && matchStatus;
-  });
+  const isClassNumericCol = (col: ClassSortCol) =>
+    col === 'decks' || col === 'syllabus' || col === 'trafficLights' || col === 'quizScores' || col === 'weakTopics' || col === 'lastActive';
+
+  const toggleClassSort = (col: ClassSortCol) => {
+    const firstDir: 'asc' | 'desc' = isClassNumericCol(col) ? 'desc' : 'asc';
+    const secondDir: 'asc' | 'desc' = firstDir === 'asc' ? 'desc' : 'asc';
+    setClassSort(prev => {
+      if (prev.column !== col) return { column: col, direction: firstDir };
+      if (prev.direction === firstDir) return { column: col, direction: secondDir };
+      return { column: null, direction: 'asc' };
+    });
+  };
+
+  const setClassColumnOrder = (col: ClassSortCol, value: string) => {
+    if (value === 'default') {
+      if (classSort.column === col) setClassSort({ column: null, direction: 'asc' });
+    } else {
+      setClassSort({ column: col, direction: value as 'asc' | 'desc' });
+    }
+  };
+
+  const resetClassFiltersAndSort = () => {
+    setClassSort({ column: null, direction: 'asc' });
+    setClassColFilters({
+      student: '',
+      tier: 'all',
+      decks: 'all',
+      syllabus: 'all',
+      trafficLights: 'all',
+      quizScores: 'all',
+      weakTopics: '',
+      lastActive: 'all'
+    });
+  };
+
+  const hasActiveClassFiltersOrSort =
+    classSort.column !== null ||
+    classColFilters.student.trim() !== '' ||
+    classColFilters.tier !== 'all' ||
+    classColFilters.decks !== 'all' ||
+    classColFilters.syllabus !== 'all' ||
+    classColFilters.trafficLights !== 'all' ||
+    classColFilters.quizScores !== 'all' ||
+    classColFilters.weakTopics.trim() !== '' ||
+    classColFilters.lastActive !== 'all';
+
+  const enrichedClassStudents = useMemo(() => {
+    return classStudents.map(std => {
+      const bioPct = std.quizScores?.biology && std.quizScores.biology.total > 0
+        ? Math.round((std.quizScores.biology.score / std.quizScores.biology.total) * 100)
+        : null;
+      const chemPct = std.quizScores?.chemistry && std.quizScores.chemistry.total > 0
+        ? Math.round((std.quizScores.chemistry.score / std.quizScores.chemistry.total) * 100)
+        : null;
+      const physPct = std.quizScores?.physics && std.quizScores.physics.total > 0
+        ? Math.round((std.quizScores.physics.score / std.quizScores.physics.total) * 100)
+        : null;
+      const takenScores = [bioPct, chemPct, physPct].filter((v): v is number => v !== null);
+      const avgQuizPct = takenScores.length > 0
+        ? Math.round(takenScores.reduce((a, b) => a + b, 0) / takenScores.length)
+        : null;
+
+      const studentDecksSet = new Set<string>([
+        ...(std.completedLessons || []),
+        ...Object.keys(std.trafficLights || {}),
+        ...Object.keys(std.subtopicQuizScores || {})
+      ]);
+      const decksCompleted = Math.max(std.completedLessonsCount || 0, studentDecksSet.size);
+      const slideDeckPct = Math.min(100, Math.round((decksCompleted / 106) * 100));
+      const syllabusPct = Math.min(100, Math.round((studentDecksSet.size / 106) * 100));
+
+      const greenCount = Object.values(std.trafficLights || {}).filter(t => t === 'green').length;
+      const orangeCount = Object.values(std.trafficLights || {}).filter(t => t === 'orange').length;
+      const redCount = Object.values(std.trafficLights || {}).filter(t => t === 'red').length;
+      const totalTL = greenCount + orangeCount + redCount;
+      const lastActiveMs = std.lastActive ? new Date(std.lastActive).getTime() : 0;
+
+      return {
+        std,
+        bioPct,
+        chemPct,
+        physPct,
+        avgQuizPct,
+        decksCompleted,
+        slideDeckPct,
+        syllabusPct,
+        greenCount,
+        orangeCount,
+        redCount,
+        totalTL,
+        lastActiveMs: Number.isFinite(lastActiveMs) ? lastActiveMs : 0
+      };
+    });
+  }, [classStudents]);
+
+  const displayedClassStudents = useMemo(() => {
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    const filtered = enrichedClassStudents.filter(row => {
+      const { std } = row;
+      if (classColFilters.student.trim()) {
+        const q = classColFilters.student.toLowerCase();
+        const matchName = (std.name || '').toLowerCase().includes(q);
+        const matchEmail = (std.email || '').toLowerCase().includes(q);
+        if (!matchName && !matchEmail) return false;
+      }
+      if (classColFilters.tier !== 'all' && (std.tier || 'Extended') !== classColFilters.tier) {
+        return false;
+      }
+      if (classColFilters.decks !== 'all') {
+        if (classColFilters.decks === 'zero' && row.decksCompleted !== 0) return false;
+        if (classColFilters.decks === 'low' && (row.slideDeckPct < 1 || row.slideDeckPct > 25)) return false;
+        if (classColFilters.decks === 'mid' && (row.slideDeckPct < 26 || row.slideDeckPct > 74)) return false;
+        if (classColFilters.decks === 'high' && row.slideDeckPct < 75) return false;
+      }
+      if (classColFilters.syllabus !== 'all') {
+        if (classColFilters.syllabus === 'zero' && row.syllabusPct !== 0) return false;
+        if (classColFilters.syllabus === 'low' && (row.syllabusPct < 1 || row.syllabusPct > 34)) return false;
+        if (classColFilters.syllabus === 'mid' && (row.syllabusPct < 35 || row.syllabusPct > 74)) return false;
+        if (classColFilters.syllabus === 'high' && row.syllabusPct < 75) return false;
+      }
+      if (classColFilters.trafficLights !== 'all') {
+        if (classColFilters.trafficLights === 'has_green' && row.greenCount === 0) return false;
+        if (classColFilters.trafficLights === 'has_amber' && row.orangeCount === 0) return false;
+        if (classColFilters.trafficLights === 'has_red' && row.redCount === 0) return false;
+        if (classColFilters.trafficLights === 'unrated' && row.totalTL > 0) return false;
+      }
+      if (classColFilters.quizScores !== 'all') {
+        if (classColFilters.quizScores === 'none' && row.avgQuizPct !== null) return false;
+        if (classColFilters.quizScores === 'high' && (row.avgQuizPct === null || row.avgQuizPct < 80)) return false;
+        if (classColFilters.quizScores === 'mid' && (row.avgQuizPct === null || row.avgQuizPct < 50 || row.avgQuizPct >= 80)) return false;
+        if (classColFilters.quizScores === 'low' && (row.avgQuizPct === null || row.avgQuizPct >= 50)) return false;
+        if (classColFilters.quizScores === 'has_bio' && row.bioPct === null) return false;
+        if (classColFilters.quizScores === 'has_chem' && row.chemPct === null) return false;
+        if (classColFilters.quizScores === 'has_phys' && row.physPct === null) return false;
+      }
+      if (classColFilters.weakTopics.trim()) {
+        const q = classColFilters.weakTopics.toLowerCase();
+        const weakText = (std.weakTopics && std.weakTopics.length > 0 ? std.weakTopics.join(', ') : 'none flagged').toLowerCase();
+        if (!weakText.includes(q)) return false;
+      }
+      if (classColFilters.lastActive !== 'all') {
+        const diff = row.lastActiveMs ? now - row.lastActiveMs : Infinity;
+        if (classColFilters.lastActive === 'today' && diff > dayMs) return false;
+        if (classColFilters.lastActive === 'week' && diff > 7 * dayMs) return false;
+        if (classColFilters.lastActive === 'month' && diff > 30 * dayMs) return false;
+        if (classColFilters.lastActive === 'older' && diff <= 30 * dayMs) return false;
+      }
+      return true;
+    });
+
+    if (!classSort.column) return filtered;
+
+    const dir = classSort.direction === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      switch (classSort.column) {
+        case 'name':
+          return dir * (a.std.name || '').localeCompare(b.std.name || '', undefined, { sensitivity: 'base' });
+        case 'tier':
+          return dir * (a.std.tier || 'Extended').localeCompare(b.std.tier || 'Extended');
+        case 'decks':
+          return dir * (a.decksCompleted - b.decksCompleted);
+        case 'syllabus':
+          return dir * (a.syllabusPct - b.syllabusPct);
+        case 'trafficLights': {
+          const scoreA = a.greenCount * 10000 + a.orangeCount * 100 - a.redCount;
+          const scoreB = b.greenCount * 10000 + b.orangeCount * 100 - b.redCount;
+          return dir * (scoreA - scoreB);
+        }
+        case 'quizScores':
+          return dir * ((a.avgQuizPct ?? -1) - (b.avgQuizPct ?? -1));
+        case 'weakTopics': {
+          const lenA = a.std.weakTopics?.length || 0;
+          const lenB = b.std.weakTopics?.length || 0;
+          if (lenA !== lenB) return dir * (lenA - lenB);
+          return dir * (a.std.weakTopics?.join(', ') || '').localeCompare(b.std.weakTopics?.join(', ') || '');
+        }
+        case 'lastActive':
+          return dir * (a.lastActiveMs - b.lastActiveMs);
+        default:
+          return 0;
+      }
+    });
+  }, [enrichedClassStudents, classColFilters, classSort]);
+
+  const isCohortNumericCol = (col: CohortSortCol) =>
+    col === 'slideDecks' || col === 'syllabusPct' || col === 'bioScore' || col === 'chemScore' || col === 'physScore';
+
+  const toggleCohortSort = (col: CohortSortCol) => {
+    const firstDir: 'asc' | 'desc' = isCohortNumericCol(col) ? 'desc' : 'asc';
+    const secondDir: 'asc' | 'desc' = firstDir === 'asc' ? 'desc' : 'asc';
+    setCohortSort(prev => {
+      if (prev.column !== col) return { column: col, direction: firstDir };
+      if (prev.direction === firstDir) return { column: col, direction: secondDir };
+      return { column: null, direction: 'asc' };
+    });
+  };
+
+  const setCohortColumnOrder = (col: CohortSortCol, value: string) => {
+    if (value === 'default') {
+      if (cohortSort.column === col) setCohortSort({ column: null, direction: 'asc' });
+    } else {
+      setCohortSort({ column: col, direction: value as 'asc' | 'desc' });
+    }
+  };
+
+  const resetCohortFiltersAndSort = () => {
+    setCohortSort({ column: null, direction: 'asc' });
+    setSearchTerm('');
+    setTierFilter('all');
+    setStatusFilter('all');
+    setCohortColFilters({
+      name: '',
+      slideDecks: 'all',
+      syllabusPct: 'all',
+      bioScore: 'all',
+      chemScore: 'all',
+      physScore: 'all',
+      weakArea: ''
+    });
+  };
+
+  const hasActiveCohortFiltersOrSort =
+    cohortSort.column !== null ||
+    searchTerm.trim() !== '' ||
+    tierFilter !== 'all' ||
+    statusFilter !== 'all' ||
+    cohortColFilters.name.trim() !== '' ||
+    cohortColFilters.slideDecks !== 'all' ||
+    cohortColFilters.syllabusPct !== 'all' ||
+    cohortColFilters.bioScore !== 'all' ||
+    cohortColFilters.chemScore !== 'all' ||
+    cohortColFilters.physScore !== 'all' ||
+    cohortColFilters.weakArea.trim() !== '';
+
+  const matchScoreRangeFilter = (val: number, filterVal: 'all' | 'high' | 'mid' | 'low' | 'zero') => {
+    if (filterVal === 'all') return true;
+    if (filterVal === 'high') return val >= 80;
+    if (filterVal === 'mid') return val >= 50 && val < 80;
+    if (filterVal === 'low') return val >= 1 && val < 50;
+    if (filterVal === 'zero') return val === 0;
+    return true;
+  };
+
+  const filteredStudents = useMemo(() => {
+    const filtered = rosterStudents.filter(student => {
+      const matchSearch = !searchTerm.trim() ||
+        student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        student.weakArea.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchNameCol = !cohortColFilters.name.trim() ||
+        student.name.toLowerCase().includes(cohortColFilters.name.toLowerCase());
+      const matchTier = tierFilter === 'all' || student.tier === tierFilter;
+      const matchStatus = statusFilter === 'all' || student.status === statusFilter;
+
+      const matchDecks =
+        cohortColFilters.slideDecks === 'all' ||
+        (cohortColFilters.slideDecks === 'zero' && student.slideDeckCount === 0) ||
+        (cohortColFilters.slideDecks === 'low' && student.slideDeckPct >= 1 && student.slideDeckPct <= 25) ||
+        (cohortColFilters.slideDecks === 'mid' && student.slideDeckPct >= 26 && student.slideDeckPct <= 74) ||
+        (cohortColFilters.slideDecks === 'high' && student.slideDeckPct >= 75);
+
+      const matchSyllabus =
+        cohortColFilters.syllabusPct === 'all' ||
+        (cohortColFilters.syllabusPct === 'zero' && student.syllabusPct === 0) ||
+        (cohortColFilters.syllabusPct === 'low' && student.syllabusPct >= 1 && student.syllabusPct <= 34) ||
+        (cohortColFilters.syllabusPct === 'mid' && student.syllabusPct >= 35 && student.syllabusPct <= 74) ||
+        (cohortColFilters.syllabusPct === 'high' && student.syllabusPct >= 75);
+
+      const matchBio = matchScoreRangeFilter(student.bioScore, cohortColFilters.bioScore);
+      const matchChem = matchScoreRangeFilter(student.chemScore, cohortColFilters.chemScore);
+      const matchPhys = matchScoreRangeFilter(student.physScore, cohortColFilters.physScore);
+      const matchWeakCol = !cohortColFilters.weakArea.trim() ||
+        student.weakArea.toLowerCase().includes(cohortColFilters.weakArea.toLowerCase());
+
+      return matchSearch && matchNameCol && matchTier && matchStatus && matchDecks && matchSyllabus && matchBio && matchChem && matchPhys && matchWeakCol;
+    });
+
+    if (!cohortSort.column) return filtered;
+
+    const dir = cohortSort.direction === 'asc' ? 1 : -1;
+    const statusRank: Record<StudentRosterItem['status'], number> = {
+      'Intervention Required': 0,
+      'On Track': 1,
+      'Excelling': 2
+    };
+
+    return [...filtered].sort((a, b) => {
+      switch (cohortSort.column) {
+        case 'name':
+          return dir * a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+        case 'tier':
+          return dir * a.tier.localeCompare(b.tier);
+        case 'slideDecks':
+          return dir * (a.slideDeckCount - b.slideDeckCount);
+        case 'syllabusPct':
+          return dir * (a.syllabusPct - b.syllabusPct);
+        case 'bioScore':
+          return dir * (a.bioScore - b.bioScore);
+        case 'chemScore':
+          return dir * (a.chemScore - b.chemScore);
+        case 'physScore':
+          return dir * (a.physScore - b.physScore);
+        case 'weakArea': {
+          const noneA = a.weakArea === 'None identified' ? 0 : 1;
+          const noneB = b.weakArea === 'None identified' ? 0 : 1;
+          if (noneA !== noneB) return dir * (noneA - noneB);
+          return dir * a.weakArea.localeCompare(b.weakArea, undefined, { sensitivity: 'base' });
+        }
+        case 'status':
+          return dir * (statusRank[a.status] - statusRank[b.status]);
+        default:
+          return 0;
+      }
+    });
+  }, [rosterStudents, searchTerm, tierFilter, statusFilter, cohortColFilters, cohortSort]);
 
   const filteredSlides = slidesSubtopics.filter(s => {
     if (!slidesSearchTerm.trim()) return true;
@@ -865,6 +1241,18 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         >
           <Calendar className="w-4 h-4" />
           <span>Class Tasks & Homework</span>
+        </button>
+
+        <button
+          onClick={() => setDashboardTab('task_analytics')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            dashboardTab === 'task_analytics'
+              ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-xs border border-black dark:border-white'
+              : 'bg-white dark:bg-black text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-900'
+          }`}
+        >
+          <ClipboardCheck className="w-4 h-4" />
+          <span>Task Analytics</span>
         </button>
 
         <button
@@ -1256,6 +1644,28 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                           </div>
                         )}
 
+                        {/* Filter Summary & Reset Bar */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
+                          <span className="text-slate-600 dark:text-slate-400 font-medium">
+                            Showing <strong className="text-slate-900 dark:text-white">{displayedClassStudents.length}</strong> of <strong className="text-slate-900 dark:text-white">{classStudents.length}</strong> student{classStudents.length === 1 ? '' : 's'}
+                            {classSort.column && (
+                              <span className="ml-2 text-[11px] text-slate-500 dark:text-slate-400">
+                                • Ordered by <strong className="text-slate-800 dark:text-slate-200">{classSort.column}</strong> ({isClassNumericCol(classSort.column) ? (classSort.direction === 'desc' ? 'High → Low' : 'Low → High') : (classSort.direction === 'asc' ? 'A → Z' : 'Z → A')})
+                              </span>
+                            )}
+                          </span>
+                          {hasActiveClassFiltersOrSort && (
+                            <button
+                              type="button"
+                              onClick={resetClassFiltersAndSort}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#FDFBF7] dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-zinc-700 text-[11px] font-bold transition"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>Reset Filters &amp; Order</span>
+                            </button>
+                          )}
+                        </div>
+
                         <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-zinc-800">
                           <table className="min-w-full text-xs text-left text-slate-800 dark:text-slate-200">
                             <thead className="bg-[#FDFBF7] dark:bg-zinc-900 text-slate-700 dark:text-slate-300 font-bold text-[11px] tracking-wider border-b border-slate-200 dark:border-zinc-800">
@@ -1263,42 +1673,280 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                                 <th className="p-3 w-8">
                                   <input
                                     type="checkbox"
-                                    checked={classStudents.length > 0 && selectedStudentIdsForBatch.size === classStudents.length}
-                                    onChange={toggleSelectAllStudents}
-                                    title="Select all students for batch action"
+                                    checked={displayedClassStudents.length > 0 && displayedClassStudents.every(r => selectedStudentIdsForBatch.has(r.std.studentId))}
+                                    onChange={() => toggleSelectAllStudents(displayedClassStudents.map(r => r.std.studentId))}
+                                    title="Select all visible students for batch action"
                                     className="rounded border-black dark:border-white bg-[#FDFBF7] dark:bg-black text-slate-900 w-3.5 h-3.5 cursor-pointer"
                                   />
                                 </th>
-                                <th className="p-3">Student</th>
-                                <th className="p-3">Tier</th>
-                                <th className="p-3">Slide Decks Completed</th>
-                                <th className="p-3">Syllabus %</th>
-                                <th className="p-3">Traffic Lights</th>
-                                <th className="p-3">Quiz Scores</th>
-                                <th className="p-3">Weak Topics</th>
-                                <th className="p-3">Last Active</th>
+                                <th className="p-3">
+                                  <button type="button" onClick={() => toggleClassSort('name')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                                    <span>Student</span>
+                                    {classSort.column === 'name' ? (
+                                      <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                        {classSort.direction === 'asc' ? 'A→Z' : 'Z→A'}
+                                      </span>
+                                    ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                                  </button>
+                                </th>
+                                <th className="p-3">
+                                  <button type="button" onClick={() => toggleClassSort('tier')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                                    <span>Tier</span>
+                                    {classSort.column === 'tier' ? (classSort.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                                  </button>
+                                </th>
+                                <th className="p-3">
+                                  <button type="button" onClick={() => toggleClassSort('decks')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                                    <span>Slide Decks Completed</span>
+                                    {classSort.column === 'decks' ? (
+                                      <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                        {classSort.direction === 'desc' ? 'Hi→Lo' : 'Lo→Hi'}
+                                      </span>
+                                    ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                                  </button>
+                                </th>
+                                <th className="p-3">
+                                  <button type="button" onClick={() => toggleClassSort('syllabus')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                                    <span>Syllabus %</span>
+                                    {classSort.column === 'syllabus' ? (
+                                      <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                        {classSort.direction === 'desc' ? 'Hi→Lo' : 'Lo→Hi'}
+                                      </span>
+                                    ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                                  </button>
+                                </th>
+                                <th className="p-3">
+                                  <button type="button" onClick={() => toggleClassSort('trafficLights')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                                    <span>Traffic Lights</span>
+                                    {classSort.column === 'trafficLights' ? (
+                                      <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                        {classSort.direction === 'desc' ? 'Hi→Lo' : 'Lo→Hi'}
+                                      </span>
+                                    ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                                  </button>
+                                </th>
+                                <th className="p-3">
+                                  <button type="button" onClick={() => toggleClassSort('quizScores')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                                    <span>Quiz Scores</span>
+                                    {classSort.column === 'quizScores' ? (
+                                      <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                        {classSort.direction === 'desc' ? 'Hi→Lo' : 'Lo→Hi'}
+                                      </span>
+                                    ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                                  </button>
+                                </th>
+                                <th className="p-3">
+                                  <button type="button" onClick={() => toggleClassSort('weakTopics')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                                    <span>Weak Topics</span>
+                                    {classSort.column === 'weakTopics' ? (
+                                      <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                        {classSort.direction === 'desc' ? 'Hi→Lo' : 'Lo→Hi'}
+                                      </span>
+                                    ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                                  </button>
+                                </th>
+                                <th className="p-3">
+                                  <button type="button" onClick={() => toggleClassSort('lastActive')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                                    <span>Last Active</span>
+                                    {classSort.column === 'lastActive' ? (classSort.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                                  </button>
+                                </th>
                                 <th className="p-3">Action</th>
+                              </tr>
+                              {/* Per-column inline filter & order row */}
+                              <tr className="bg-slate-50/90 dark:bg-zinc-950 border-t border-slate-200 dark:border-zinc-800 font-normal align-top">
+                                <th className="p-1.5 text-center pt-2.5">
+                                  <Filter className="w-3 h-3 text-slate-400 mx-auto" />
+                                </th>
+                                <th className="p-1.5 space-y-1">
+                                  <select
+                                    value={classSort.column === 'name' ? classSort.direction : 'default'}
+                                    onChange={e => setClassColumnOrder('name', e.target.value)}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                                  >
+                                    <option value="default">Order: Default</option>
+                                    <option value="asc">A → Z (Alphabetical)</option>
+                                    <option value="desc">Z → A (Reverse)</option>
+                                  </select>
+                                  <input
+                                    type="text"
+                                    value={classColFilters.student}
+                                    onChange={e => setClassColFilters(prev => ({ ...prev, student: e.target.value }))}
+                                    placeholder="Search name/email..."
+                                    className="w-full min-w-[115px] px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 font-medium"
+                                  />
+                                </th>
+                                <th className="p-1.5">
+                                  <select
+                                    value={classColFilters.tier}
+                                    onChange={e => setClassColFilters(prev => ({ ...prev, tier: e.target.value as any }))}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                                  >
+                                    <option value="all">All Tiers</option>
+                                    <option value="Core">Core</option>
+                                    <option value="Extended">Extended</option>
+                                  </select>
+                                </th>
+                                <th className="p-1.5 space-y-1">
+                                  <select
+                                    value={classSort.column === 'decks' ? classSort.direction : 'default'}
+                                    onChange={e => setClassColumnOrder('decks', e.target.value)}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                                  >
+                                    <option value="default">Order: Default</option>
+                                    <option value="desc">High → Low</option>
+                                    <option value="asc">Low → High</option>
+                                  </select>
+                                  <select
+                                    value={classColFilters.decks}
+                                    onChange={e => setClassColFilters(prev => ({ ...prev, decks: e.target.value as any }))}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                                  >
+                                    <option value="all">All Decks</option>
+                                    <option value="high">75–100%</option>
+                                    <option value="mid">26–74%</option>
+                                    <option value="low">1–25%</option>
+                                    <option value="zero">0 decks</option>
+                                  </select>
+                                </th>
+                                <th className="p-1.5 space-y-1">
+                                  <select
+                                    value={classSort.column === 'syllabus' ? classSort.direction : 'default'}
+                                    onChange={e => setClassColumnOrder('syllabus', e.target.value)}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                                  >
+                                    <option value="default">Order: Default</option>
+                                    <option value="desc">High → Low</option>
+                                    <option value="asc">Low → High</option>
+                                  </select>
+                                  <select
+                                    value={classColFilters.syllabus}
+                                    onChange={e => setClassColFilters(prev => ({ ...prev, syllabus: e.target.value as any }))}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                                  >
+                                    <option value="all">All %</option>
+                                    <option value="high">75–100%</option>
+                                    <option value="mid">35–74%</option>
+                                    <option value="low">1–34%</option>
+                                    <option value="zero">0%</option>
+                                  </select>
+                                </th>
+                                <th className="p-1.5 space-y-1">
+                                  <select
+                                    value={classSort.column === 'trafficLights' ? classSort.direction : 'default'}
+                                    onChange={e => setClassColumnOrder('trafficLights', e.target.value)}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                                  >
+                                    <option value="default">Order: Default</option>
+                                    <option value="desc">High → Low</option>
+                                    <option value="asc">Low → High</option>
+                                  </select>
+                                  <select
+                                    value={classColFilters.trafficLights}
+                                    onChange={e => setClassColFilters(prev => ({ ...prev, trafficLights: e.target.value as any }))}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                                  >
+                                    <option value="all">All Lights</option>
+                                    <option value="has_green">Has Green</option>
+                                    <option value="has_amber">Has Amber</option>
+                                    <option value="has_red">Has Red</option>
+                                    <option value="unrated">Unrated</option>
+                                  </select>
+                                </th>
+                                <th className="p-1.5 space-y-1">
+                                  <select
+                                    value={classSort.column === 'quizScores' ? classSort.direction : 'default'}
+                                    onChange={e => setClassColumnOrder('quizScores', e.target.value)}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                                  >
+                                    <option value="default">Order: Default</option>
+                                    <option value="desc">High → Low</option>
+                                    <option value="asc">Low → High</option>
+                                  </select>
+                                  <select
+                                    value={classColFilters.quizScores}
+                                    onChange={e => setClassColFilters(prev => ({ ...prev, quizScores: e.target.value as any }))}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                                  >
+                                    <option value="all">All Scores</option>
+                                    <option value="high">Avg ≥ 80%</option>
+                                    <option value="mid">Avg 50–79%</option>
+                                    <option value="low">Avg &lt; 50%</option>
+                                    <option value="has_bio">Has Bio</option>
+                                    <option value="has_chem">Has Chem</option>
+                                    <option value="has_phys">Has Phys</option>
+                                    <option value="none">No Quizzes</option>
+                                  </select>
+                                </th>
+                                <th className="p-1.5 space-y-1">
+                                  <select
+                                    value={classSort.column === 'weakTopics' ? classSort.direction : 'default'}
+                                    onChange={e => setClassColumnOrder('weakTopics', e.target.value)}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                                  >
+                                    <option value="default">Order: Default</option>
+                                    <option value="desc">Count: High → Low</option>
+                                    <option value="asc">Count: Low → High</option>
+                                  </select>
+                                  <input
+                                    type="text"
+                                    value={classColFilters.weakTopics}
+                                    onChange={e => setClassColFilters(prev => ({ ...prev, weakTopics: e.target.value }))}
+                                    placeholder="Filter topic / none..."
+                                    className="w-full min-w-[100px] px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 font-medium"
+                                  />
+                                </th>
+                                <th className="p-1.5 space-y-1">
+                                  <select
+                                    value={classSort.column === 'lastActive' ? classSort.direction : 'default'}
+                                    onChange={e => setClassColumnOrder('lastActive', e.target.value)}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                                  >
+                                    <option value="default">Order: Default</option>
+                                    <option value="desc">Newest → Oldest</option>
+                                    <option value="asc">Oldest → Newest</option>
+                                  </select>
+                                  <select
+                                    value={classColFilters.lastActive}
+                                    onChange={e => setClassColFilters(prev => ({ ...prev, lastActive: e.target.value as any }))}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                                  >
+                                    <option value="all">Any Time</option>
+                                    <option value="today">Last 24h</option>
+                                    <option value="week">Last 7d</option>
+                                    <option value="month">Last 30d</option>
+                                    <option value="older">&gt; 30d ago</option>
+                                  </select>
+                                </th>
+                                <th className="p-2">
+                                  {hasActiveClassFiltersOrSort && (
+                                    <button
+                                      type="button"
+                                      onClick={resetClassFiltersAndSort}
+                                      className="px-2 py-1 rounded-lg bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-[10px] font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition"
+                                    >
+                                      Clear
+                                    </button>
+                                  )}
+                                </th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200 dark:divide-zinc-800 bg-white dark:bg-black">
-                              {classStudents.map(std => {
+                              {displayedClassStudents.length === 0 ? (
+                                <tr>
+                                  <td colSpan={10} className="p-6 text-center text-xs text-slate-500 dark:text-slate-400">
+                                    No students match the selected column filters.{' '}
+                                    <button type="button" onClick={resetClassFiltersAndSort} className="underline font-bold text-slate-800 dark:text-slate-200">
+                                      Reset filters
+                                    </button>
+                                  </td>
+                                </tr>
+                              ) : displayedClassStudents.map(row => {
+                                const { std, bioPct, chemPct, physPct, decksCompleted, slideDeckPct, syllabusPct, greenCount, orangeCount, redCount } = row;
                                 const isSelected = selectedStudentIdsForBatch.has(std.studentId);
-                                const bioScore = std.quizScores?.biology ? Math.round((std.quizScores.biology.score / std.quizScores.biology.total) * 100) : '-';
-                                const chemScore = std.quizScores?.chemistry ? Math.round((std.quizScores.chemistry.score / std.quizScores.chemistry.total) * 100) : '-';
-                                const physScore = std.quizScores?.physics ? Math.round((std.quizScores.physics.score / std.quizScores.physics.total) * 100) : '-';
-
-                                const studentDecksSet = new Set<string>([
-                                  ...(std.completedLessons || []),
-                                  ...Object.keys(std.trafficLights || {}),
-                                  ...Object.keys(std.subtopicQuizScores || {})
-                                ]);
-                                const decksCompleted = Math.max(std.completedLessonsCount || 0, studentDecksSet.size);
-                                const slideDeckPct = Math.min(100, Math.round((decksCompleted / 106) * 100));
-                                const syllabusPct = Math.min(100, Math.round((studentDecksSet.size / 106) * 100));
-
-                                const greenCount = Object.values(std.trafficLights || {}).filter(t => t === 'green').length;
-                                const orangeCount = Object.values(std.trafficLights || {}).filter(t => t === 'orange').length;
-                                const redCount = Object.values(std.trafficLights || {}).filter(t => t === 'red').length;
+                                const bioScore = bioPct !== null ? bioPct : '-';
+                                const chemScore = chemPct !== null ? chemPct : '-';
+                                const physScore = physPct !== null ? physPct : '-';
 
                                 return (
                                   <tr key={std.studentId} className={`transition ${isSelected ? 'bg-[#EBF3F5] dark:bg-zinc-900/60' : 'hover:bg-slate-50 dark:hover:bg-zinc-900/40'}`}>
@@ -1442,6 +2090,23 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
           classes={classes}
           selectedClassId={selectedClass?.id}
           onNavigateToLessons={onNavigateToLessons}
+          onOpenTaskAnalytics={() => setDashboardTab('task_analytics')}
+        />
+      )}
+
+      {/* ============================================================= */}
+      {/* TAB: TASK COMPLETION ANALYTICS MATRIX                         */}
+      {/* ============================================================= */}
+      {dashboardTab === 'task_analytics' && (
+        <TaskAnalyticsPage
+          currentUser={currentUser}
+          classes={classes}
+          selectedClassId={selectedClass?.id}
+          onSelectClassId={(cid) => {
+            const match = classes.find(c => c.id === cid);
+            if (match) setSelectedClass(match);
+          }}
+          onNavigateToTasks={() => setDashboardTab('tasks')}
         />
       )}
 
@@ -1745,30 +2410,312 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                   )}
                 </p>
               </div>
-            ) : filteredStudents.length === 0 ? (
-              <div className="p-8 text-center bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl space-y-1">
-                <p className="text-sm font-bold text-slate-900 dark:text-white">No students match filter</p>
-                <p className="text-xs text-slate-500">Try adjusting your search query, tier filter, or status filter.</p>
-              </div>
             ) : (
-              <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-zinc-800">
-                <table className="min-w-full text-xs text-left text-slate-800 dark:text-slate-200">
-                  <thead className="bg-[#FDFBF7] dark:bg-zinc-900 text-slate-700 dark:text-slate-300 font-bold text-[11px] border-b border-slate-200 dark:border-zinc-800">
-                    <tr>
-                      <th className="p-3">Student Name</th>
-                      <th className="p-3">Tier</th>
-                      <th className="p-3">Slide Decks</th>
-                      <th className="p-3">Syllabus %</th>
-                      <th className="p-3">Biology</th>
-                      <th className="p-3">Chemistry</th>
-                      <th className="p-3">Physics</th>
-                      <th className="p-3">Priority Weak Topic</th>
-                      <th className="p-3">Status</th>
-                      <th className="p-3">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 dark:divide-zinc-800 bg-white dark:bg-black">
-                    {filteredStudents.map(std => {
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="text-slate-600 dark:text-slate-400 font-medium">
+                    Showing <strong className="text-slate-900 dark:text-white">{filteredStudents.length}</strong> of <strong className="text-slate-900 dark:text-white">{rosterStudents.length}</strong> student{rosterStudents.length === 1 ? '' : 's'}
+                    {cohortSort.column && (
+                      <span className="ml-2 text-[11px] text-slate-500 dark:text-slate-400">
+                        • Ordered by <strong className="text-slate-800 dark:text-slate-200">{cohortSort.column}</strong> ({isCohortNumericCol(cohortSort.column) ? (cohortSort.direction === 'desc' ? 'High → Low' : 'Low → High') : (cohortSort.direction === 'asc' ? 'A → Z' : 'Z → A')})
+                      </span>
+                    )}
+                  </span>
+                  {hasActiveCohortFiltersOrSort && (
+                    <button
+                      type="button"
+                      onClick={resetCohortFiltersAndSort}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#FDFBF7] dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-zinc-700 text-[11px] font-bold transition"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Reset Filters &amp; Order</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-zinc-800">
+                  <table className="min-w-full text-xs text-left text-slate-800 dark:text-slate-200">
+                    <thead className="bg-[#FDFBF7] dark:bg-zinc-900 text-slate-700 dark:text-slate-300 font-bold text-[11px] border-b border-slate-200 dark:border-zinc-800">
+                      <tr>
+                        <th className="p-3">
+                          <button type="button" onClick={() => toggleCohortSort('name')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                            <span>Student Name</span>
+                            {cohortSort.column === 'name' ? (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                {cohortSort.direction === 'asc' ? 'A→Z' : 'Z→A'}
+                              </span>
+                            ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                          </button>
+                        </th>
+                        <th className="p-3">
+                          <button type="button" onClick={() => toggleCohortSort('tier')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                            <span>Tier</span>
+                            {cohortSort.column === 'tier' ? (cohortSort.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                          </button>
+                        </th>
+                        <th className="p-3">
+                          <button type="button" onClick={() => toggleCohortSort('slideDecks')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                            <span>Slide Decks</span>
+                            {cohortSort.column === 'slideDecks' ? (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                {cohortSort.direction === 'desc' ? 'Hi→Lo' : 'Lo→Hi'}
+                              </span>
+                            ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                          </button>
+                        </th>
+                        <th className="p-3">
+                          <button type="button" onClick={() => toggleCohortSort('syllabusPct')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                            <span>Syllabus %</span>
+                            {cohortSort.column === 'syllabusPct' ? (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                {cohortSort.direction === 'desc' ? 'Hi→Lo' : 'Lo→Hi'}
+                              </span>
+                            ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                          </button>
+                        </th>
+                        <th className="p-3">
+                          <button type="button" onClick={() => toggleCohortSort('bioScore')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                            <span>Biology</span>
+                            {cohortSort.column === 'bioScore' ? (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                {cohortSort.direction === 'desc' ? 'Hi→Lo' : 'Lo→Hi'}
+                              </span>
+                            ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                          </button>
+                        </th>
+                        <th className="p-3">
+                          <button type="button" onClick={() => toggleCohortSort('chemScore')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                            <span>Chemistry</span>
+                            {cohortSort.column === 'chemScore' ? (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                {cohortSort.direction === 'desc' ? 'Hi→Lo' : 'Lo→Hi'}
+                              </span>
+                            ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                          </button>
+                        </th>
+                        <th className="p-3">
+                          <button type="button" onClick={() => toggleCohortSort('physScore')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                            <span>Physics</span>
+                            {cohortSort.column === 'physScore' ? (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                {cohortSort.direction === 'desc' ? 'Hi→Lo' : 'Lo→Hi'}
+                              </span>
+                            ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                          </button>
+                        </th>
+                        <th className="p-3">
+                          <button type="button" onClick={() => toggleCohortSort('weakArea')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                            <span>Priority Weak Topic</span>
+                            {cohortSort.column === 'weakArea' ? (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                {cohortSort.direction === 'asc' ? 'A→Z' : 'Z→A'}
+                              </span>
+                            ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                          </button>
+                        </th>
+                        <th className="p-3">
+                          <button type="button" onClick={() => toggleCohortSort('status')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                            <span>Status</span>
+                            {cohortSort.column === 'status' ? (cohortSort.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                          </button>
+                        </th>
+                        <th className="p-3">Action</th>
+                      </tr>
+                      {/* Per-column inline filter & order row */}
+                      <tr className="bg-slate-50/90 dark:bg-zinc-950 border-t border-slate-200 dark:border-zinc-800 font-normal align-top">
+                        <th className="p-1.5 space-y-1">
+                          <select
+                            value={cohortSort.column === 'name' ? cohortSort.direction : 'default'}
+                            onChange={e => setCohortColumnOrder('name', e.target.value)}
+                            className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                          >
+                            <option value="default">Order: Default</option>
+                            <option value="asc">A → Z (Alphabetical)</option>
+                            <option value="desc">Z → A (Reverse)</option>
+                          </select>
+                          <input
+                            type="text"
+                            value={cohortColFilters.name}
+                            onChange={e => setCohortColFilters(prev => ({ ...prev, name: e.target.value }))}
+                            placeholder="Search student..."
+                            className="w-full min-w-[115px] px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 font-medium"
+                          />
+                        </th>
+                        <th className="p-1.5">
+                          <select
+                            value={tierFilter}
+                            onChange={e => setTierFilter(e.target.value as any)}
+                            className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                          >
+                            <option value="all">All</option>
+                            <option value="Core">Core</option>
+                            <option value="Extended">Extended</option>
+                          </select>
+                        </th>
+                        <th className="p-1.5 space-y-1">
+                          <select
+                            value={cohortSort.column === 'slideDecks' ? cohortSort.direction : 'default'}
+                            onChange={e => setCohortColumnOrder('slideDecks', e.target.value)}
+                            className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                          >
+                            <option value="default">Order: Default</option>
+                            <option value="desc">High → Low</option>
+                            <option value="asc">Low → High</option>
+                          </select>
+                          <select
+                            value={cohortColFilters.slideDecks}
+                            onChange={e => setCohortColFilters(prev => ({ ...prev, slideDecks: e.target.value as any }))}
+                            className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                          >
+                            <option value="all">All</option>
+                            <option value="high">75–100%</option>
+                            <option value="mid">26–74%</option>
+                            <option value="low">1–25%</option>
+                            <option value="zero">0 decks</option>
+                          </select>
+                        </th>
+                        <th className="p-1.5 space-y-1">
+                          <select
+                            value={cohortSort.column === 'syllabusPct' ? cohortSort.direction : 'default'}
+                            onChange={e => setCohortColumnOrder('syllabusPct', e.target.value)}
+                            className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                          >
+                            <option value="default">Order: Default</option>
+                            <option value="desc">High → Low</option>
+                            <option value="asc">Low → High</option>
+                          </select>
+                          <select
+                            value={cohortColFilters.syllabusPct}
+                            onChange={e => setCohortColFilters(prev => ({ ...prev, syllabusPct: e.target.value as any }))}
+                            className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                          >
+                            <option value="all">All</option>
+                            <option value="high">75–100%</option>
+                            <option value="mid">35–74%</option>
+                            <option value="low">1–34%</option>
+                            <option value="zero">0%</option>
+                          </select>
+                        </th>
+                        <th className="p-1.5 space-y-1">
+                          <select
+                            value={cohortSort.column === 'bioScore' ? cohortSort.direction : 'default'}
+                            onChange={e => setCohortColumnOrder('bioScore', e.target.value)}
+                            className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                          >
+                            <option value="default">Order: Default</option>
+                            <option value="desc">High → Low</option>
+                            <option value="asc">Low → High</option>
+                          </select>
+                          <select
+                            value={cohortColFilters.bioScore}
+                            onChange={e => setCohortColFilters(prev => ({ ...prev, bioScore: e.target.value as any }))}
+                            className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                          >
+                            <option value="all">All</option>
+                            <option value="high">≥ 80%</option>
+                            <option value="mid">50–79%</option>
+                            <option value="low">1–49%</option>
+                            <option value="zero">0%</option>
+                          </select>
+                        </th>
+                        <th className="p-1.5 space-y-1">
+                          <select
+                            value={cohortSort.column === 'chemScore' ? cohortSort.direction : 'default'}
+                            onChange={e => setCohortColumnOrder('chemScore', e.target.value)}
+                            className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                          >
+                            <option value="default">Order: Default</option>
+                            <option value="desc">High → Low</option>
+                            <option value="asc">Low → High</option>
+                          </select>
+                          <select
+                            value={cohortColFilters.chemScore}
+                            onChange={e => setCohortColFilters(prev => ({ ...prev, chemScore: e.target.value as any }))}
+                            className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                          >
+                            <option value="all">All</option>
+                            <option value="high">≥ 80%</option>
+                            <option value="mid">50–79%</option>
+                            <option value="low">1–49%</option>
+                            <option value="zero">0%</option>
+                          </select>
+                        </th>
+                        <th className="p-1.5 space-y-1">
+                          <select
+                            value={cohortSort.column === 'physScore' ? cohortSort.direction : 'default'}
+                            onChange={e => setCohortColumnOrder('physScore', e.target.value)}
+                            className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                          >
+                            <option value="default">Order: Default</option>
+                            <option value="desc">High → Low</option>
+                            <option value="asc">Low → High</option>
+                          </select>
+                          <select
+                            value={cohortColFilters.physScore}
+                            onChange={e => setCohortColFilters(prev => ({ ...prev, physScore: e.target.value as any }))}
+                            className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                          >
+                            <option value="all">All</option>
+                            <option value="high">≥ 80%</option>
+                            <option value="mid">50–79%</option>
+                            <option value="low">1–49%</option>
+                            <option value="zero">0%</option>
+                          </select>
+                        </th>
+                        <th className="p-1.5 space-y-1">
+                          <select
+                            value={cohortSort.column === 'weakArea' ? cohortSort.direction : 'default'}
+                            onChange={e => setCohortColumnOrder('weakArea', e.target.value)}
+                            className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                          >
+                            <option value="default">Order: Default</option>
+                            <option value="asc">A → Z</option>
+                            <option value="desc">Z → A</option>
+                          </select>
+                          <input
+                            type="text"
+                            value={cohortColFilters.weakArea}
+                            onChange={e => setCohortColFilters(prev => ({ ...prev, weakArea: e.target.value }))}
+                            placeholder="Filter topic..."
+                            className="w-full min-w-[100px] px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 font-medium"
+                          />
+                        </th>
+                        <th className="p-1.5">
+                          <select
+                            value={statusFilter}
+                            onChange={e => setStatusFilter(e.target.value as any)}
+                            className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                          >
+                            <option value="all">All</option>
+                            <option value="Excelling">Excelling</option>
+                            <option value="On Track">On Track</option>
+                            <option value="Intervention Required">Intervention Required</option>
+                          </select>
+                        </th>
+                        <th className="p-2">
+                          {hasActiveCohortFiltersOrSort && (
+                            <button
+                              type="button"
+                              onClick={resetCohortFiltersAndSort}
+                              className="px-2 py-1 rounded-lg bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-[10px] font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-zinc-800 bg-white dark:bg-black">
+                      {filteredStudents.length === 0 ? (
+                        <tr>
+                          <td colSpan={10} className="p-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                            No students match the current filters.{' '}
+                            <button type="button" onClick={resetCohortFiltersAndSort} className="underline font-bold text-slate-800 dark:text-slate-200">
+                              Reset all filters
+                            </button>
+                          </td>
+                        </tr>
+                      ) : filteredStudents.map(std => {
                       let statusClass = 'bg-[#EBF3F5] dark:bg-zinc-900 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-zinc-700';
                       if (std.status === 'Intervention Required') {
                         statusClass = 'bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 border-rose-300 dark:border-rose-800';
@@ -1905,6 +2852,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                   </tbody>
                 </table>
               </div>
+            </div>
             )}
           </div>
         </div>
@@ -2477,10 +3425,55 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         });
 
         const allQuizzes = [...subtopicQuizzes, ...subjectQuizzes];
-        const filteredQuizzes = allQuizzes.filter(q => {
-          if (analysisSubjectFilter === 'all') return true;
-          return q.subject === analysisSubjectFilter;
+        const filteredQuizzesRaw = allQuizzes.filter(q => {
+          if (analysisSubjectFilter !== 'all' && q.subject !== analysisSubjectFilter) return false;
+          if (modalQuizFilters.topic.trim()) {
+            const term = modalQuizFilters.topic.toLowerCase();
+            if (!q.code.toLowerCase().includes(term) && !q.title.toLowerCase().includes(term)) return false;
+          }
+          if (modalQuizFilters.result === 'passed' && !q.passed) return false;
+          if (modalQuizFilters.result === 'review' && q.passed) return false;
+          if (modalQuizFilters.scoreRange === 'high' && q.percentage < 80) return false;
+          if (modalQuizFilters.scoreRange === 'mid' && (q.percentage < 50 || q.percentage >= 80)) return false;
+          if (modalQuizFilters.scoreRange === 'low' && q.percentage >= 50) return false;
+          return true;
         });
+
+        const toggleModalQuizSort = (col: 'topic' | 'subject' | 'score' | 'percentage' | 'result' | 'date') => {
+          const isNumeric = col === 'score' || col === 'percentage' || col === 'date';
+          const firstDir: 'asc' | 'desc' = isNumeric ? 'desc' : 'asc';
+          const secondDir: 'asc' | 'desc' = firstDir === 'asc' ? 'desc' : 'asc';
+          setModalQuizSort(prev => {
+            if (prev.column !== col) return { column: col, direction: firstDir };
+            if (prev.direction === firstDir) return { column: col, direction: secondDir };
+            return { column: null, direction: 'asc' };
+          });
+        };
+
+        const filteredQuizzes = modalQuizSort.column
+          ? [...filteredQuizzesRaw].sort((a, b) => {
+              const dir = modalQuizSort.direction === 'asc' ? 1 : -1;
+              switch (modalQuizSort.column) {
+                case 'topic':
+                  return dir * `${a.code} ${a.title}`.localeCompare(`${b.code} ${b.title}`, undefined, { numeric: true });
+                case 'subject':
+                  return dir * a.subject.localeCompare(b.subject);
+                case 'score':
+                  return dir * (a.score - b.score);
+                case 'percentage':
+                  return dir * (a.percentage - b.percentage);
+                case 'result':
+                  return dir * (Number(a.passed) - Number(b.passed));
+                case 'date': {
+                  const tA = a.date ? new Date(a.date).getTime() : 0;
+                  const tB = b.date ? new Date(b.date).getTime() : 0;
+                  return dir * (tA - tB);
+                }
+                default:
+                  return 0;
+              }
+            })
+          : filteredQuizzesRaw;
 
         // Summary calculations
         const totalQuizzes = allQuizzes.length;
@@ -2636,7 +3629,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                 </div>
 
                 {/* Quizzes List or Empty State */}
-                {filteredQuizzes.length === 0 ? (
+                {allQuizzes.length === 0 ? (
                   <div className="p-8 text-center bg-[#FDFBF7] dark:bg-zinc-900 border border-dashed border-slate-300 dark:border-zinc-800 rounded-xl space-y-2">
                     <Award className="w-8 h-8 text-slate-400 mx-auto" />
                     <p className="text-xs font-bold text-slate-900 dark:text-white">No practice quizzes completed yet</p>
@@ -2649,16 +3642,163 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                     <table className="min-w-full text-xs text-left text-slate-800 dark:text-slate-200">
                       <thead className="bg-[#FDFBF7] dark:bg-zinc-900 text-slate-700 dark:text-slate-300 text-[11px] border-b border-slate-200 dark:border-zinc-800 font-bold">
                         <tr>
-                          <th className="p-3">Topic / Quiz</th>
-                          <th className="p-3">Subject</th>
-                          <th className="p-3">Score</th>
-                          <th className="p-3">Percentage</th>
-                          <th className="p-3">Result</th>
-                          <th className="p-3">Date Completed</th>
+                          <th className="p-3">
+                            <button type="button" onClick={() => toggleModalQuizSort('topic')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition">
+                              <span>Topic / Quiz</span>
+                              {modalQuizSort.column === 'topic' ? (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                  {modalQuizSort.direction === 'asc' ? 'A→Z' : 'Z→A'}
+                                </span>
+                              ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                            </button>
+                          </th>
+                          <th className="p-3">
+                            <button type="button" onClick={() => toggleModalQuizSort('subject')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition">
+                              <span>Subject</span>
+                              {modalQuizSort.column === 'subject' ? (modalQuizSort.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                            </button>
+                          </th>
+                          <th className="p-3">
+                            <button type="button" onClick={() => toggleModalQuizSort('score')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition">
+                              <span>Score</span>
+                              {modalQuizSort.column === 'score' ? (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                  {modalQuizSort.direction === 'desc' ? 'Hi→Lo' : 'Lo→Hi'}
+                                </span>
+                              ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                            </button>
+                          </th>
+                          <th className="p-3">
+                            <button type="button" onClick={() => toggleModalQuizSort('percentage')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition">
+                              <span>Percentage</span>
+                              {modalQuizSort.column === 'percentage' ? (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                  {modalQuizSort.direction === 'desc' ? 'Hi→Lo' : 'Lo→Hi'}
+                                </span>
+                              ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                            </button>
+                          </th>
+                          <th className="p-3">
+                            <button type="button" onClick={() => toggleModalQuizSort('result')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition">
+                              <span>Result</span>
+                              {modalQuizSort.column === 'result' ? (modalQuizSort.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                            </button>
+                          </th>
+                          <th className="p-3">
+                            <button type="button" onClick={() => toggleModalQuizSort('date')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition">
+                              <span>Date Completed</span>
+                              {modalQuizSort.column === 'date' ? (modalQuizSort.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                            </button>
+                          </th>
+                        </tr>
+                        <tr className="bg-slate-50/90 dark:bg-zinc-950 border-t border-slate-200 dark:border-zinc-800 font-normal align-top">
+                          <th className="p-1.5 space-y-1">
+                            <select
+                              value={modalQuizSort.column === 'topic' ? modalQuizSort.direction : 'default'}
+                              onChange={e => setModalQuizSort(e.target.value === 'default' ? { column: null, direction: 'asc' } : { column: 'topic', direction: e.target.value as 'asc' | 'desc' })}
+                              className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                            >
+                              <option value="default">Order: Default</option>
+                              <option value="asc">A → Z</option>
+                              <option value="desc">Z → A</option>
+                            </select>
+                            <input
+                              type="text"
+                              value={modalQuizFilters.topic}
+                              onChange={e => setModalQuizFilters(prev => ({ ...prev, topic: e.target.value }))}
+                              placeholder="Filter topic..."
+                              className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 font-medium"
+                            />
+                          </th>
+                          <th className="p-1.5">
+                            <select
+                              value={analysisSubjectFilter}
+                              onChange={e => setAnalysisSubjectFilter(e.target.value as any)}
+                              className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                            >
+                              <option value="all">All</option>
+                              <option value="biology">Biology</option>
+                              <option value="chemistry">Chemistry</option>
+                              <option value="physics">Physics</option>
+                            </select>
+                          </th>
+                          <th className="p-1.5">
+                            <select
+                              value={modalQuizSort.column === 'score' ? modalQuizSort.direction : 'default'}
+                              onChange={e => setModalQuizSort(e.target.value === 'default' ? { column: null, direction: 'asc' } : { column: 'score', direction: e.target.value as 'asc' | 'desc' })}
+                              className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                            >
+                              <option value="default">Order: Default</option>
+                              <option value="desc">High → Low</option>
+                              <option value="asc">Low → High</option>
+                            </select>
+                          </th>
+                          <th className="p-1.5 space-y-1">
+                            <select
+                              value={modalQuizSort.column === 'percentage' ? modalQuizSort.direction : 'default'}
+                              onChange={e => setModalQuizSort(e.target.value === 'default' ? { column: null, direction: 'asc' } : { column: 'percentage', direction: e.target.value as 'asc' | 'desc' })}
+                              className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                            >
+                              <option value="default">Order: Default</option>
+                              <option value="desc">High → Low</option>
+                              <option value="asc">Low → High</option>
+                            </select>
+                            <select
+                              value={modalQuizFilters.scoreRange}
+                              onChange={e => setModalQuizFilters(prev => ({ ...prev, scoreRange: e.target.value as any }))}
+                              className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                            >
+                              <option value="all">All %</option>
+                              <option value="high">≥ 80%</option>
+                              <option value="mid">50–79%</option>
+                              <option value="low">&lt; 50%</option>
+                            </select>
+                          </th>
+                          <th className="p-1.5">
+                            <select
+                              value={modalQuizFilters.result}
+                              onChange={e => setModalQuizFilters(prev => ({ ...prev, result: e.target.value as any }))}
+                              className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                            >
+                              <option value="all">All</option>
+                              <option value="passed">Green Light</option>
+                              <option value="review">Needs Review</option>
+                            </select>
+                          </th>
+                          <th className="p-1.5 space-y-1">
+                            <select
+                              value={modalQuizSort.column === 'date' ? modalQuizSort.direction : 'default'}
+                              onChange={e => setModalQuizSort(e.target.value === 'default' ? { column: null, direction: 'asc' } : { column: 'date', direction: e.target.value as 'asc' | 'desc' })}
+                              className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                            >
+                              <option value="default">Order: Default</option>
+                              <option value="desc">Newest → Oldest</option>
+                              <option value="asc">Oldest → Newest</option>
+                            </select>
+                            {(modalQuizFilters.topic || modalQuizFilters.result !== 'all' || modalQuizFilters.scoreRange !== 'all' || modalQuizSort.column) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setModalQuizSort({ column: null, direction: 'asc' });
+                                  setModalQuizFilters({ topic: '', result: 'all', scoreRange: 'all' });
+                                  setAnalysisSubjectFilter('all');
+                                }}
+                                className="w-full px-2 py-1 rounded-lg bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-[10px] font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition"
+                              >
+                                Reset
+                              </button>
+                            )}
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 dark:divide-zinc-800 bg-white dark:bg-black">
-                        {filteredQuizzes.map(quiz => (
+                        {filteredQuizzes.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="p-6 text-center text-xs text-slate-500">
+                              No quiz results match your column filters.
+                            </td>
+                          </tr>
+                        ) : filteredQuizzes.map(quiz => (
                           <tr key={quiz.id} className="hover:bg-slate-50 dark:hover:bg-zinc-900/40 transition">
                             <td className="p-3">
                               <div className="font-bold text-slate-900 dark:text-white flex items-center gap-2">

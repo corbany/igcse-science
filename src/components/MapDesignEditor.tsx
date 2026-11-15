@@ -35,6 +35,7 @@ import {
   BuildingTile,
   GeneratedBuilding,
   generateBuilding,
+  getTileSourceCoords,
   drawWaterBody,
   drawDirtRoad
 } from './BattleRoyaleArena';
@@ -65,6 +66,63 @@ interface SelectedTool {
 }
 
 const STORAGE_KEY = 'igcse_royale_custom_map_corbanb';
+
+const Sample1BuildingThumb: React.FC<{
+  style: BuildingStyle;
+  w: number;
+  h: number;
+  sheetImg: HTMLImageElement | null;
+  sheetLoaded: boolean;
+}> = ({ style, w, h, sheetImg, sheetLoaded }) => {
+  const thumbRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = thumbRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const cw = canvas.width;
+    const ch = canvas.height;
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.imageSmoothingEnabled = false;
+
+    const previewBldg = generateBuilding(0, 0, w, h, style, '');
+    const tilePx = Math.floor(Math.min((cw - 4) / w, (ch - 4) / h));
+    const offsetX = Math.floor((cw - w * tilePx) / 2);
+    const offsetY = Math.floor((ch - h * tilePx) / 2);
+
+    const hasSheet = !!(sheetLoaded && sheetImg && sheetImg.complete && sheetImg.naturalWidth > 0);
+    for (const t of previewBldg.tiles) {
+      const dx = offsetX + t.col * tilePx;
+      const dy = offsetY + t.row * tilePx;
+      if (hasSheet) {
+        if (t.baseSheetCol !== undefined && t.baseSheetRow !== undefined) {
+          const { sx: bsx, sy: bsy } = getTileSourceCoords(t.baseSheetCol, t.baseSheetRow);
+          ctx.drawImage(sheetImg, bsx, bsy, TILE_SIZE, TILE_SIZE, dx, dy, tilePx, tilePx);
+        }
+        const { sx, sy } = getTileSourceCoords(t.sheetCol, t.sheetRow);
+        ctx.drawImage(sheetImg, sx, sy, TILE_SIZE, TILE_SIZE, dx, dy, tilePx, tilePx);
+        if (t.overlayCol !== undefined && t.overlayRow !== undefined) {
+          const { sx: osx, sy: osy } = getTileSourceCoords(t.overlayCol, t.overlayRow);
+          ctx.drawImage(sheetImg, osx, osy, TILE_SIZE, TILE_SIZE, dx, dy, tilePx, tilePx);
+        }
+      } else {
+        ctx.fillStyle = t.isRoof ? '#c58f5c' : '#d9caa9';
+        ctx.fillRect(dx, dy, tilePx, tilePx);
+      }
+    }
+  }, [style, w, h, sheetImg, sheetLoaded]);
+
+  return (
+    <canvas
+      ref={thumbRef}
+      width={44}
+      height={44}
+      className="w-11 h-11 rounded-md bg-[#8dc435]/35 border border-slate-200 shrink-0"
+    />
+  );
+};
 
 export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
   currentUser,
@@ -103,7 +161,22 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
 
   // Canvas Viewport & Camera
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const sheetImgRef = useRef<HTMLImageElement | null>(null);
+  const [sheetLoaded, setSheetLoaded] = useState<boolean>(false);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 1200, height: 800 });
+
+  useEffect(() => {
+    const img = new Image();
+    img.src = '/assets/roguelikeSheet_transparent.png';
+    img.onload = () => {
+      sheetImgRef.current = img;
+      setSheetLoaded(true);
+    };
+    if (img.complete && img.naturalWidth > 0) {
+      sheetImgRef.current = img;
+      setSheetLoaded(true);
+    }
+  }, []);
   const [zoomLevel, setZoomLevel] = useState<number>(0.35); // 0.15 = overview, 1.0 = 1:1 tile view
   const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 200, y: 120 });
   const isDraggingPan = useRef<boolean>(false);
@@ -157,22 +230,35 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
     { id: 'sand', name: 'Desert Sand', icon: '🏜️', surface: 'sand', color: '#d97706' }
   ];
 
-  const OBSTACLE_PALETTE = [
+  const OBSTACLE_PALETTE: Array<{
+    id: string;
+    name: string;
+    icon: string;
+    type: string;
+    mat: string;
+    hp: number;
+    w: number;
+    h: number;
+    radius: number;
+    sheetCol?: number;
+    sheetRow?: number;
+  }> = [
     { id: 'pine_tree', name: 'Pine Tree', icon: '🌲', type: 'pine_tree', mat: 'wood', hp: 90, w: 36, h: 48, radius: 14 },
     { id: 'round_tree', name: 'Oak Tree', icon: '🌳', type: 'round_tree', mat: 'wood', hp: 85, w: 38, h: 48, radius: 15 },
     { id: 'boulder', name: 'Stone Boulder', icon: '🪨', type: 'boulder', mat: 'brick', hp: 120, w: 34, h: 32, radius: 16 },
     { id: 'fence', name: 'Wood Fence', icon: '🪵', type: 'fence', mat: 'wood', hp: 70, w: 32, h: 32, radius: 12 },
     { id: 'bush', name: 'Stealth Bush', icon: '🌱', type: 'bush', mat: 'wood', hp: 40, w: 32, h: 32, radius: 14 },
     { id: 'tree_stump', name: 'Tree Stump', icon: '🪵', type: 'tree_stump', mat: 'wood', hp: 50, w: 32, h: 32, radius: 12 },
-    { id: 'tent', name: 'Camp Tent', icon: '⛺', type: 'tent', mat: 'wood', hp: 110, w: 48, h: 48, radius: 20 },
+    { id: 'tent', name: 'Camp Tent', icon: '⛺', type: 'tent', mat: 'wood', hp: 110, w: 64, h: 64, radius: 24, sheetCol: 46, sheetRow: 10 },
     { id: 'barrel_oil', name: 'Metal Barrel', icon: '🛢️', type: 'barrel_oil', mat: 'metal', hp: 80, w: 28, h: 32, radius: 12 }
   ];
 
   const BUILDING_PALETTE = [
-    { id: 'cabin_wood', name: 'Wood Cabin (3x3)', icon: '🪵', style: 'wood' as BuildingStyle, w: 3, h: 3 },
-    { id: 'house_stone', name: 'Stone House (4x4)', icon: '🏠', style: 'stone' as BuildingStyle, w: 4, h: 4 },
-    { id: 'castle_tower', name: 'Castle Tower (3x3)', icon: '🏰', style: 'castle' as BuildingStyle, w: 3, h: 3 },
-    { id: 'cottage_brick', name: 'Brick Cottage (4x3)', icon: '🏡', style: 'brick' as BuildingStyle, w: 4, h: 3 }
+    { id: 'house_stone', name: 'Sample1 Village House', subtitle: 'Gable Roof & Lattice Window', icon: '🏠', style: 'stone' as BuildingStyle, w: 3, h: 5 },
+    { id: 'barn_wood', name: 'Sample1 Garage Barn', subtitle: 'Wide Open Barn Doorway', icon: '🏚️', style: 'wood' as BuildingStyle, w: 2, h: 4 },
+    { id: 'cottage_terracotta', name: 'Sample1 Cottage', subtitle: 'Roof Weathervane & Door', icon: '🏡', style: 'terracotta' as BuildingStyle, w: 2, h: 4 },
+    { id: 'manor_castle', name: 'Sample1 L-Shaped Manor', subtitle: 'Dual-Wing Courtyard Complex', icon: '🏛️', style: 'castle' as BuildingStyle, w: 5, h: 4 },
+    { id: 'villa_brick', name: 'Sample1 Porch Villa', subtitle: 'Covered Wooden Side Porch', icon: '🏘️', style: 'brick' as BuildingStyle, w: 4, h: 4 }
   ];
 
   const LOOT_PALETTE = [
@@ -207,7 +293,11 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
     ctx.lineWidth = 4 / zoomLevel;
     ctx.strokeRect(0, 0, MAP_SIZE, MAP_SIZE);
 
-    // 2. Base Terrain Layer
+    // 2. Base Terrain Layer + Sample1 Water Lilies
+    const sheetImg = sheetImgRef.current;
+    const hasSheet = !!(sheetLoaded && sheetImg && sheetImg.complete && sheetImg.naturalWidth > 0);
+    const prevSmooth = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
     const step = WORLD_TILE_SIZE;
     for (let r = 0; r < TILES_COUNT; r++) {
       for (let c = 0; c < TILES_COUNT; c++) {
@@ -216,19 +306,45 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
         const x = c * step;
         const y = r * step;
 
-        if (t.isWater || t.surface === 'water') {
-          ctx.fillStyle = '#0284c7';
-        } else if (t.isRoad || t.surface === 'dirt') {
-          ctx.fillStyle = '#78350f';
-        } else if (t.surface === 'stone') {
-          ctx.fillStyle = '#64748b';
-        } else if (t.surface === 'sand') {
-          ctx.fillStyle = '#d97706';
+        if (hasSheet && t.overlayCol !== undefined && t.overlayRow !== undefined) {
+          const { sx: gsx, sy: gsy } = getTileSourceCoords(5, 0);
+          ctx.drawImage(sheetImg, gsx, gsy, TILE_SIZE, TILE_SIZE, x, y, step, step);
+          const { sx, sy } = getTileSourceCoords(t.overlayCol, t.overlayRow);
+          ctx.drawImage(sheetImg, sx, sy, TILE_SIZE, TILE_SIZE, x, y, step, step);
+          if (t.isWater && t.lilyCol !== undefined && t.lilyRow !== undefined) {
+            const { sx: lsx, sy: lsy } = getTileSourceCoords(t.lilyCol, t.lilyRow);
+            ctx.drawImage(sheetImg, lsx, lsy, TILE_SIZE, TILE_SIZE, x, y, step, step);
+          }
         } else {
-          ctx.fillStyle = (r + c) % 2 === 0 ? '#16a34a' : '#15803d';
+          if (t.isWater || t.surface === 'water') {
+            ctx.fillStyle = '#63c5cf';
+          } else if (t.isRoad || t.surface === 'dirt') {
+            ctx.fillStyle = '#b48355';
+          } else if (t.surface === 'stone') {
+            ctx.fillStyle = '#64748b';
+          } else if (t.surface === 'sand') {
+            ctx.fillStyle = '#d97706';
+          } else {
+            ctx.fillStyle = (r + c) % 2 === 0 ? '#16a34a' : '#15803d';
+          }
+          ctx.fillRect(x, y, step, step);
+          if (t.isWater && t.lilyCol !== undefined) {
+            ctx.fillStyle = '#4ba86d';
+            ctx.beginPath();
+            ctx.arc(x + 16, y + 16, 9, 0, Math.PI * 2);
+            ctx.fill();
+            if (t.lilyCol === 25) {
+              ctx.fillStyle = '#ffffff';
+              ctx.beginPath();
+              ctx.arc(x + 16, y + 15, 5, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = '#facc15';
+              ctx.beginPath();
+              ctx.arc(x + 16, y + 15, 2, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
         }
-
-        ctx.fillRect(x, y, step, step);
       }
     }
 
@@ -249,20 +365,48 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
       }
     }
 
-    // 4. Buildings Layer
+    // 4. Buildings Layer (Sample1-accurate layered Kenney sprites)
+    ctx.imageSmoothingEnabled = false;
     buildings.forEach(b => {
-      ctx.fillStyle = b.style === 'wood' ? '#854d0e' : b.style === 'castle' ? '#475569' : '#334155';
-      ctx.fillRect(b.worldX, b.worldY, b.worldW, b.worldH);
+      if (hasSheet && Array.isArray(b.tiles) && b.tiles.length > 0) {
+        for (const t of b.tiles as BuildingTile[]) {
+          const tx = t.col * WORLD_TILE_SIZE;
+          const ty = t.row * WORLD_TILE_SIZE;
+          if (t.baseSheetCol !== undefined && t.baseSheetRow !== undefined) {
+            const { sx: bsx, sy: bsy } = getTileSourceCoords(t.baseSheetCol, t.baseSheetRow);
+            ctx.drawImage(sheetImg, bsx, bsy, TILE_SIZE, TILE_SIZE, tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+          }
+          const { sx, sy } = getTileSourceCoords(t.sheetCol, t.sheetRow);
+          ctx.drawImage(sheetImg, sx, sy, TILE_SIZE, TILE_SIZE, tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+          if (t.overlayCol !== undefined && t.overlayRow !== undefined) {
+            const { sx: osx, sy: osy } = getTileSourceCoords(t.overlayCol, t.overlayRow);
+            ctx.drawImage(sheetImg, osx, osy, TILE_SIZE, TILE_SIZE, tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+          }
+        }
+      } else {
+        ctx.fillStyle = '#e1d5ba';
+        ctx.fillRect(b.worldX, b.worldY + WORLD_TILE_SIZE, b.worldW, Math.max(WORLD_TILE_SIZE, b.worldH - WORLD_TILE_SIZE));
+        ctx.fillStyle = '#b48151';
+        ctx.fillRect(b.worldX, b.worldY, b.worldW, WORLD_TILE_SIZE);
+      }
 
-      ctx.strokeStyle = selectedObjectId === b.id ? '#fbbf24' : '#1e293b';
-      ctx.lineWidth = selectedObjectId === b.id ? 4 : 2;
-      ctx.strokeRect(b.worldX, b.worldY, b.worldW, b.worldH);
+      if (selectedObjectId === b.id) {
+        ctx.strokeStyle = '#fbbf24';
+        ctx.lineWidth = 3 / zoomLevel;
+        ctx.strokeRect(b.worldX, b.worldY, b.worldW, b.worldH);
+      }
 
-      // Label
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 16px sans-serif';
-      ctx.fillText(b.name || 'Building', b.worldX + 10, b.worldY + 24);
+      if (zoomLevel >= 0.28 || selectedObjectId === b.id) {
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
+        ctx.font = 'bold 11px sans-serif';
+        const label = b.name || 'Building';
+        const tw = ctx.measureText(label).width;
+        ctx.fillRect(b.worldX + 2, b.worldY - 16, tw + 8, 14);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(label, b.worldX + 6, b.worldY - 5);
+      }
     });
+    ctx.imageSmoothingEnabled = prevSmooth;
 
     // 5. Scenery Props Layer (Sorted by Y)
     const sortedProps = [...scenery].sort((a, b) => a.y - b.y);
@@ -296,8 +440,43 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
         ctx.arc(sc.x, sc.y, sc.radius || 14, 0, Math.PI * 2);
         ctx.fill();
       } else if (sc.type === 'tent') {
-        ctx.fillStyle = '#0284c7';
-        ctx.fillRect(sc.x - 20, sc.y - 20, 40, 40);
+        const tw = sc.width || 64;
+        const th = sc.height || 64;
+        if (hasSheet) {
+          ctx.imageSmoothingEnabled = false;
+          const halfW = tw / 2;
+          const halfH = th / 2;
+          const leftX = sc.x - halfW;
+          const topY = sc.y - th + 2;
+          const parts = [
+            { c: 46, r: 10, dx: 0, dy: 0 },
+            { c: 47, r: 10, dx: halfW, dy: 0 },
+            { c: 46, r: 11, dx: 0, dy: halfH },
+            { c: 47, r: 11, dx: halfW, dy: halfH }
+          ];
+          for (const pt of parts) {
+            const { sx: tsx, sy: tsy } = getTileSourceCoords(pt.c, pt.r);
+            ctx.drawImage(sheetImg, tsx, tsy, TILE_SIZE, TILE_SIZE, leftX + pt.dx, topY + pt.dy, halfW, halfH);
+          }
+        } else {
+          ctx.fillStyle = '#4ba86d';
+          ctx.strokeStyle = '#24633d';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(sc.x - tw * 0.45, sc.y);
+          ctx.lineTo(sc.x + tw * 0.45, sc.y);
+          ctx.lineTo(sc.x, sc.y - th * 0.88);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+      } else if (sc.type === 'campfire') {
+        ctx.fillStyle = '#8f673f';
+        ctx.fillRect(sc.x - 10, sc.y - 6, 20, 6);
+        ctx.fillStyle = '#f97316';
+        ctx.beginPath();
+        ctx.arc(sc.x, sc.y - 10, 7, 0, Math.PI * 2);
+        ctx.fill();
       } else {
         ctx.fillStyle = '#94a3b8';
         ctx.fillRect(sc.x - 12, sc.y - 12, 24, 24);
@@ -336,6 +515,29 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
         targetRows = bDef.h;
         targetStartCol = Math.max(0, Math.min(TILES_COUNT - targetCols, hoveredTile.col - Math.floor(targetCols / 2)));
         targetStartRow = Math.max(0, Math.min(TILES_COUNT - targetRows, hoveredTile.row - Math.floor(targetRows / 2)));
+
+        // Live translucent ghost preview of the Sample1 building under cursor
+        if (hasSheet) {
+          const ghostBldg = generateBuilding(targetStartCol, targetStartRow, bDef.w, bDef.h, bDef.style, bDef.name);
+          ctx.save();
+          ctx.globalAlpha = 0.7;
+          ctx.imageSmoothingEnabled = false;
+          for (const gt of ghostBldg.tiles) {
+            const gtx = gt.col * WORLD_TILE_SIZE;
+            const gty = gt.row * WORLD_TILE_SIZE;
+            if (gt.baseSheetCol !== undefined && gt.baseSheetRow !== undefined) {
+              const { sx: bsx, sy: bsy } = getTileSourceCoords(gt.baseSheetCol, gt.baseSheetRow);
+              ctx.drawImage(sheetImg, bsx, bsy, TILE_SIZE, TILE_SIZE, gtx, gty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+            }
+            const { sx, sy } = getTileSourceCoords(gt.sheetCol, gt.sheetRow);
+            ctx.drawImage(sheetImg, sx, sy, TILE_SIZE, TILE_SIZE, gtx, gty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+            if (gt.overlayCol !== undefined && gt.overlayRow !== undefined) {
+              const { sx: osx, sy: osy } = getTileSourceCoords(gt.overlayCol, gt.overlayRow);
+              ctx.drawImage(sheetImg, osx, osy, TILE_SIZE, TILE_SIZE, gtx, gty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+            }
+          }
+          ctx.restore();
+        }
       } else if ((editorMode === 'paint' && selectedTool.category === 'terrain') || editorMode === 'erase') {
         const b = getBrushBounds(hoveredTile.worldX, hoveredTile.worldY, hoveredTile.col, hoveredTile.row, brushSize);
         targetStartCol = b.startCol;
@@ -345,7 +547,7 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
       }
 
       // Highlight bounding box around exact targeted tile(s)
-      ctx.fillStyle = editorMode === 'erase' ? 'rgba(239, 68, 68, 0.32)' : 'rgba(251, 191, 36, 0.32)';
+      ctx.fillStyle = editorMode === 'erase' ? 'rgba(239, 68, 68, 0.32)' : 'rgba(251, 191, 36, 0.22)';
       ctx.fillRect(targetStartCol * WORLD_TILE_SIZE, targetStartRow * WORLD_TILE_SIZE, targetCols * WORLD_TILE_SIZE, targetRows * WORLD_TILE_SIZE);
 
       ctx.strokeStyle = editorMode === 'erase' ? '#ef4444' : '#fbbf24';
@@ -387,7 +589,7 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
     }
 
     ctx.restore();
-  }, [tiles, scenery, buildings, groundLoot, zoomLevel, panOffset, selectedObjectId, hoveredTile, editorMode, selectedTool, brushSize, canvasSize]);
+  }, [tiles, scenery, buildings, groundLoot, zoomLevel, panOffset, selectedObjectId, hoveredTile, editorMode, selectedTool, brushSize, canvasSize, sheetLoaded]);
 
   // Helper: Shared centered brush bounds used identically for crosshair preview & editing
   function getBrushBounds(worldX: number, worldY: number, tileCol: number, tileRow: number, size: number) {
@@ -506,30 +708,38 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
               if (r >= 0 && r < TILES_COUNT && c >= 0 && c < TILES_COUNT) {
                 if (selectedTool.id === 'water') {
                   copy[r][c].surface = 'water';
-                  copy[r][c].baseColor = '#0284c7';
+                  copy[r][c].baseColor = '#63c5cf';
                   copy[r][c].isWater = true;
                   copy[r][c].isRoad = false;
-                  copy[r][c].overlayCol = 1;
+                  copy[r][c].overlayCol = 3;
                   copy[r][c].overlayRow = 1;
                 } else if (selectedTool.id === 'dirt') {
                   copy[r][c].surface = 'dirt';
-                  copy[r][c].baseColor = '#78350f';
+                  copy[r][c].baseColor = '#b48355';
                   copy[r][c].isWater = false;
                   copy[r][c].isRoad = true;
                   copy[r][c].overlayCol = 6;
                   copy[r][c].overlayRow = 0;
+                  copy[r][c].lilyCol = undefined;
+                  copy[r][c].lilyRow = undefined;
                 } else if (selectedTool.id === 'stone') {
                   copy[r][c].surface = 'stone';
                   copy[r][c].baseColor = '#475569';
                   copy[r][c].isWater = false;
                   copy[r][c].isRoad = true;
-                  copy[r][c].overlayCol = 8;
-                  copy[r][c].overlayRow = 3;
+                  copy[r][c].overlayCol = 7;
+                  copy[r][c].overlayRow = 0;
+                  copy[r][c].lilyCol = undefined;
+                  copy[r][c].lilyRow = undefined;
                 } else if (selectedTool.id === 'sand') {
                   copy[r][c].surface = 'sand';
                   copy[r][c].baseColor = '#d97706';
                   copy[r][c].isWater = false;
                   copy[r][c].isRoad = false;
+                  copy[r][c].overlayCol = undefined;
+                  copy[r][c].overlayRow = undefined;
+                  copy[r][c].lilyCol = undefined;
+                  copy[r][c].lilyRow = undefined;
                 } else {
                   copy[r][c].surface = 'grass';
                   copy[r][c].baseColor = '#15803d';
@@ -537,6 +747,10 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
                   copy[r][c].isRoad = false;
                   copy[r][c].sheetCol = 5;
                   copy[r][c].sheetRow = 0;
+                  copy[r][c].overlayCol = undefined;
+                  copy[r][c].overlayRow = undefined;
+                  copy[r][c].lilyCol = undefined;
+                  copy[r][c].lilyRow = undefined;
                 }
               }
             }
@@ -559,7 +773,9 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
           maxHp: def.hp,
           materialDrop: def.mat,
           dropAmount: 5,
-          spriteKey: def.type
+          spriteKey: def.type === 'tent' ? 'prop_tent' : def.type,
+          sheetCol: def.sheetCol,
+          sheetRow: def.sheetRow
         };
         setScenery(prev => [...prev, newProp]);
         setStatusMessage(`Placed ${def.name} at center of tile [${tileCol}, ${tileRow}].`);
@@ -675,13 +891,8 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
           if (b.id === selectedObjectId) {
             const snappedCol = Math.max(0, Math.min(TILES_COUNT - b.width, tileCol - Math.floor(b.width / 2)));
             const snappedRow = Math.max(0, Math.min(TILES_COUNT - b.height, tileRow - Math.floor(b.height / 2)));
-            return {
-              ...b,
-              tileX: snappedCol,
-              tileY: snappedRow,
-              worldX: snappedCol * WORLD_TILE_SIZE,
-              worldY: snappedRow * WORLD_TILE_SIZE
-            };
+            const moved = generateBuilding(snappedCol, snappedRow, b.width, b.height, b.style, b.name);
+            return { ...moved, id: b.id };
           }
           return b;
         }));
@@ -938,7 +1149,25 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
                 ].map(tab => (
                   <button
                     key={tab.cat}
-                    onClick={() => setActiveCategory(tab.cat as PaletteCategory)}
+                    onClick={() => {
+                      const cat = tab.cat as PaletteCategory;
+                      setActiveCategory(cat);
+                      if (selectedTool.category !== cat) {
+                        if (cat === 'terrain') {
+                          const first = TERRAIN_PALETTE[0];
+                          setSelectedTool({ category: 'terrain', id: first.id, name: first.name, icon: first.icon });
+                        } else if (cat === 'obstacles') {
+                          const first = OBSTACLE_PALETTE[0];
+                          setSelectedTool({ category: 'obstacles', id: first.id, name: first.name, icon: first.icon });
+                        } else if (cat === 'buildings') {
+                          const first = BUILDING_PALETTE[0];
+                          setSelectedTool({ category: 'buildings', id: first.id, name: first.name, icon: first.icon });
+                        } else if (cat === 'loot') {
+                          const first = LOOT_PALETTE[0];
+                          setSelectedTool({ category: 'loot', id: first.id, name: first.name, icon: first.icon });
+                        }
+                      }
+                    }}
                     className={`py-1.5 px-1 rounded-md flex flex-col items-center transition cursor-pointer ${
                       activeCategory === tab.cat
                         ? 'bg-slate-200 text-slate-900 border border-slate-300 font-bold'
@@ -1006,25 +1235,34 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
             )}
 
             {editorMode === 'paint' && activeCategory === 'buildings' && (
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
-                  Pre-Fab Structures
+                  Sample1.png Buildings
                 </span>
                 {BUILDING_PALETTE.map(b => (
                   <button
                     key={b.id}
                     onClick={() => setSelectedTool({ category: 'buildings', id: b.id, name: b.name, icon: b.icon })}
-                    className={`w-full flex items-center justify-between p-2 rounded-lg text-xs font-semibold transition cursor-pointer border ${
+                    className={`w-full flex items-center justify-between p-2 rounded-lg text-xs font-semibold transition cursor-pointer border text-left ${
                       selectedTool.id === b.id
                         ? 'bg-purple-50 border-purple-400 text-purple-900 shadow-2xs'
                         : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="text-base">{b.icon}</span>
-                      <span>{b.name}</span>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Sample1BuildingThumb
+                        style={b.style}
+                        w={b.w}
+                        h={b.h}
+                        sheetImg={sheetImgRef.current}
+                        sheetLoaded={sheetLoaded}
+                      />
+                      <div className="min-w-0">
+                        <span className="block truncate font-bold">{b.name}</span>
+                        <span className="block text-[10px] text-slate-500 truncate">{b.subtitle}</span>
+                      </div>
                     </div>
-                    <span className="text-[10px] font-mono text-slate-500">{b.w}x{b.h}</span>
+                    <span className="text-[10px] font-mono text-slate-500 shrink-0 ml-1">{b.w}x{b.h}</span>
                   </button>
                 ))}
               </div>

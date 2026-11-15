@@ -93,6 +93,7 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { db, auth } from './firebaseAuth';
+import { getFantasySkin } from '../data/fantasySkinsData';
 
 export interface UserGameProfile {
   uid: string;
@@ -193,6 +194,8 @@ export interface ArenaPlayer {
   kills: number;
   highGroundActive?: boolean;
   metalShieldActiveUntil?: number;
+  brittleGuardUsedAt?: number;
+  royalAbsorptionUsedAt?: number;
 }
 
 export interface ArenaStructure {
@@ -224,6 +227,44 @@ export interface SupplyCrate {
   rewardType: 'shield' | 'materials';
   question: ScienceQuestion;
 }
+
+export interface SupplyCrateDropOptions {
+  center?: { x: number; y: number };
+  radius?: number;
+  x?: number;
+  y?: number;
+  rewardType?: 'shield' | 'materials';
+}
+
+export const samplePointWithinStormEye = (
+  center: { x: number; y: number },
+  radius: number,
+  mapSize: number = 5120,
+  marginPx?: number
+): { x: number; y: number } => {
+  const cx = Number.isFinite(center?.x) ? center.x : 2500;
+  const cy = Number.isFinite(center?.y) ? center.y : 2500;
+  const effectiveRadius = Math.max(40, Number.isFinite(radius) ? radius : 3600);
+  const edgeMargin = marginPx ?? Math.min(130, Math.max(20, effectiveRadius * 0.1));
+  const safeRadius = Math.max(16, effectiveRadius - edgeMargin);
+  const minBound = 140;
+  const maxBound = mapSize - 140;
+
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const angle = Math.random() * 2 * Math.PI;
+    const dist = Math.sqrt(Math.random()) * safeRadius;
+    const x = Math.round(cx + Math.cos(angle) * dist);
+    const y = Math.round(cy + Math.sin(angle) * dist);
+    if (x >= minBound && x <= maxBound && y >= minBound && y <= maxBound) {
+      return { x, y };
+    }
+  }
+
+  // Fallback: clamp center into map and sample tight safe point inside both storm and map
+  const clampedX = Math.max(minBound, Math.min(maxBound, Math.round(cx)));
+  const clampedY = Math.max(minBound, Math.min(maxBound, Math.round(cy)));
+  return { x: clampedX, y: clampedY };
+};
 
 // ============================================================================
 // SHOP CATALOG & ITEMS DEFINITION
@@ -1507,19 +1548,21 @@ export const startBattleRoyale = async (): Promise<void> => {
     const angle = (idx / count) * 2 * Math.PI;
     const x = Math.round(arenaCenter + Math.cos(angle) * spawnRadius);
     const y = Math.round(arenaCenter + Math.sin(angle) * spawnRadius);
+    const resolvedSkin = getFantasySkin(l.avatar || 'cultist');
+    const isKnightHero = resolvedSkin.id === 'knight_hero';
 
     const arenaPlayer: ArenaPlayer = {
       uid: l.uid,
       name: l.name,
-      avatar: l.avatar || 'cyber_scientist',
+      avatar: l.avatar || 'cultist',
       equippedWeapon: l.equippedWeapon || 'bunsen_burner',
       x,
       y,
       angle: angle + Math.PI, // look toward center
       hp: 100,
       maxHp: 100,
-      shield: 50,
-      maxShield: 100,
+      shield: isKnightHero ? 70 : 50,
+      maxShield: isKnightHero ? 120 : 100,
       wood: Math.max(10, l.wood || 20),
       brick: Math.max(10, l.brick || 10),
       metal: Math.max(5, l.metal || 5),
@@ -1532,24 +1575,24 @@ export const startBattleRoyale = async (): Promise<void> => {
     idx++;
   });
 
-  // 5. Spawn 10 initial Science Supply Crates across the map
+  // 5. Spawn 10 initial Science Supply Crates randomly within the opening Eye of the Storm
+  const initialCrates: SupplyCrate[] = [];
   for (let c = 0; c < 10; c++) {
     const q = CRATE_SCIENCE_QUESTIONS[c % CRATE_SCIENCE_QUESTIONS.length];
-    const crateAngle = Math.random() * 2 * Math.PI;
-    const crateDist = 300 + Math.random() * 1400;
-    const cx = Math.round(arenaCenter + Math.cos(crateAngle) * crateDist);
-    const cy = Math.round(arenaCenter + Math.sin(crateAngle) * crateDist);
+    const pt = samplePointWithinStormEye({ x: arenaCenter, y: arenaCenter }, 3600);
 
     const crateId = `crate_${Date.now()}_${c}`;
-    const crateRef = doc(db, 'battleEvent', 'crates', 'items', crateId);
-    batch.set(crateRef, {
+    const crateData: SupplyCrate = {
       id: crateId,
-      x: cx,
-      y: cy,
+      x: pt.x,
+      y: pt.y,
       isClaimed: false,
       rewardType: c % 2 === 0 ? 'shield' : 'materials',
       question: q
-    });
+    };
+    initialCrates.push(crateData);
+    const crateRef = doc(db, 'battleEvent', 'crates', 'items', crateId);
+    batch.set(crateRef, crateData);
   }
 
   // 6. Set state to IN_PROGRESS with 3600px border radius and randomized finish center
@@ -1567,7 +1610,7 @@ export const startBattleRoyale = async (): Promise<void> => {
   };
   setLocalGameItem(LOCAL_BATTLE_STATE_KEY, liveState);
   setLocalGameItem(LOCAL_STRUCTURES_KEY, []);
-  setLocalGameItem(LOCAL_CRATES_KEY, []);
+  setLocalGameItem(LOCAL_CRATES_KEY, initialCrates);
   batch.set(stateDoc, liveState);
 
   await batch.commit();
@@ -1792,104 +1835,194 @@ export const updatePlayerPosition = async (
   }
 };
 
+const computePlayerDamageOutcome = (
+  target: ArenaPlayer,
+  damageAmount: number,
+  isStormDamage: boolean,
+  nowMs: number
+): {
+  newShield: number;
+  newHp: number;
+  isKilled: boolean;
+  bricksGained: number;
+  brittleGuardTriggered: boolean;
+  royalAbsorptionUsedAt?: number;
+  brittleGuardUsedAt?: number;
+} => {
+  const skinDef = getFantasySkin(target.avatar || 'cultist');
+  let actualDamage = Math.max(1, damageAmount);
+  let bricksGained = 0;
+  let brittleGuardTriggered = false;
+  let royalAbsorptionUsedAt = target.royalAbsorptionUsedAt;
+  let brittleGuardUsedAt = target.brittleGuardUsedAt;
+
+  if (isStormDamage) {
+    // Dark Knight — Heavy Armor: Reduces incoming damage from the storm boundary by 50%
+    if (skinDef.id === 'dark_knight') {
+      actualDamage = Math.max(1, Math.round(actualDamage * 0.5));
+    }
+  } else {
+    // Metal Bunker active shield (-50% dmg)
+    if (target.metalShieldActiveUntil && target.metalShieldActiveUntil > nowMs) {
+      actualDamage = Math.round(actualDamage * 0.5);
+    }
+
+    // Skin Defense Stat mitigation (up to 25% damage reduction for armored skins)
+    const defReduction = Math.min(0.25, Math.max(0, ((skinDef.defense - 18) / 80) * 0.25));
+    actualDamage = Math.max(1, Math.round(actualDamage * (1 - defReduction)));
+
+    // Slime — Viscous Form: 15% physical combat impact dampening
+    if (skinDef.id === 'slime') {
+      actualDamage = Math.max(1, Math.round(actualDamage * 0.85));
+    }
+
+    // Slime King — Royal Absorption: Absorbs 50% of first shot (recharges every 10s) and turns into bricks
+    if (skinDef.id === 'slime_king' && (!target.royalAbsorptionUsedAt || nowMs - target.royalAbsorptionUsedAt >= 10000)) {
+      const absorbed = Math.max(1, Math.round(actualDamage * 0.5));
+      actualDamage = Math.max(1, actualDamage - absorbed);
+      bricksGained = Math.max(6, Math.round(absorbed * 0.5));
+      royalAbsorptionUsedAt = nowMs;
+    }
+  }
+
+  let newShield = target.shield;
+  let newHp = target.hp;
+
+  if (isStormDamage) {
+    newHp = Math.max(0, newHp - actualDamage);
+  } else {
+    if (newShield > 0) {
+      if (newShield >= actualDamage) {
+        newShield -= actualDamage;
+        actualDamage = 0;
+      } else {
+        actualDamage -= newShield;
+        newShield = 0;
+      }
+    }
+    newHp = Math.max(0, newHp - actualDamage);
+
+    // Skeleton — Brittle Guard: Absorbs single fatal physical strike with bone plating (25s recharge)
+    if (
+      newHp <= 0 &&
+      skinDef.id === 'skeleton_warrior' &&
+      (!target.brittleGuardUsedAt || nowMs - target.brittleGuardUsedAt >= 25000)
+    ) {
+      newHp = 20;
+      brittleGuardTriggered = true;
+      brittleGuardUsedAt = nowMs;
+    }
+  }
+
+  return {
+    newShield,
+    newHp,
+    isKilled: newHp <= 0,
+    bricksGained,
+    brittleGuardTriggered,
+    royalAbsorptionUsedAt,
+    brittleGuardUsedAt
+  };
+};
+
 /**
- * Deal damage to a player (absorbs shield first, then HP)
+ * Deal damage to a player (absorbs shield first, applies skin defense & special abilities)
  */
 export const damageArenaPlayer = async (
   targetUid: string,
   damageAmount: number,
   attackerUid?: string,
   isStormDamage: boolean = false
-): Promise<{ killed: boolean }> => {
+): Promise<{ killed: boolean; bricksGained?: number; brittleGuardTriggered?: boolean }> => {
   if (!targetUid) return { killed: false };
 
-  // Update local cache first
+  const nowMs = Date.now();
   const currentPlayers = getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []);
   const targetLocal = currentPlayers.find(p => p.uid === targetUid);
   let localKilled = false;
+  let localBricksGained = 0;
+  let localBrittleTriggered = false;
+
   if (targetLocal && targetLocal.isAlive) {
-    let actualDamage = damageAmount;
-    if (!isStormDamage && targetLocal.metalShieldActiveUntil && targetLocal.metalShieldActiveUntil > Date.now()) {
-      actualDamage = Math.round(actualDamage * 0.5);
+    const outcome = computePlayerDamageOutcome(targetLocal, damageAmount, isStormDamage, nowMs);
+    localKilled = outcome.isKilled;
+    localBricksGained = outcome.bricksGained;
+    localBrittleTriggered = outcome.brittleGuardTriggered;
+    targetLocal.shield = outcome.newShield;
+    targetLocal.hp = outcome.newHp;
+    targetLocal.isAlive = !outcome.isKilled;
+    if (outcome.bricksGained > 0) {
+      targetLocal.brick = (targetLocal.brick || 0) + outcome.bricksGained;
     }
-    let newShield = targetLocal.shield;
-    let newHp = targetLocal.hp;
-
-    if (isStormDamage) {
-      // Storm damage bypasses protective shields and directly decreases HP (8 HP per second)
-      newHp = Math.max(0, newHp - actualDamage);
-    } else {
-      if (newShield > 0) {
-        if (newShield >= actualDamage) {
-          newShield -= actualDamage;
-          actualDamage = 0;
-        } else {
-          actualDamage -= newShield;
-          newShield = 0;
-        }
-      }
-      newHp = Math.max(0, newHp - actualDamage);
+    if (outcome.royalAbsorptionUsedAt !== undefined) {
+      targetLocal.royalAbsorptionUsedAt = outcome.royalAbsorptionUsedAt;
     }
-
-    localKilled = newHp <= 0;
-    targetLocal.shield = newShield;
-    targetLocal.hp = newHp;
-    targetLocal.isAlive = !localKilled;
+    if (outcome.brittleGuardUsedAt !== undefined) {
+      targetLocal.brittleGuardUsedAt = outcome.brittleGuardUsedAt;
+    }
     setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, currentPlayers);
   }
 
-  if (!canPerformFirestoreWrite()) return { killed: localKilled };
+  if (!canPerformFirestoreWrite()) {
+    return {
+      killed: localKilled,
+      bricksGained: localBricksGained,
+      brittleGuardTriggered: localBrittleTriggered
+    };
+  }
 
   const targetDoc = doc(db, 'battleEvent', 'players', 'items', targetUid);
   try {
     const snap = await getDoc(targetDoc);
-    if (!snap.exists()) return { killed: localKilled };
+    if (!snap.exists()) {
+      return {
+        killed: localKilled,
+        bricksGained: localBricksGained,
+        brittleGuardTriggered: localBrittleTriggered
+      };
+    }
 
     const current = snap.data() as ArenaPlayer;
     if (!current.isAlive) return { killed: false };
 
-    let actualDamage = damageAmount;
-    if (!isStormDamage && current.metalShieldActiveUntil && current.metalShieldActiveUntil > Date.now()) {
-      actualDamage = Math.round(actualDamage * 0.5);
+    const outcome = computePlayerDamageOutcome(current, damageAmount, isStormDamage, nowMs);
+    const updatePayload: Record<string, any> = {
+      shield: outcome.newShield,
+      hp: outcome.newHp,
+      isAlive: !outcome.isKilled
+    };
+    if (outcome.bricksGained > 0) {
+      updatePayload.brick = increment(outcome.bricksGained);
+    }
+    if (outcome.royalAbsorptionUsedAt !== undefined) {
+      updatePayload.royalAbsorptionUsedAt = outcome.royalAbsorptionUsedAt;
+    }
+    if (outcome.brittleGuardUsedAt !== undefined) {
+      updatePayload.brittleGuardUsedAt = outcome.brittleGuardUsedAt;
     }
 
-    let newShield = current.shield;
-    let newHp = current.hp;
-
-    if (isStormDamage) {
-      newHp = Math.max(0, newHp - actualDamage);
-    } else {
-      if (newShield > 0) {
-        if (newShield >= actualDamage) {
-          newShield -= actualDamage;
-          actualDamage = 0;
-        } else {
-          actualDamage -= newShield;
-          newShield = 0;
-        }
-      }
-      newHp = Math.max(0, newHp - actualDamage);
-    }
-    const isKilled = newHp <= 0;
-
-    await setDoc(targetDoc, {
-      shield: newShield,
-      hp: newHp,
-      isAlive: !isKilled
-    }, { merge: true });
+    await setDoc(targetDoc, updatePayload, { merge: true });
 
     // Credit kill to attacker (if not environmental storm damage)
-    if (isKilled && attackerUid && attackerUid !== targetUid && !isStormDamage) {
+    if (outcome.isKilled && attackerUid && attackerUid !== targetUid && !isStormDamage) {
       const attackerDoc = doc(db, 'battleEvent', 'players', 'items', attackerUid);
       await setDoc(attackerDoc, {
         kills: increment(1)
       }, { merge: true }).catch(() => {});
     }
 
-    return { killed: isKilled };
+    return {
+      killed: outcome.isKilled,
+      bricksGained: outcome.bricksGained,
+      brittleGuardTriggered: outcome.brittleGuardTriggered
+    };
   } catch (err) {
     handleFirestoreError(err, 'damageArenaPlayer');
-    return { killed: localKilled };
+    return {
+      killed: localKilled,
+      bricksGained: localBricksGained,
+      brittleGuardTriggered: localBrittleTriggered
+    };
   }
 };
 
@@ -1982,38 +2115,43 @@ export const placeArenaStructure = async (
 /**
  * Damage or destroy a placed structure
  */
-export const damageArenaStructure = async (structureId: string, damage: number): Promise<void> => {
-  if (!structureId) return;
+export const damageArenaStructure = async (structureId: string, damage: number): Promise<{ destroyed: boolean }> => {
+  if (!structureId) return { destroyed: false };
 
+  let localDestroyed = false;
   const currentStructs = getLocalGameItem<ArenaStructure[]>(LOCAL_STRUCTURES_KEY, []);
   const structIdx = currentStructs.findIndex(s => s.id === structureId);
   if (structIdx >= 0) {
     const newHp = currentStructs[structIdx].hp - damage;
     if (newHp <= 0) {
       currentStructs.splice(structIdx, 1);
+      localDestroyed = true;
     } else {
       currentStructs[structIdx].hp = newHp;
     }
     setLocalGameItem(LOCAL_STRUCTURES_KEY, currentStructs);
   }
 
-  if (!canPerformFirestoreWrite()) return;
+  if (!canPerformFirestoreWrite()) return { destroyed: localDestroyed };
 
   const structDoc = doc(db, 'battleEvent', 'structures', 'items', structureId);
   try {
     const snap = await getDoc(structDoc);
-    if (!snap.exists()) return;
+    if (!snap.exists()) return { destroyed: localDestroyed };
 
     const current = snap.data() as ArenaStructure;
     const newHp = current.hp - damage;
 
     if (newHp <= 0) {
       await deleteDoc(structDoc);
+      return { destroyed: true };
     } else {
       await setDoc(structDoc, { hp: newHp }, { merge: true });
+      return { destroyed: false };
     }
   } catch (err) {
     handleFirestoreError(err, 'damageArenaStructure');
+    return { destroyed: localDestroyed };
   }
 };
 
@@ -2046,26 +2184,92 @@ export const subscribeToSupplyCrates = (
 };
 
 /**
- * Spawn a new randomized mid-game supply crate
+ * Compute live storm center and radius from battle state timestamps if callers omit explicit storm coordinates
  */
-export const dropMidGameSupplyCrate = async (): Promise<void> => {
-  const crateId = `crate_${Date.now()}`;
-  const arenaCenter = 2500;
-  const angle = Math.random() * 2 * Math.PI;
-  const dist = 200 + Math.random() * 1500;
-  const x = Math.round(arenaCenter + Math.cos(angle) * dist);
-  const y = Math.round(arenaCenter + Math.sin(angle) * dist);
-  const q = CRATE_SCIENCE_QUESTIONS[Math.floor(Math.random() * CRATE_SCIENCE_QUESTIONS.length)];
+const resolveActiveStormGeometry = (options?: SupplyCrateDropOptions): { center: { x: number; y: number }; radius: number } => {
+  if (options?.center && options?.radius !== undefined) {
+    return { center: options.center, radius: options.radius };
+  }
 
-  const crateRef = doc(db, 'battleEvent', 'crates', 'items', crateId);
-  await setDoc(crateRef, {
+  const cachedState = getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE);
+  let center = options?.center || cachedState.stormCenter || { x: 2500, y: 2500 };
+  let radius = options?.radius ?? (Number.isFinite(cachedState.stormRadius) ? cachedState.stormRadius : 3600);
+
+  if (cachedState.status === 'IN_PROGRESS' && cachedState.startedAt) {
+    const elapsedSec = Math.max(0, Math.min(600, (Date.now() - new Date(cachedState.startedAt).getTime()) / 1000));
+    if (elapsedSec < 600) {
+      const START_RADIUS = 3600;
+      const FINAL_RADIUS = 75;
+      const TOTAL_SHRINK = START_RADIUS - FINAL_RADIUS;
+      const NORMAL_RATE = TOTAL_SHRINK / 850;
+      const SURGE_RATE = NORMAL_RATE * 3.5;
+      const completedCycles = Math.floor(elapsedSec / 60);
+      const cycleSec = elapsedSec % 60;
+      let shrunk = completedCycles * 85 * NORMAL_RATE;
+      shrunk += cycleSec <= 50 ? cycleSec * NORMAL_RATE : 50 * NORMAL_RATE + (cycleSec - 50) * SURGE_RATE;
+      radius = Math.max(FINAL_RADIUS, START_RADIUS - shrunk);
+      const progress = Math.min(1, Math.max(0, (START_RADIUS - radius) / TOTAL_SHRINK));
+      const easeProgress = progress * progress * (3 - 2 * progress);
+      const finalCenter = cachedState.stormFinalCenter || { x: 2500, y: 2500 };
+      center = {
+        x: 2500 + (finalCenter.x - 2500) * easeProgress,
+        y: 2500 + (finalCenter.y - 2500) * easeProgress
+      };
+    }
+  }
+
+  return { center, radius };
+};
+
+/**
+ * Spawn a new randomized mid-game supply crate strictly within the current Eye of the Storm
+ */
+export const dropMidGameSupplyCrate = async (options?: SupplyCrateDropOptions): Promise<SupplyCrate | null> => {
+  const { center, radius } = resolveActiveStormGeometry(options);
+  let x = options?.x;
+  let y = options?.y;
+
+  // Validate explicit coords or sample uniformly within the safe storm circle
+  const safeRadius = Math.max(20, radius - Math.min(120, Math.max(20, radius * 0.08)));
+  if (
+    x === undefined ||
+    y === undefined ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    Math.hypot(x - center.x, y - center.y) > safeRadius
+  ) {
+    const pt = samplePointWithinStormEye(center, radius);
+    x = pt.x;
+    y = pt.y;
+  }
+
+  const crateId = `crate_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const q = CRATE_SCIENCE_QUESTIONS[Math.floor(Math.random() * CRATE_SCIENCE_QUESTIONS.length)];
+  const newCrate: SupplyCrate = {
     id: crateId,
-    x,
-    y,
+    x: Math.round(x),
+    y: Math.round(y),
     isClaimed: false,
-    rewardType: Math.random() > 0.5 ? 'shield' : 'materials',
+    rewardType: options?.rewardType || (Math.random() > 0.5 ? 'shield' : 'materials'),
     question: q
-  });
+  };
+
+  // Always update local fallback immediately so offline/solo testing works instantaneously
+  const existingCrates = getLocalGameItem<SupplyCrate[]>(LOCAL_CRATES_KEY, []);
+  setLocalGameItem(LOCAL_CRATES_KEY, [...existingCrates, newCrate]);
+
+  if (!canPerformFirestoreWrite()) {
+    return newCrate;
+  }
+
+  try {
+    const crateRef = doc(db, 'battleEvent', 'crates', 'items', crateId);
+    await setDoc(crateRef, newCrate);
+  } catch (err) {
+    handleFirestoreError(err, 'dropMidGameSupplyCrate');
+  }
+
+  return newCrate;
 };
 
 /**
@@ -2077,26 +2281,58 @@ export const claimSupplyCrate = async (
   rewardType: 'shield' | 'materials'
 ): Promise<void> => {
   if (!crateId || !uid) return;
+
+  // Immediately remove from local crate cache
+  const existingCrates = getLocalGameItem<SupplyCrate[]>(LOCAL_CRATES_KEY, []);
+  setLocalGameItem(LOCAL_CRATES_KEY, existingCrates.filter(c => c.id !== crateId));
+
+  // Apply reward to local player cache
+  const currentPlayers = getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []);
+  const playerIdx = currentPlayers.findIndex(p => p.uid === uid);
+  let isGoblin = false;
+  let maxShieldCap = 100;
+  if (playerIdx >= 0) {
+    const p = currentPlayers[playerIdx];
+    const skinDef = getFantasySkin(p.avatar || 'cultist');
+    isGoblin = skinDef.id === 'goblin';
+    maxShieldCap = skinDef.id === 'knight_hero' ? 120 : (p.maxShield || 100);
+    if (rewardType === 'shield') {
+      p.shield = Math.min(maxShieldCap, (p.shield || 0) + 50);
+    } else {
+      p.wood = (p.wood || 0) + (isGoblin ? 30 : 20);
+      p.brick = (p.brick || 0) + (isGoblin ? 23 : 15);
+      p.metal = (p.metal || 0) + (isGoblin ? 15 : 10);
+    }
+    setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, currentPlayers);
+  }
+
+  if (!canPerformFirestoreWrite()) return;
+
   const crateDoc = doc(db, 'battleEvent', 'crates', 'items', crateId);
   const playerDoc = doc(db, 'battleEvent', 'players', 'items', uid);
 
   try {
-    // Delete crate or mark claimed
     await deleteDoc(crateDoc);
 
-    // Apply reward
     if (rewardType === 'shield') {
+      const pSnap = await getDoc(playerDoc);
+      const currentShield = pSnap.exists() ? Number(pSnap.data()?.shield || 0) : 0;
+      const cap = pSnap.exists() && getFantasySkin(pSnap.data()?.avatar || 'cultist').id === 'knight_hero' ? 120 : maxShieldCap;
       await setDoc(playerDoc, {
-        shield: increment(50)
+        shield: Math.min(cap, currentShield + 50)
       }, { merge: true });
     } else {
       await setDoc(playerDoc, {
-        wood: increment(20),
-        brick: increment(15),
-        metal: increment(10)
+        wood: increment(isGoblin ? 30 : 20),
+        brick: increment(isGoblin ? 23 : 15),
+        metal: increment(isGoblin ? 15 : 10)
       }, { merge: true });
     }
+
+    if (isGoblin) {
+      await setDoc(doc(db, 'users', uid), { gold: increment(15) }, { merge: true }).catch(() => {});
+    }
   } catch (err) {
-    console.warn('Error claiming supply crate:', err);
+    handleFirestoreError(err, 'claimSupplyCrate');
   }
 };

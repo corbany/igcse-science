@@ -49,6 +49,7 @@ import {
   endBattleRoyale,
   dropMidGameSupplyCrate,
   clearArenaStructures,
+  samplePointWithinStormEye,
   SHOP_ITEMS,
   ShopItem,
   equipItem
@@ -88,6 +89,10 @@ export interface BuildingTile {
   row: number; // grid tile row
   sheetCol: number;
   sheetRow: number;
+  baseSheetCol?: number; // backdrop wall drawn behind translucent gables, windows & doors
+  baseSheetRow?: number;
+  overlayCol?: number; // optional roof weathervane / trim overlay
+  overlayRow?: number;
   isRoof?: boolean;
 }
 
@@ -105,6 +110,7 @@ export interface GeneratedBuilding {
   style: BuildingStyle;
   tiles: BuildingTile[];
   hitbox: { x: number; y: number; w: number; h: number };
+  hitboxes?: Array<{ x: number; y: number; w: number; h: number }>;
   doorway: { x: number; y: number; w: number; h: number };
   perimeterProps: SceneryProp[];
   interiorLoot: GroundLootItem[];
@@ -121,6 +127,8 @@ interface TileData {
   sheetRow: number;
   overlayCol?: number;
   overlayRow?: number;
+  lilyCol?: number; // Water lily pad / flower overlay from roguelikeSheet
+  lilyRow?: number;
   hasRoadMarking?: 'h_dash' | 'v_dash' | 'crosswalk' | null;
   detailType: number;
   isWater?: boolean;
@@ -196,6 +204,8 @@ interface Projectile {
   weaponId: string;
   color: string;
   isHighGround?: boolean;
+  isDragonBlood?: boolean;
+  isWindWalker?: boolean;
 }
 
 interface ParticleFX {
@@ -314,10 +324,11 @@ export const SPRITE_MANIFEST: Record<string, string> = {
   `),
   prop_tent: createSvgDataUri(`
     <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">
-      <ellipse cx="40" cy="70" rx="36" ry="8" fill="#000000" fill-opacity="0.35"/>
-      <polygon points="10,68 70,68 40,16" fill="#d97706"/>
-      <polygon points="10,68 40,68 40,16" fill="#b45309"/>
-      <polygon points="32,68 48,68 40,36" fill="#1e293b"/>
+      <ellipse cx="40" cy="70" rx="34" ry="7" fill="#000000" fill-opacity="0.28"/>
+      <polygon points="8,66 72,66 64,26 40,12 16,26" fill="#4ba86d" stroke="#24633d" stroke-width="2.5"/>
+      <polygon points="18,66 62,66 40,14" fill="#5eb780" stroke="#24633d" stroke-width="2"/>
+      <polygon points="24,66 56,66 40,34" fill="#307e4d"/>
+      <line x1="40" y1="34" x2="40" y2="66" stroke="#164228" stroke-width="3"/>
     </svg>
   `),
   prop_fence: createSvgDataUri(`
@@ -699,11 +710,13 @@ class ArenaSoundEngine {
     sourceY: number,
     listenerX: number,
     listenerY: number,
-    surface: string = 'grass'
+    surface: string = 'grass',
+    volumeScale: number = 1
   ) {
-    const bus = this.getSpatialBus(sourceX, sourceY, listenerX, listenerY, 600);
+    const bus = this.getSpatialBus(sourceX, sourceY, listenerX, listenerY, Math.round(600 * Math.max(0.25, volumeScale)));
     if (!bus || !this.ctx) return;
 
+    const effectiveGain = bus.gainFactor * volumeScale;
     const t = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
@@ -714,7 +727,7 @@ class ArenaSoundEngine {
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(140, t);
       osc.frequency.exponentialRampToValueAtTime(60, t + 0.04);
-      gain.gain.setValueAtTime(0.18 * bus.gainFactor, t);
+      gain.gain.setValueAtTime(0.18 * effectiveGain, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
       osc.start(t);
       osc.stop(t + 0.04);
@@ -722,7 +735,7 @@ class ArenaSoundEngine {
       osc.type = 'sine';
       osc.frequency.setValueAtTime(100, t);
       osc.frequency.exponentialRampToValueAtTime(45, t + 0.05);
-      gain.gain.setValueAtTime(0.12 * bus.gainFactor, t);
+      gain.gain.setValueAtTime(0.12 * effectiveGain, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
       osc.start(t);
       osc.stop(t + 0.05);
@@ -730,7 +743,7 @@ class ArenaSoundEngine {
       osc.type = 'square';
       osc.frequency.setValueAtTime(220, t);
       osc.frequency.exponentialRampToValueAtTime(80, t + 0.035);
-      gain.gain.setValueAtTime(0.14 * bus.gainFactor, t);
+      gain.gain.setValueAtTime(0.14 * effectiveGain, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
       osc.start(t);
       osc.stop(t + 0.035);
@@ -739,7 +752,7 @@ class ArenaSoundEngine {
       osc.type = 'sine';
       osc.frequency.setValueAtTime(90, t);
       osc.frequency.exponentialRampToValueAtTime(40, t + 0.045);
-      gain.gain.setValueAtTime(0.14 * bus.gainFactor, t);
+      gain.gain.setValueAtTime(0.14 * effectiveGain, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.045);
       osc.start(t);
       osc.stop(t + 0.045);
@@ -962,6 +975,43 @@ class ArenaSoundEngine {
       gain.gain.exponentialRampToValueAtTime(0.01, t + idx * 0.12 + 0.35);
       osc.start(t + idx * 0.12);
       osc.stop(t + idx * 0.12 + 0.35);
+    });
+  }
+
+  playSonarPing() {
+    if (!this.sfxEnabled) return;
+    this.initCtx();
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1320, t);
+    osc.frequency.exponentialRampToValueAtTime(880, t + 0.14);
+    gain.gain.setValueAtTime(0.1, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    osc.start(t);
+    osc.stop(t + 0.16);
+  }
+
+  playSupplyDrop() {
+    if (!this.sfxEnabled) return;
+    this.initCtx();
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    [587.33, 880].forEach((freq, idx) => {
+      const osc = this.ctx!.createOscillator();
+      const gain = this.ctx!.createGain();
+      osc.connect(gain);
+      gain.connect(this.sfxGain!);
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, t + idx * 0.09);
+      gain.gain.setValueAtTime(0.14, t + idx * 0.09);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + idx * 0.09 + 0.2);
+      osc.start(t + idx * 0.09);
+      osc.stop(t + idx * 0.09 + 0.21);
     });
   }
 
@@ -1272,103 +1322,148 @@ interface BuildingStyleConfig {
   primaryMat: 'brick' | 'wood' | 'metal';
 }
 
+// Sample1 Kenney Roguelike Building Palette (Warm Tan Shingle Roofs + Cream Stucco Walls)
+const SAMPLE1_ROOF = {
+  peakL: { col: 20, row: 21 },
+  peakR: { col: 21, row: 21 },
+  slopeL: { col: 20, row: 22 },
+  slopeR: { col: 21, row: 22 },
+  gableL: { col: 20, row: 23 },
+  gableR: { col: 21, row: 23 },
+  gableMidTrim: { col: 22, row: 22 },
+  hTopL: { col: 24, row: 21 },
+  hTopM: { col: 25, row: 21 },
+  hTopR: { col: 26, row: 21 },
+  hBotL: { col: 24, row: 22 },
+  hBotM: { col: 25, row: 22 },
+  hBotR: { col: 26, row: 22 }
+};
+
+const SAMPLE1_WALL = {
+  midL: { col: 17, row: 15 },
+  midC: { col: 18, row: 15 },
+  midR: { col: 19, row: 15 },
+  botL: { col: 14, row: 15 },
+  botC: { col: 13, row: 15 },
+  botR: { col: 16, row: 15 },
+  eaveL: { col: 17, row: 16 },
+  eaveC: { col: 18, row: 16 },
+  eaveR: { col: 19, row: 16 }
+};
+
+const SAMPLE1_FEATURES = {
+  windowLattice: { col: 46, row: 5 },
+  doorWoodSingle: { col: 45, row: 4 },
+  doorBarnL: { col: 28, row: 8 },
+  doorBarnR: { col: 29, row: 8 },
+  weathervane: { col: 52, row: 10 },
+  porchDeck: { col: 42, row: 28 },
+  porchRailL: { col: 41, row: 28 },
+  trashBin: { col: 26, row: 7 },
+  brickKiln: { col: 26, row: 8 }
+};
+
 const BUILDING_STYLES: Record<BuildingStyle, BuildingStyleConfig> = {
   terracotta: {
-    roofTL: { col: 2, row: 18 },
-    roofTM: { col: 3, row: 18 },
-    roofTR: { col: 4, row: 18 },
-    roofML: { col: 2, row: 19 },
-    roofMM: { col: 3, row: 19 },
-    roofMR: { col: 4, row: 19 },
-    wallL: { col: 20, row: 12 },
-    wallM: { col: 21, row: 12 },
-    wallR: { col: 22, row: 12 },
-    wallWindow: { col: 23, row: 12 },
-    foundationL: { col: 20, row: 13 },
-    foundationM: { col: 21, row: 13 },
-    foundationR: { col: 22, row: 13 },
-    door: { col: 19, row: 13 },
-    floor: { col: 20, row: 14, surface: 'stone', color: '#475569' },
+    roofTL: SAMPLE1_ROOF.peakL,
+    roofTM: SAMPLE1_ROOF.hTopM,
+    roofTR: SAMPLE1_ROOF.peakR,
+    roofML: SAMPLE1_ROOF.slopeL,
+    roofMM: SAMPLE1_ROOF.hBotM,
+    roofMR: SAMPLE1_ROOF.slopeR,
+    wallL: SAMPLE1_WALL.midL,
+    wallM: SAMPLE1_WALL.midC,
+    wallR: SAMPLE1_WALL.midR,
+    wallWindow: SAMPLE1_FEATURES.windowLattice,
+    foundationL: SAMPLE1_WALL.botL,
+    foundationM: SAMPLE1_WALL.botC,
+    foundationR: SAMPLE1_WALL.botR,
+    door: SAMPLE1_FEATURES.doorWoodSingle,
+    floor: { col: 12, row: 3, surface: 'dirt', color: '#78350f' },
     primaryMat: 'brick'
   },
   wood: {
-    roofTL: { col: 10, row: 17 },
-    roofTM: { col: 11, row: 17 },
-    roofTR: { col: 12, row: 17 },
-    roofML: { col: 10, row: 18 },
-    roofMM: { col: 11, row: 18 },
-    roofMR: { col: 12, row: 18 },
-    wallL: { col: 13, row: 12 },
-    wallM: { col: 14, row: 12 },
-    wallR: { col: 15, row: 12 },
-    wallWindow: { col: 14, row: 13 },
-    foundationL: { col: 13, row: 13 },
-    foundationM: { col: 14, row: 13 },
-    foundationR: { col: 15, row: 13 },
-    door: { col: 11, row: 13 },
+    roofTL: SAMPLE1_ROOF.peakL,
+    roofTM: SAMPLE1_ROOF.hTopM,
+    roofTR: SAMPLE1_ROOF.peakR,
+    roofML: SAMPLE1_ROOF.slopeL,
+    roofMM: SAMPLE1_ROOF.hBotM,
+    roofMR: SAMPLE1_ROOF.slopeR,
+    wallL: SAMPLE1_WALL.midL,
+    wallM: SAMPLE1_WALL.midC,
+    wallR: SAMPLE1_WALL.midR,
+    wallWindow: SAMPLE1_FEATURES.windowLattice,
+    foundationL: SAMPLE1_WALL.botL,
+    foundationM: SAMPLE1_WALL.botC,
+    foundationR: SAMPLE1_WALL.botR,
+    door: SAMPLE1_FEATURES.doorBarnL,
     floor: { col: 12, row: 3, surface: 'dirt', color: '#78350f' },
     primaryMat: 'wood'
   },
   castle: {
-    roofTL: { col: 21, row: 26 },
-    roofTM: { col: 22, row: 26 },
-    roofTR: { col: 23, row: 26 },
-    roofML: { col: 21, row: 27 },
-    roofMM: { col: 22, row: 27 },
-    roofMR: { col: 23, row: 27 },
-    wallL: { col: 20, row: 12 },
-    wallM: { col: 21, row: 12 },
-    wallR: { col: 22, row: 12 },
-    wallWindow: { col: 23, row: 12 },
-    foundationL: { col: 20, row: 13 },
-    foundationM: { col: 21, row: 13 },
-    foundationR: { col: 22, row: 13 },
-    door: { col: 20, row: 13 },
-    floor: { col: 20, row: 14, surface: 'stone', color: '#334155' },
+    roofTL: SAMPLE1_ROOF.peakL,
+    roofTM: SAMPLE1_ROOF.hTopM,
+    roofTR: SAMPLE1_ROOF.peakR,
+    roofML: SAMPLE1_ROOF.slopeL,
+    roofMM: SAMPLE1_ROOF.hBotM,
+    roofMR: SAMPLE1_ROOF.slopeR,
+    wallL: SAMPLE1_WALL.midL,
+    wallM: SAMPLE1_WALL.midC,
+    wallR: SAMPLE1_WALL.midR,
+    wallWindow: SAMPLE1_FEATURES.windowLattice,
+    foundationL: SAMPLE1_WALL.botL,
+    foundationM: SAMPLE1_WALL.botC,
+    foundationR: SAMPLE1_WALL.botR,
+    door: SAMPLE1_FEATURES.doorWoodSingle,
+    floor: { col: 20, row: 14, surface: 'stone', color: '#475569' },
     primaryMat: 'brick'
   },
   stone: {
-    roofTL: { col: 21, row: 26 },
-    roofTM: { col: 22, row: 26 },
-    roofTR: { col: 23, row: 26 },
-    roofML: { col: 21, row: 27 },
-    roofMM: { col: 22, row: 27 },
-    roofMR: { col: 23, row: 27 },
-    wallL: { col: 20, row: 12 },
-    wallM: { col: 21, row: 12 },
-    wallR: { col: 22, row: 12 },
-    wallWindow: { col: 23, row: 12 },
-    foundationL: { col: 20, row: 13 },
-    foundationM: { col: 21, row: 13 },
-    foundationR: { col: 22, row: 13 },
-    door: { col: 19, row: 13 },
+    roofTL: SAMPLE1_ROOF.peakL,
+    roofTM: SAMPLE1_ROOF.hTopM,
+    roofTR: SAMPLE1_ROOF.peakR,
+    roofML: SAMPLE1_ROOF.slopeL,
+    roofMM: SAMPLE1_ROOF.hBotM,
+    roofMR: SAMPLE1_ROOF.slopeR,
+    wallL: SAMPLE1_WALL.midL,
+    wallM: SAMPLE1_WALL.midC,
+    wallR: SAMPLE1_WALL.midR,
+    wallWindow: SAMPLE1_FEATURES.windowLattice,
+    foundationL: SAMPLE1_WALL.botL,
+    foundationM: SAMPLE1_WALL.botC,
+    foundationR: SAMPLE1_WALL.botR,
+    door: SAMPLE1_FEATURES.doorWoodSingle,
     floor: { col: 21, row: 14, surface: 'stone', color: '#475569' },
     primaryMat: 'brick'
   },
   brick: {
-    roofTL: { col: 12, row: 26 },
-    roofTM: { col: 13, row: 26 },
-    roofTR: { col: 14, row: 26 },
-    roofML: { col: 12, row: 27 },
-    roofMM: { col: 13, row: 27 },
-    roofMR: { col: 14, row: 27 },
-    wallL: { col: 24, row: 12 },
-    wallM: { col: 25, row: 12 },
-    wallR: { col: 26, row: 12 },
-    wallWindow: { col: 23, row: 12 },
-    foundationL: { col: 24, row: 13 },
-    foundationM: { col: 25, row: 13 },
-    foundationR: { col: 26, row: 13 },
-    door: { col: 19, row: 13 },
+    roofTL: SAMPLE1_ROOF.peakL,
+    roofTM: SAMPLE1_ROOF.hTopM,
+    roofTR: SAMPLE1_ROOF.peakR,
+    roofML: SAMPLE1_ROOF.slopeL,
+    roofMM: SAMPLE1_ROOF.hBotM,
+    roofMR: SAMPLE1_ROOF.slopeR,
+    wallL: SAMPLE1_WALL.midL,
+    wallM: SAMPLE1_WALL.midC,
+    wallR: SAMPLE1_WALL.midR,
+    wallWindow: SAMPLE1_FEATURES.windowLattice,
+    foundationL: SAMPLE1_WALL.botL,
+    foundationM: SAMPLE1_WALL.botC,
+    foundationR: SAMPLE1_WALL.botR,
+    door: SAMPLE1_FEATURES.doorWoodSingle,
     floor: { col: 22, row: 14, surface: 'stone', color: '#334155' },
     primaryMat: 'brick'
   }
 };
 
+export function getBuildingHitboxes(bldg: GeneratedBuilding): Array<{ x: number; y: number; w: number; h: number }> {
+  return bldg.hitboxes && bldg.hitboxes.length > 0 ? bldg.hitboxes : [bldg.hitbox];
+}
+
 /**
- * 3. BUILDING PREFAB GENERATOR & DRAW FUNCTIONS
- * Calculates correct corner, wall, window, roof, and door tile offsets from the sheet grid,
- * and builds valid hitboxes so the player collides with walls and doors instead of walking through roofs.
+ * 3. BUILDING PREFAB GENERATOR & DRAW FUNCTIONS (Modeled directly after Sample1)
+ * Builds multi-layered tan gabled roofs + cream stucco walls + lattice windows + wooden/barn doors,
+ * and constructs accurate rectangular or L-shaped hitboxes so roofs/walls are solid and doorways passable.
  */
 export function generateBuilding(
   x: number, // tile column or pixel coordinate
@@ -1380,7 +1475,7 @@ export function generateBuilding(
 ): GeneratedBuilding {
   const tileX = x > 180 ? Math.floor(x / WORLD_TILE_SIZE) : Math.floor(x);
   const tileY = y > 180 ? Math.floor(y / WORLD_TILE_SIZE) : Math.floor(y);
-  const wTiles = Math.max(3, Math.floor(width));
+  const wTiles = Math.max(2, Math.floor(width));
   const hTiles = Math.max(3, Math.floor(height));
 
   const worldX = tileX * WORLD_TILE_SIZE;
@@ -1390,88 +1485,285 @@ export function generateBuilding(
 
   const conf = BUILDING_STYLES[style] || BUILDING_STYLES.stone;
   const tiles: BuildingTile[] = [];
+  const bldgId = `bldg_${tileX}_${tileY}`;
 
-  const roofRowCount = hTiles >= 4 ? 2 : 1;
-  const doorRelC = Math.floor(wTiles / 2);
+  // Helper to push a gable wing (used for Barn, Village House, Cottage, Porch Villa, and L-Manor main wing)
+  const buildGableWing = (
+    wingStartCol: number,
+    wingW: number,
+    wingH: number,
+    options: {
+      isBarnDoor?: boolean;
+      hasWeathervane?: boolean;
+      doorColRel?: number;
+    } = {}
+  ) => {
+    const slopeRows = wingH >= 4 ? 2 : 1; // dr=0 (peak), optional dr=1 (full slope)
+    const gableRow = wingH >= 4 ? 2 : 1;
+    const doorRow = wingH - 1;
+    const doorCol = options.doorColRel ?? (wingW === 2 ? 0 : Math.floor(wingW / 2));
 
-  // Generate building tile slice offsets
-  for (let dr = 0; dr < hTiles; dr++) {
-    for (let dc = 0; dc < wTiles; dc++) {
-      const c = tileX + dc;
-      const r = tileY + dr;
-      let sheetCol = conf.wallM.col;
-      let sheetRow = conf.wallM.row;
-      let isRoof = false;
+    for (let dr = 0; dr < wingH; dr++) {
+      for (let dc = 0; dc < wingW; dc++) {
+        const c = tileX + wingStartCol + dc;
+        const r = tileY + dr;
+        const isL = dc === 0;
+        const isR = dc === wingW - 1;
 
-      // 1. Roof Top Row
-      if (dr === 0) {
-        isRoof = true;
-        if (dc === 0) {
-          sheetCol = conf.roofTL.col;
-          sheetRow = conf.roofTL.row;
-        } else if (dc === wTiles - 1) {
-          sheetCol = conf.roofTR.col;
-          sheetRow = conf.roofTR.row;
-        } else {
-          sheetCol = conf.roofTM.col;
-          sheetRow = conf.roofTM.row;
+        // 1. Gable Peak Row (dr === 0)
+        if (dr === 0) {
+          const sprite = isL ? SAMPLE1_ROOF.peakL : isR ? SAMPLE1_ROOF.peakR : SAMPLE1_ROOF.hTopM;
+          tiles.push({
+            col: c,
+            row: r,
+            sheetCol: sprite.col,
+            sheetRow: sprite.row,
+            overlayCol: options.hasWeathervane && isL ? SAMPLE1_FEATURES.weathervane.col : undefined,
+            overlayRow: options.hasWeathervane && isL ? SAMPLE1_FEATURES.weathervane.row : undefined,
+            isRoof: true
+          });
+        }
+        // 2. Full Tan Roof Slope Row (dr === 1 when wingH >= 4)
+        else if (dr === 1 && slopeRows >= 2) {
+          const sprite = isL ? SAMPLE1_ROOF.slopeL : isR ? SAMPLE1_ROOF.slopeR : SAMPLE1_ROOF.hBotM;
+          tiles.push({
+            col: c,
+            row: r,
+            sheetCol: sprite.col,
+            sheetRow: sprite.row,
+            isRoof: true
+          });
+        }
+        // 3. Triangular Cream Gable Cutout Row (dr === gableRow)
+        else if (dr === gableRow && dr < doorRow) {
+          const base = isL ? SAMPLE1_WALL.midL : isR ? SAMPLE1_WALL.midR : SAMPLE1_WALL.midC;
+          if (isL) {
+            tiles.push({
+              col: c,
+              row: r,
+              baseSheetCol: base.col,
+              baseSheetRow: base.row,
+              sheetCol: SAMPLE1_ROOF.gableL.col,
+              sheetRow: SAMPLE1_ROOF.gableL.row,
+              isRoof: true
+            });
+          } else if (isR) {
+            tiles.push({
+              col: c,
+              row: r,
+              baseSheetCol: base.col,
+              baseSheetRow: base.row,
+              sheetCol: SAMPLE1_ROOF.gableR.col,
+              sheetRow: SAMPLE1_ROOF.gableR.row,
+              isRoof: true
+            });
+          } else {
+            // Center of gable: if wingH === 4 and not a barn, place lattice window cleanly beneath eave ridge
+            const showWindowInGable = wingH === 4 && !options.isBarnDoor && dc === doorCol;
+            tiles.push({
+              col: c,
+              row: r,
+              baseSheetCol: base.col,
+              baseSheetRow: base.row,
+              sheetCol: showWindowInGable ? SAMPLE1_FEATURES.windowLattice.col : SAMPLE1_ROOF.gableMidTrim.col,
+              sheetRow: showWindowInGable ? SAMPLE1_FEATURES.windowLattice.row : SAMPLE1_ROOF.gableMidTrim.row,
+              overlayCol: showWindowInGable ? SAMPLE1_ROOF.gableMidTrim.col : undefined,
+              overlayRow: showWindowInGable ? SAMPLE1_ROOF.gableMidTrim.row : undefined,
+              isRoof: false
+            });
+          }
+        }
+        // 4. Upper Cream Stucco Wall Rows (e.g., dr === 3 on 5-tile-tall Village House)
+        else if (dr < doorRow) {
+          const base = isL ? SAMPLE1_WALL.midL : isR ? SAMPLE1_WALL.midR : SAMPLE1_WALL.midC;
+          const hasWin =
+            (wingW >= 3 && dc === doorCol) ||
+            (wingW >= 4 && !isL && !isR && dc % 2 === 1);
+          tiles.push({
+            col: c,
+            row: r,
+            baseSheetCol: hasWin ? base.col : undefined,
+            baseSheetRow: hasWin ? base.row : undefined,
+            sheetCol: hasWin ? SAMPLE1_FEATURES.windowLattice.col : base.col,
+            sheetRow: hasWin ? SAMPLE1_FEATURES.windowLattice.row : base.row,
+            isRoof: false
+          });
+        }
+        // 5. Ground Wall & Doorway Row (dr === doorRow)
+        else {
+          const base = isL ? SAMPLE1_WALL.botL : isR ? SAMPLE1_WALL.botR : SAMPLE1_WALL.botC;
+          if (options.isBarnDoor && wingW === 2) {
+            const barnOverlay = isL ? SAMPLE1_FEATURES.doorBarnL : SAMPLE1_FEATURES.doorBarnR;
+            tiles.push({
+              col: c,
+              row: r,
+              baseSheetCol: base.col,
+              baseSheetRow: base.row,
+              sheetCol: barnOverlay.col,
+              sheetRow: barnOverlay.row,
+              isRoof: false
+            });
+          } else if (options.isBarnDoor && wingW >= 3 && (dc === doorCol || dc === doorCol - 1)) {
+            const barnOverlay = dc === doorCol - 1 ? SAMPLE1_FEATURES.doorBarnL : SAMPLE1_FEATURES.doorBarnR;
+            tiles.push({
+              col: c,
+              row: r,
+              baseSheetCol: base.col,
+              baseSheetRow: base.row,
+              sheetCol: barnOverlay.col,
+              sheetRow: barnOverlay.row,
+              isRoof: false
+            });
+          } else if (dc === doorCol) {
+            tiles.push({
+              col: c,
+              row: r,
+              baseSheetCol: base.col,
+              baseSheetRow: base.row,
+              sheetCol: SAMPLE1_FEATURES.doorWoodSingle.col,
+              sheetRow: SAMPLE1_FEATURES.doorWoodSingle.row,
+              isRoof: false
+            });
+          } else if (!isL && !isR && wingW >= 4 && dc % 2 === 0) {
+            tiles.push({
+              col: c,
+              row: r,
+              baseSheetCol: base.col,
+              baseSheetRow: base.row,
+              sheetCol: SAMPLE1_FEATURES.windowLattice.col,
+              sheetRow: SAMPLE1_FEATURES.windowLattice.row,
+              isRoof: false
+            });
+          } else {
+            tiles.push({
+              col: c,
+              row: r,
+              sheetCol: base.col,
+              sheetRow: base.row,
+              isRoof: false
+            });
+          }
         }
       }
-      // 2. Roof Lower / Overhang Row
-      else if (dr === 1 && roofRowCount > 1) {
-        isRoof = true;
-        if (dc === 0) {
-          sheetCol = conf.roofML?.col ?? conf.roofTL.col;
-          sheetRow = conf.roofML?.row ?? conf.roofTL.row;
-        } else if (dc === wTiles - 1) {
-          sheetCol = conf.roofMR?.col ?? conf.roofTR.col;
-          sheetRow = conf.roofMR?.row ?? conf.roofTR.row;
-        } else {
-          sheetCol = conf.roofMM?.col ?? conf.roofTM.col;
-          sheetRow = conf.roofMM?.row ?? conf.roofTM.row;
-        }
-      }
-      // 3. Wall Middle Rows
-      else if (dr < hTiles - 1) {
-        if (dc === 0) {
-          sheetCol = conf.wallL.col;
-          sheetRow = conf.wallL.row;
-        } else if (dc === wTiles - 1) {
-          sheetCol = conf.wallR.col;
-          sheetRow = conf.wallR.row;
-        } else if (dc % 2 === 1 && dc !== doorRelC) {
-          sheetCol = conf.wallWindow.col;
-          sheetRow = conf.wallWindow.row;
-        } else {
-          sheetCol = conf.wallM.col;
-          sheetRow = conf.wallM.row;
-        }
-      }
-      // 4. Door / Foundation Bottom Row
-      else {
-        if (dc === 0) {
-          sheetCol = conf.foundationL.col;
-          sheetRow = conf.foundationL.row;
-        } else if (dc === wTiles - 1) {
-          sheetCol = conf.foundationR.col;
-          sheetRow = conf.foundationR.row;
-        } else if (dc === doorRelC) {
-          sheetCol = conf.door.col;
-          sheetRow = conf.door.row;
-        } else {
-          sheetCol = conf.foundationM.col;
-          sheetRow = conf.foundationM.row;
-        }
-      }
-
-      tiles.push({
-        col: c,
-        row: r,
-        sheetCol,
-        sheetRow,
-        isRoof
-      });
     }
+  };
+
+  let hitboxes: Array<{ x: number; y: number; w: number; h: number }> | undefined;
+  let doorWorldX = (tileX + Math.floor(wTiles / 2)) * WORLD_TILE_SIZE;
+  const doorWorldY = (tileY + hTiles - 1) * WORLD_TILE_SIZE;
+  let doorW = WORLD_TILE_SIZE - 8;
+
+  // Build Sample1 architectural archetype by style & footprint
+  if (style === 'castle' && wTiles >= 4 && hTiles >= 4) {
+    // L-Shaped Manor (Sample1 bottom-left complex): Main vertical gable wing + lower horizontal wing
+    const mainW = wTiles >= 5 ? 3 : 2;
+    const wingW = wTiles - mainW;
+    const mainDoorRel = mainW === 2 ? 0 : 1;
+    buildGableWing(0, mainW, hTiles, { doorColRel: mainDoorRel });
+
+    const wingTopRow = Math.max(1, hTiles - 3);
+    for (let dr = wingTopRow; dr < hTiles; dr++) {
+      for (let dc = mainW; dc < wTiles; dc++) {
+        const c = tileX + dc;
+        const r = tileY + dr;
+        const isWingR = dc === wTiles - 1;
+        if (dr === wingTopRow) {
+          const sp = isWingR ? SAMPLE1_ROOF.hTopR : SAMPLE1_ROOF.hTopM;
+          tiles.push({ col: c, row: r, sheetCol: sp.col, sheetRow: sp.row, isRoof: true });
+        } else if (dr === wingTopRow + 1) {
+          const sp = isWingR ? SAMPLE1_ROOF.hBotR : SAMPLE1_ROOF.hBotM;
+          tiles.push({ col: c, row: r, sheetCol: sp.col, sheetRow: sp.row, isRoof: true });
+        } else {
+          const wallBase = isWingR ? SAMPLE1_WALL.eaveR : SAMPLE1_WALL.eaveC;
+          const showWin = dc === mainW + Math.floor((wingW - 1) / 2);
+          tiles.push({
+            col: c,
+            row: r,
+            baseSheetCol: showWin ? wallBase.col : undefined,
+            baseSheetRow: showWin ? wallBase.row : undefined,
+            sheetCol: showWin ? SAMPLE1_FEATURES.windowLattice.col : wallBase.col,
+            sheetRow: showWin ? SAMPLE1_FEATURES.windowLattice.row : wallBase.row,
+            isRoof: false
+          });
+        }
+      }
+    }
+
+    hitboxes = [
+      { x: worldX, y: worldY, w: mainW * WORLD_TILE_SIZE, h: worldH },
+      {
+        x: worldX + mainW * WORLD_TILE_SIZE,
+        y: worldY + wingTopRow * WORLD_TILE_SIZE,
+        w: wingW * WORLD_TILE_SIZE,
+        h: (hTiles - wingTopRow) * WORLD_TILE_SIZE
+      }
+    ];
+    doorWorldX = (tileX + mainDoorRel) * WORLD_TILE_SIZE;
+  } else if (style === 'brick' && wTiles >= 4 && hTiles >= 4) {
+    // Town Porch Villa (Sample1 far-right house): Wooden left porch + main gable body
+    const mainW = wTiles - 1;
+    const mainDoorRel = Math.floor(mainW / 2);
+    buildGableWing(1, mainW, hTiles, { doorColRel: mainDoorRel });
+
+    const porchRoofRow = Math.max(1, hTiles - 3);
+    for (let dr = porchRoofRow; dr < hTiles; dr++) {
+      const c = tileX;
+      const r = tileY + dr;
+      if (dr === porchRoofRow) {
+        tiles.push({ col: c, row: r, sheetCol: SAMPLE1_ROOF.hTopL.col, sheetRow: SAMPLE1_ROOF.hTopL.row, isRoof: true });
+      } else if (dr === porchRoofRow + 1) {
+        tiles.push({ col: c, row: r, sheetCol: SAMPLE1_ROOF.hBotL.col, sheetRow: SAMPLE1_ROOF.hBotL.row, isRoof: true });
+      } else {
+        tiles.push({
+          col: c,
+          row: r,
+          baseSheetCol: SAMPLE1_WALL.eaveL.col,
+          baseSheetRow: SAMPLE1_WALL.eaveL.row,
+          sheetCol: SAMPLE1_FEATURES.porchDeck.col,
+          sheetRow: SAMPLE1_FEATURES.porchDeck.row,
+          overlayCol: SAMPLE1_FEATURES.porchRailL.col,
+          overlayRow: SAMPLE1_FEATURES.porchRailL.row,
+          isRoof: false
+        });
+      }
+    }
+
+    hitboxes = [
+      {
+        x: worldX,
+        y: worldY + porchRoofRow * WORLD_TILE_SIZE,
+        w: WORLD_TILE_SIZE,
+        h: (hTiles - porchRoofRow) * WORLD_TILE_SIZE
+      },
+      {
+        x: worldX + WORLD_TILE_SIZE,
+        y: worldY,
+        w: mainW * WORLD_TILE_SIZE,
+        h: worldH
+      }
+    ];
+    doorWorldX = (tileX + 1 + mainDoorRel) * WORLD_TILE_SIZE;
+  } else if (style === 'wood') {
+    // Sample1 Barn / Storage Shed: Wide dark open garage door across center
+    buildGableWing(0, wTiles, hTiles, { isBarnDoor: true });
+    if (wTiles === 2) {
+      doorWorldX = worldX + 8;
+      doorW = worldW - 16;
+    } else {
+      const midC = Math.floor(wTiles / 2);
+      doorWorldX = (tileX + midC - 1) * WORLD_TILE_SIZE + 8;
+      doorW = WORLD_TILE_SIZE * 2 - 16;
+    }
+  } else if (style === 'terracotta') {
+    // Sample1 Watchpost Cottage: Weathervane on upper-left roof + single wood door
+    const doorCol = wTiles === 2 ? 0 : Math.floor(wTiles / 2);
+    buildGableWing(0, wTiles, hTiles, { hasWeathervane: true, doorColRel: doorCol });
+    doorWorldX = (tileX + doorCol) * WORLD_TILE_SIZE;
+  } else {
+    // Sample1 Village House ('stone' default): Trapezoidal tan roof, cream gable, lattice window, wood door
+    const doorCol = wTiles === 2 ? 0 : Math.floor(wTiles / 2);
+    buildGableWing(0, wTiles, hTiles, { doorColRel: doorCol });
+    doorWorldX = (tileX + doorCol) * WORLD_TILE_SIZE;
   }
 
   // Hitbox & Doorway Opening (Solid walls and roofs block player movement)
@@ -1482,79 +1774,78 @@ export function generateBuilding(
     h: worldH
   };
 
-  const doorWorldX = (tileX + doorRelC) * WORLD_TILE_SIZE;
-  const doorWorldY = (tileY + hTiles - 1) * WORLD_TILE_SIZE;
   const doorway = {
-    x: doorWorldX + 4,
+    x: doorWorldX + (wTiles === 2 && style === 'wood' ? 0 : 4),
     y: doorWorldY,
-    w: WORLD_TILE_SIZE - 8,
+    w: doorW,
     h: WORLD_TILE_SIZE
   };
 
-  // Grouped Perimeter Props (Fences, Crates, Barrels, Trees)
+  // Sample1-faithful Perimeter Props (Trash Bin by Barn, Brick Kiln by Cottage, Neat Fencing/Tree)
   const perimeterProps: SceneryProp[] = [];
-  const bldgId = `bldg_${tileX}_${tileY}`;
 
-  // 1. Stacked wood crate at corner
-  perimeterProps.push({
-    id: `${bldgId}_crate`,
-    x: worldX - 14,
-    y: worldY + worldH - 6,
-    type: 'crate_wood',
-    width: 32,
-    height: 32,
-    footprintRadius: 14,
-    hp: 60,
-    maxHp: 60,
-    materialDrop: 'wood',
-    dropAmount: 4,
-    spriteKey: 'prop_crate_wood',
-    sheetCol: 7,
-    sheetRow: 23
-  });
+  if (style === 'wood') {
+    // Grey metal bin cleanly tucked beside the Barn's bottom-left corner (as in Sample1)
+    perimeterProps.push({
+      id: `${bldgId}_bin`,
+      x: worldX - 18,
+      y: worldY + worldH - 12,
+      type: 'barrel_oil',
+      width: 28,
+      height: 28,
+      footprintRadius: 12,
+      hp: 65,
+      maxHp: 65,
+      materialDrop: 'metal',
+      dropAmount: 4,
+      spriteKey: 'prop_barrel_oil',
+      sheetCol: SAMPLE1_FEATURES.trashBin.col,
+      sheetRow: SAMPLE1_FEATURES.trashBin.row
+    });
+  } else if (style === 'terracotta') {
+    // Small brick kiln/oven beside Cottage bottom-left (as in Sample1)
+    perimeterProps.push({
+      id: `${bldgId}_kiln`,
+      x: worldX - 18,
+      y: worldY + worldH - 12,
+      type: 'boulder',
+      width: 28,
+      height: 28,
+      footprintRadius: 12,
+      hp: 85,
+      maxHp: 85,
+      materialDrop: 'brick',
+      dropAmount: 5,
+      spriteKey: 'prop_boulder',
+      sheetCol: SAMPLE1_FEATURES.brickKiln.col,
+      sheetRow: SAMPLE1_FEATURES.brickKiln.row
+    });
+  } else {
+    // Wood crate at corner
+    perimeterProps.push({
+      id: `${bldgId}_crate`,
+      x: worldX - 16,
+      y: worldY + worldH - 10,
+      type: 'crate_wood',
+      width: 30,
+      height: 30,
+      footprintRadius: 13,
+      hp: 60,
+      maxHp: 60,
+      materialDrop: 'wood',
+      dropAmount: 4,
+      spriteKey: 'prop_crate_wood',
+      sheetCol: 7,
+      sheetRow: 23
+    });
+  }
 
-  // 2. Storage barrel near entrance
-  perimeterProps.push({
-    id: `${bldgId}_barrel`,
-    x: doorWorldX + WORLD_TILE_SIZE + 14,
-    y: doorWorldY + 16,
-    type: 'barrel_oil',
-    width: 28,
-    height: 32,
-    footprintRadius: 12,
-    hp: 75,
-    maxHp: 75,
-    materialDrop: conf.primaryMat,
-    dropAmount: 4,
-    spriteKey: 'prop_barrel_oil',
-    sheetCol: 6,
-    sheetRow: 23
-  });
-
-  // 3. Fencing lining property perimeter
-  perimeterProps.push({
-    id: `${bldgId}_fence_l`,
-    x: worldX - 26,
-    y: worldY + worldH - 4,
-    type: 'fence',
-    width: 32,
-    height: 32,
-    footprintRadius: 10,
-    hp: 80,
-    maxHp: 80,
-    materialDrop: 'wood',
-    dropAmount: 3,
-    spriteKey: 'prop_fence',
-    sheetCol: 13,
-    sheetRow: 13
-  });
-
-  // 4. Perimeter Tree in garden/alley
+  // Neat perimeter round tree (as seen alongside Sample1 cottages)
   perimeterProps.push({
     id: `${bldgId}_tree`,
-    x: worldX + worldW + 28,
-    y: worldY + 20,
-    type: style === 'wood' ? 'pine_tree' : 'round_tree',
+    x: worldX + worldW + 26,
+    y: worldY + 24,
+    type: 'round_tree',
     width: 36,
     height: 48,
     footprintRadius: 14,
@@ -1562,18 +1853,18 @@ export function generateBuilding(
     maxHp: 90,
     materialDrop: 'wood',
     dropAmount: 6,
-    spriteKey: style === 'wood' ? 'prop_pine_tree' : 'prop_round_tree',
-    sheetCol: style === 'wood' ? 16 : 13,
+    spriteKey: 'prop_round_tree',
+    sheetCol: 13,
     sheetRow: 9,
     sheetTopRow: 8
   });
 
-  // 5. Interior / Porch loot cache
+  // Interior / Porch loot cache
   const interiorLoot: GroundLootItem[] = [
     {
       id: `${bldgId}_loot`,
-      x: doorWorldX + WORLD_TILE_SIZE / 2,
-      y: doorWorldY + WORLD_TILE_SIZE / 2 - 6,
+      x: doorWorldX + Math.max(WORLD_TILE_SIZE / 2, doorW / 2),
+      y: doorWorldY + WORLD_TILE_SIZE / 2 - 4,
       type: 'banana',
       name: `${name} Ration Supply`,
       spriteKey: 'loot_banana',
@@ -1596,6 +1887,7 @@ export function generateBuilding(
     style,
     tiles,
     hitbox,
+    hitboxes,
     doorway,
     perimeterProps,
     interiorLoot
@@ -1604,13 +1896,13 @@ export function generateBuilding(
 
 /**
  * LAYER 2: drawHousePrefab(x, y, width, height, style, name)
- * Builds complete 4x4 or 3x3 houses with matching roof lines, wall panels, windows, and doors.
+ * Builds Sample1-faithful gabled village houses, barns, cottages, porch villas, and L-manors.
  */
 export function drawHousePrefab(
   x: number,
   y: number,
-  width: number = 4,
-  height: number = 4,
+  width: number = 3,
+  height: number = 5,
   style: BuildingStyle = 'stone',
   name: string = 'House'
 ): GeneratedBuilding {
@@ -1619,86 +1911,103 @@ export function drawHousePrefab(
 
 /**
  * LAYER 1: drawWaterBody(startX, startY, width, height)
- * Renders a connected pond using official Kenney 9-slice water tile coordinates:
- * - Top-Left Corner: (col: 0, row: 0)
- * - Top Edge: (col: 1, row: 0)
- * - Top-Right Corner: (col: 2, row: 0)
- * - Left Edge: (col: 0, row: 1)
- * - Inner Water Fill: (col: 1, row: 1)
- * - Right Edge: (col: 2, row: 1)
- * - Bottom-Left Corner: (col: 0, row: 2)
- * - Bottom Edge: (col: 1, row: 2)
- * - Bottom-Right Corner: (col: 2, row: 2)
+ * Renders a connected Sample1-accurate pond using Kenney 9-slice grass+shoreline water tiles (col 2..4, row 0..2)
+ * and scatters floating green lily pads + blooming white water lilies (cols 25,26,28 rows 10..11) across interior tiles.
  */
 export function drawWaterBody(
   tiles: TileData[][],
   startX: number,
   startY: number,
   width: number,
-  height: number
+  height: number,
+  rng: () => number = Math.random
 ) {
+  const lilySprites = [
+    { col: 25, row: 11 }, // Blooming white water lily with yellow center on green pad
+    { col: 25, row: 11 }, // Extra weight for classic white flower lily
+    { col: 26, row: 11 }, // Large notched green lily pad
+    { col: 28, row: 10 }, // Paired small green lily pads
+    { col: 28, row: 11 }  // Small oval green lily pad
+  ];
+
+  let placedLilies = 0;
+
   for (let dy = 0; dy < height; dy++) {
     for (let dx = 0; dx < width; dx++) {
       const c = startX + dx;
       const r = startY + dy;
       if (r < 0 || r >= TILES_COUNT || c < 0 || c >= TILES_COUNT) continue;
 
-      let sheetCol = 1;
+      let sheetCol = 3;
       let sheetRow = 1;
+      const isInterior = dx > 0 && dx < width - 1 && dy > 0 && dy < height - 1;
 
       if (dx === 0 && dy === 0) {
-        // Top-Left Corner: (col: 0, row: 0)
-        sheetCol = 0;
-        sheetRow = 0;
+        sheetCol = 2; sheetRow = 0; // Top-Left shoreline corner
       } else if (dx === width - 1 && dy === 0) {
-        // Top-Right Corner: (col: 2, row: 0)
-        sheetCol = 2;
-        sheetRow = 0;
+        sheetCol = 4; sheetRow = 0; // Top-Right shoreline corner
       } else if (dy === 0) {
-        // Top Edge: (col: 1, row: 0)
-        sheetCol = 1;
-        sheetRow = 0;
+        sheetCol = 3; sheetRow = 0; // Top shoreline edge
       } else if (dx === 0 && dy === height - 1) {
-        // Bottom-Left Corner: (col: 0, row: 2)
-        sheetCol = 0;
-        sheetRow = 2;
+        sheetCol = 2; sheetRow = 2; // Bottom-Left shoreline corner
       } else if (dx === width - 1 && dy === height - 1) {
-        // Bottom-Right Corner: (col: 2, row: 2)
-        sheetCol = 2;
-        sheetRow = 2;
+        sheetCol = 4; sheetRow = 2; // Bottom-Right shoreline corner
       } else if (dy === height - 1) {
-        // Bottom Edge: (col: 1, row: 2)
-        sheetCol = 1;
-        sheetRow = 2;
+        sheetCol = 3; sheetRow = 2; // Bottom shoreline edge
       } else if (dx === 0) {
-        // Left Edge: (col: 0, row: 1)
-        sheetCol = 0;
-        sheetRow = 1;
+        sheetCol = 2; sheetRow = 1; // Left shoreline edge
       } else if (dx === width - 1) {
-        // Right Edge: (col: 2, row: 1)
-        sheetCol = 2;
-        sheetRow = 1;
+        sheetCol = 4; sheetRow = 1; // Right shoreline edge
       } else {
-        // Inner Water Fill: (col: 1, row: 1)
-        sheetCol = 1;
-        sheetRow = 1;
+        // Interior sky-blue water fill with subtle cyan shimmer tile variation
+        sheetCol = rng() > 0.72 ? 1 : 3;
+        sheetRow = sheetCol === 1 ? 0 : 1;
       }
 
       tiles[r][c].surface = 'water';
-      tiles[r][c].baseColor = '#0284c7';
+      tiles[r][c].baseColor = '#63c5cf';
       tiles[r][c].overlayCol = sheetCol;
       tiles[r][c].overlayRow = sheetRow;
       tiles[r][c].isWater = true;
+
+      // Sprinkle Sample1 water lilies on interior water tiles (spaced cleanly apart)
+      const isDeepInterior = dx >= 2 && dx <= width - 3 && dy >= 2 && dy <= height - 3;
+      if (isInterior && (isDeepInterior ? rng() < 0.14 : rng() < 0.05)) {
+        const hasAdjacentLily =
+          tiles[r - 1]?.[c]?.lilyCol !== undefined ||
+          tiles[r]?.[c - 1]?.lilyCol !== undefined ||
+          tiles[r - 1]?.[c - 1]?.lilyCol !== undefined;
+        if (!hasAdjacentLily) {
+          const picked = lilySprites[Math.floor(rng() * lilySprites.length)];
+          tiles[r][c].lilyCol = picked.col;
+          tiles[r][c].lilyRow = picked.row;
+          placedLilies++;
+        }
+      }
+    }
+  }
+
+  // Guarantee at least 3 visible water lilies on every pond
+  if (placedLilies < 3 && width >= 5 && height >= 5) {
+    const fallbackCoords = [
+      { dx: Math.floor(width * 0.35), dy: Math.floor(height * 0.35), col: 25, row: 11 },
+      { dx: Math.floor(width * 0.65), dy: Math.floor(height * 0.6), col: 25, row: 11 },
+      { dx: Math.floor(width * 0.45), dy: Math.floor(height * 0.72), col: 28, row: 10 }
+    ];
+    for (const fc of fallbackCoords) {
+      const r = startY + fc.dy;
+      const c = startX + fc.dx;
+      if (tiles[r]?.[c]?.isWater && tiles[r][c].lilyCol === undefined) {
+        tiles[r][c].lilyCol = fc.col;
+        tiles[r][c].lilyRow = fc.row;
+      }
     }
   }
 }
 
 /**
  * LAYER 1: drawDirtRoad(startX, startY, length, direction, roadWidth)
- * Renders connected dirt roads and crossroads with coherent tile indices:
- * - Horizontal: col: 6, row: 0
- * - Vertical: col: 7, row: 1
- * - Intersection: col: 6, row: 1
+ * Renders connected warm-brown dirt roads and pathways using Sample1 dirt tiles (6,0 / 6,1 / 8,10).
  */
 export function drawDirtRoad(
   tiles: TileData[][],
@@ -1719,17 +2028,48 @@ export function drawDirtRoad(
       if (r < 0 || r >= TILES_COUNT || c < 0 || c >= TILES_COUNT) continue;
       if (tiles[r][c].isWater) continue; // Keep water bodies intact
 
-      let sheetCol = isHoriz ? 6 : 7;
+      let sheetCol = isHoriz ? 6 : 6;
       let sheetRow = isHoriz ? 0 : 1;
 
-      // Crossing / intersection tile
       if (tiles[r][c].isRoad) {
-        sheetCol = 6;
-        sheetRow = 1;
+        sheetCol = 8;
+        sheetRow = 10;
       }
 
       tiles[r][c].surface = 'dirt';
-      tiles[r][c].baseColor = '#78350f';
+      tiles[r][c].baseColor = '#b48355';
+      tiles[r][c].overlayCol = sheetCol;
+      tiles[r][c].overlayRow = sheetRow;
+      tiles[r][c].lilyCol = undefined;
+      tiles[r][c].lilyRow = undefined;
+      tiles[r][c].isRoad = true;
+    }
+  }
+}
+
+/**
+ * LAYER 1: drawDirtPatch(tiles, startX, startY, width, height)
+ * Renders a Sample1 rounded dirt clearing (Kenney 9-slice cols 7..9, rows 9..11) for campgrounds & yards.
+ */
+export function drawDirtPatch(
+  tiles: TileData[][],
+  startX: number,
+  startY: number,
+  width: number,
+  height: number
+) {
+  for (let dy = 0; dy < height; dy++) {
+    for (let dx = 0; dx < width; dx++) {
+      const c = startX + dx;
+      const r = startY + dy;
+      if (r < 0 || r >= TILES_COUNT || c < 0 || c >= TILES_COUNT) continue;
+      if (tiles[r][c].isWater) continue;
+
+      const sheetCol = dx === 0 ? 7 : dx === width - 1 ? 9 : 8;
+      const sheetRow = dy === 0 ? 9 : dy === height - 1 ? 11 : 10;
+
+      tiles[r][c].surface = 'dirt';
+      tiles[r][c].baseColor = '#b48355';
       tiles[r][c].overlayCol = sheetCol;
       tiles[r][c].overlayRow = sheetRow;
       tiles[r][c].isRoad = true;
@@ -1776,12 +2116,13 @@ function createSeededRng(seed: number): () => number {
 
 export function getSkinMovementSpeedPxPerSec(
   skinDef: FantasySkinDefinition,
-  isSpeedBoosted: boolean = false
+  isSpeedBoosted: boolean = false,
+  extraMultiplier: number = 1
 ): number {
   const clampedStat = Math.max(40, Math.min(100, skinDef?.speed ?? 52));
   // Dramatic scale: Slime (46) ~206 px/s vs Cultist (52) ~238 px/s vs Archer (68) ~322 px/s vs Overlord (96) ~469 px/s
   const basePxPerSec = 175 + ((clampedStat - 40) / 60) * 315;
-  return isSpeedBoosted ? basePxPerSec * 1.25 : basePxPerSec;
+  return basePxPerSec * (isSpeedBoosted ? 1.25 : 1) * extraMultiplier;
 }
 
 /**
@@ -1859,44 +2200,96 @@ function generateSuperAnimalStyleMap(seed: number = Date.now()): GeneratedWorldD
     }
   };
 
-  // Place 3 distinct randomized lakes in outer zones clear of central spawn (tile 78,78)
-  const lakeZones = [
-    { minC: 26, maxC: 54, minR: 16, maxR: 46 },
-    { minC: 26, maxC: 54, minR: 98, maxR: 128 },
-    { minC: 102, maxC: 132, minR: 18, maxR: 52 },
-    { minC: 102, maxC: 132, minR: 98, maxR: 128 }
+  // =========================================================================
+  // RESERVE ONE DESIGNATED CITY / VILLAGE ZONE (STRICTLY <= 15% OF MAP AREA)
+  // 160x160 = 25,600 tiles total -> 15% max = 3,840 tiles.
+  // City district is ~46x44 = 2,024 tiles (~7.9% of map, never exceeds 15%).
+  // =========================================================================
+  const cityW = randInt(44, 48);
+  const cityH = randInt(42, 46);
+  const maxCityTiles = Math.floor(0.15 * TILES_COUNT * TILES_COUNT); // 3,840 tiles hard cap
+  const safeCityW = cityW * cityH > maxCityTiles ? 46 : cityW;
+  const safeCityH = cityW * cityH > maxCityTiles ? 44 : cityH;
+
+  const cityCandidateRegions = [
+    { c: randInt(28, 34), r: randInt(26, 32) },   // North-West city
+    { c: randInt(84, 88), r: randInt(26, 32) },   // North-East city
+    { c: randInt(28, 34), r: randInt(86, 90) },   // South-West city
+    { c: randInt(84, 88), r: randInt(86, 90) }    // South-East city
   ];
-  // Shuffle lakeZones so lakes shift quadrants each match/test
+  for (let i = cityCandidateRegions.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [cityCandidateRegions[i], cityCandidateRegions[j]] = [cityCandidateRegions[j], cityCandidateRegions[i]];
+  }
+
+  let cityRect = cityCandidateRegions[0];
+  for (const cand of cityCandidateRegions) {
+    let c = cand.c;
+    let r = cand.r;
+    if (forestSide === 'west' && c < 26) c = 26;
+    if (forestSide === 'east' && c + safeCityW > 134) c = 134 - safeCityW;
+    if (forestSide === 'north' && r < 26) r = 26;
+    if (forestSide === 'south' && r + safeCityH > 134) r = 134 - safeCityH;
+
+    // Ensure central spawn (78,78) is outside or safely buffered from city blocks
+    const centerInCity = 78 >= c - 4 && 78 <= c + safeCityW + 4 && 78 >= r - 4 && 78 <= r + safeCityH + 4;
+    if (!centerInCity) {
+      cityRect = { c, r };
+      break;
+    }
+  }
+  // Final clamp away from forest border
+  if (forestSide === 'west' && cityRect.c < 26) cityRect.c = 26;
+  if (forestSide === 'east' && cityRect.c + safeCityW > 134) cityRect.c = 134 - safeCityW;
+  if (forestSide === 'north' && cityRect.r < 26) cityRect.r = 26;
+  if (forestSide === 'south' && cityRect.r + safeCityH > 134) cityRect.r = 134 - safeCityH;
+
+  const overlapsCity = (tileC: number, tileR: number, w: number, h: number, pad = 2) =>
+    tileC < cityRect.c + safeCityW + pad &&
+    tileC + w + pad > cityRect.c &&
+    tileR < cityRect.r + safeCityH + pad &&
+    tileR + h + pad > cityRect.r;
+
+  // Place 3-4 distinct randomized lakes in outer zones clear of central spawn (78,78) AND City/Village
+  const lakeZones = [
+    { minC: 26, maxC: 56, minR: 16, maxR: 50 },
+    { minC: 26, maxC: 56, minR: 96, maxR: 132 },
+    { minC: 100, maxC: 134, minR: 18, maxR: 54 },
+    { minC: 100, maxC: 134, minR: 96, maxR: 132 }
+  ];
   for (let i = lakeZones.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
     [lakeZones[i], lakeZones[j]] = [lakeZones[j], lakeZones[i]];
   }
   const lakeTileRects: Array<{ c: number; r: number; w: number; h: number }> = [];
-  const lakeCount = rng() > 0.45 ? 4 : 3;
-  for (let i = 0; i < lakeCount; i++) {
+  for (let i = 0; i < lakeZones.length; i++) {
     const z = lakeZones[i];
-    const lw = randInt(14, 22);
+    const lw = randInt(14, 21);
     const lh = randInt(12, 16);
-    let lc = randInt(z.minC, z.maxC - lw);
-    let lr = randInt(z.minR, z.maxR - lh);
-    // Shift inward away from dense forest edge if forest occupies that edge
-    if (forestSide === 'west' && lc < 26) lc = 26;
-    if (forestSide === 'east' && lc + lw > 134) lc = 134 - lw;
-    if (forestSide === 'north' && lr < 26) lr = 26;
-    if (forestSide === 'south' && lr + lh > 134) lr = 134 - lh;
-    // Ensure safe center spawn (2500,2500 -> ~tile 78,78) is never underwater
-    const lakeCenterC = lc + lw / 2;
-    const lakeCenterR = lr + lh / 2;
-    if (Math.hypot(lakeCenterC - 78, lakeCenterR - 78) < 22) continue;
+    let placedLake = false;
+    for (let attempt = 0; attempt < 15 && !placedLake; attempt++) {
+      let lc = randInt(z.minC, Math.max(z.minC, z.maxC - lw));
+      let lr = randInt(z.minR, Math.max(z.minR, z.maxR - lh));
+      if (forestSide === 'west' && lc < 26) lc = 26;
+      if (forestSide === 'east' && lc + lw > 134) lc = 134 - lw;
+      if (forestSide === 'north' && lr < 26) lr = 26;
+      if (forestSide === 'south' && lr + lh > 134) lr = 134 - lh;
 
-    drawWaterBody(tiles, lc, lr, lw, lh);
-    lakeTileRects.push({ c: lc, r: lr, w: lw, h: lh });
-    lakesMeta.push({
-      x: lc * WORLD_TILE_SIZE,
-      y: lr * WORLD_TILE_SIZE,
-      w: lw * WORLD_TILE_SIZE,
-      h: lh * WORLD_TILE_SIZE
-    });
+      const lakeCenterC = lc + lw / 2;
+      const lakeCenterR = lr + lh / 2;
+      if (Math.hypot(lakeCenterC - 78, lakeCenterR - 78) < 20) continue;
+      if (overlapsCity(lc, lr, lw, lh, 3)) continue;
+
+      drawWaterBody(tiles, lc, lr, lw, lh, rng);
+      lakeTileRects.push({ c: lc, r: lr, w: lw, h: lh });
+      lakesMeta.push({
+        x: lc * WORLD_TILE_SIZE,
+        y: lr * WORLD_TILE_SIZE,
+        w: lw * WORLD_TILE_SIZE,
+        h: lh * WORLD_TILE_SIZE
+      });
+      placedLake = true;
+    }
   }
 
   // Arterial highways crossing at (nsRoadCol, ewRoadRow)
@@ -1923,82 +2316,203 @@ function generateSuperAnimalStyleMap(seed: number = Date.now()): GeneratedWorldD
     forestBox = { x: 0, y: 136 * WORLD_TILE_SIZE, w: MAP_SIZE, h: 24 * WORLD_TILE_SIZE };
   }
 
-  // =========================================================================
-  // LAYER 2: 2 RANDOMIZED VILLAGES (VARIED POSITIONS, STYLES & BUILDINGS)
-  // =========================================================================
-  const allStyles: BuildingStyle[] = ['stone', 'wood', 'castle', 'terracotta', 'brick'];
-  const villageNames = [
-    ['Millbrook Crossing', 'Oakridge Outpost'],
-    ['Cobalt Hamlet', 'Whispering Pines'],
-    ['Riverside Bastion', 'Amberwatch'],
-    ['Crestwood Keep', 'Silverhollow'],
-    ['Ironforge Quarter', 'Sunvale Village']
-  ];
-  const chosenNames = pick(villageNames);
-
-  const overlapsLake = (tileC: number, tileR: number, w: number, h: number) =>
+  const overlapsLake = (tileC: number, tileR: number, w: number, h: number, pad = 2) =>
     lakeTileRects.some(
-      l => tileC < l.c + l.w + 3 && tileC + w + 3 > l.c && tileR < l.r + l.h + 3 && tileR + h + 3 > l.r
+      l => tileC < l.c + l.w + pad && tileC + w + pad > l.c && tileR < l.r + l.h + pad && tileR + h + pad > l.r
     );
 
-  const candidateVillageAnchors = [
-    { c: randInt(58, 72), r: randInt(28, 44) },
-    { c: randInt(86, 110), r: randInt(96, 114) },
-    { c: randInt(86, 110), r: randInt(28, 46) },
-    { c: randInt(34, 52), r: randInt(94, 112) }
+  const overlapsExistingBuilding = (tileC: number, tileR: number, w: number, h: number, padTiles = 3) =>
+    buildings.some(
+      b =>
+        tileC < b.tileX + b.width + padTiles &&
+        tileC + w + padTiles > b.tileX &&
+        tileR < b.tileY + b.height + padTiles &&
+        tileR + h + padTiles > b.tileY
+    );
+
+  const areaHasRoadOrWater = (tileC: number, tileR: number, w: number, h: number) => {
+    for (let r = tileR; r < tileR + h; r++) {
+      for (let c = tileC; c < tileC + w; c++) {
+        const t = tiles[r]?.[c];
+        if (!t || t.isWater || t.isRoad) return true;
+      }
+    }
+    return false;
+  };
+
+  const commitBuildingSafely = (b: GeneratedBuilding) => {
+    // Filter perimeter props so trees/crates/bins never sit in water, roads, or neighboring buildings
+    const cleanProps = b.perimeterProps.filter(p => {
+      const pc = Math.floor(p.x / WORLD_TILE_SIZE);
+      const pr = Math.floor(p.y / WORLD_TILE_SIZE);
+      const pt = tiles[pr]?.[pc];
+      if (!pt || pt.isWater || pt.isRoad) return false;
+      const touchesOther = buildings.some(
+        ob =>
+          p.x >= ob.worldX - 18 &&
+          p.x <= ob.worldX + ob.worldW + 18 &&
+          p.y >= ob.worldY - 18 &&
+          p.y <= ob.worldY + ob.worldH + 18
+      );
+      return !touchesOther;
+    });
+    b.perimeterProps = cleanProps;
+    buildings.push(b);
+    scenery.push(...cleanProps);
+    groundLoot.push(...b.interiorLoot);
+  };
+
+  // =========================================================================
+  // LAYER 2A: ONE DESIGNATED HIGH-DENSITY CITY / VILLAGE (<= 15% OF MAP)
+  // Features interconnected pathways separating Sample1 buildings cleanly.
+  // =========================================================================
+  const cityNames = [
+    'Oakridge Market Town',
+    'Millbrook Haven',
+    'Sunvale Borough',
+    'Crestwood Village',
+    'Amberwatch Quarter'
   ];
-  // Shuffle anchors so villages spawn in fresh regions each session
-  for (let i = candidateVillageAnchors.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [candidateVillageAnchors[i], candidateVillageAnchors[j]] = [candidateVillageAnchors[j], candidateVillageAnchors[i]];
+  const cityName = pick(cityNames);
+  const cc0 = cityRect.c;
+  const cr0 = cityRect.r;
+
+  // Internal street pathways inside the City/Village (creating clean walkable blocks)
+  const cityHStreetRows = [
+    cr0 + 9,
+    cr0 + 21,
+    cr0 + 33
+  ].filter(r => r + 2 < cr0 + safeCityH - 2);
+  const cityVStreetCols = [
+    cc0 + 10,
+    cc0 + 22,
+    cc0 + 34
+  ].filter(c => c + 2 < cc0 + safeCityW - 2);
+
+  for (const hr of cityHStreetRows) {
+    addRoad(cc0, hr, safeCityW, 'horizontal', 2);
+  }
+  for (const vc of cityVStreetCols) {
+    addRoad(vc, cr0, safeCityH, 'vertical', 2);
   }
 
-  let placedVillages = 0;
-  for (const anchor of candidateVillageAnchors) {
-    if (placedVillages >= 2) break;
-    // Keep away from center spawn (78,78) and water
-    if (Math.hypot(anchor.c + 8 - 78, anchor.r + 8 - 78) < 16) continue;
-    if (overlapsLake(anchor.c - 4, anchor.r - 4, 22, 22)) continue;
+  // Connect designated City/Village main streets straight into the arterial highways
+  const mainCityHR = cityHStreetRows[Math.floor(cityHStreetRows.length / 2)] ?? cr0 + Math.floor(safeCityH / 2);
+  const mainCityVC = cityVStreetCols[Math.floor(cityVStreetCols.length / 2)] ?? cc0 + Math.floor(safeCityW / 2);
+  if (cc0 > nsRoadCol) {
+    addRoad(nsRoadCol, mainCityHR, cc0 - nsRoadCol + 2, 'horizontal', 2);
+  } else if (cc0 + safeCityW < nsRoadCol) {
+    addRoad(cc0 + safeCityW - 1, mainCityHR, nsRoadCol - (cc0 + safeCityW) + 3, 'horizontal', 2);
+  }
+  if (cr0 > ewRoadRow) {
+    addRoad(mainCityVC, ewRoadRow, cr0 - ewRoadRow + 2, 'vertical', 2);
+  } else if (cr0 + safeCityH < ewRoadRow) {
+    addRoad(mainCityVC, cr0 + safeCityH - 1, ewRoadRow - (cr0 + safeCityH) + 3, 'vertical', 2);
+  }
 
-    const vName = chosenNames[placedVillages];
-    const vc = anchor.c;
-    const vr = anchor.r;
-    const styleA = pick(allStyles);
-    const styleB = pick(allStyles);
-    const styleC = pick(allStyles);
-    const styleD = pick(allStyles);
+  // Populate every city block between the dirt pathways with Sample1 buildings (12-16 dense buildings)
+  const hBounds = [cr0, ...cityHStreetRows.map(r => r + 2), cr0 + safeCityH];
+  const hEnds = [...cityHStreetRows, cr0 + safeCityH];
+  const vBounds = [cc0, ...cityVStreetCols.map(c => c + 2), cc0 + safeCityW];
+  const vEnds = [...cityVStreetCols, cc0 + safeCityW];
 
-    const vBuildings = [
-      drawHousePrefab(vc, vr, 4, 4, styleA, `${vName} Hall`),
-      drawHousePrefab(vc + 10, vr, rng() > 0.5 ? 4 : 3, 4, styleB, `${vName} Tavern`),
-      drawHousePrefab(vc, vr + 10, rng() > 0.5 ? 4 : 3, 3, styleC, `${vName} Workshop`),
-      drawHousePrefab(vc + 10, vr + 10, 3, 3, styleD, `${vName} Watchpost`)
-    ];
+  const cityArchetypes: Array<{ style: BuildingStyle; w: number; h: number; label: string }> = [
+    { style: 'castle', w: 5, h: 4, label: 'Town Manor' },
+    { style: 'brick', w: 4, h: 4, label: 'Porch Villa' },
+    { style: 'stone', w: 3, h: 5, label: 'Village House' },
+    { style: 'wood', w: 2, h: 4, label: 'Supply Barn' },
+    { style: 'terracotta', w: 2, h: 4, label: 'Watchpost Cottage' },
+    { style: 'stone', w: 3, h: 4, label: 'Townhouse' }
+  ];
 
-    // Village courtyard dirt paths + spur connecting to main road
-    addRoad(vc - 2, vr + 6, 18, 'horizontal', 3);
-    addRoad(vc + 6, vr - 2, 18, 'vertical', 3);
+  let cityBldgCount = 0;
+  for (let br = 0; br < hEnds.length; br++) {
+    const rMin = hBounds[br] + 1;
+    const rMax = hEnds[br] - 1;
+    if (rMax - rMin < 5) continue;
 
-    if (vc + 6 > nsRoadCol) {
-      addRoad(nsRoadCol, vr + 6, vc + 6 - nsRoadCol + 2, 'horizontal', 2);
-    } else {
-      addRoad(vc + 6, vr + 6, nsRoadCol - (vc + 6) + 2, 'horizontal', 2);
+    for (let bc = 0; bc < vEnds.length; bc++) {
+      const cMin = vBounds[bc] + 1;
+      const cMax = vEnds[bc] - 1;
+      if (cMax - cMin < 4) continue;
+
+      // Leave occasional central town square or place 1-2 buildings in wider blocks with pathway clearance
+      const blockW = cMax - cMin;
+      const blockH = rMax - rMin;
+      const arch = pick(cityArchetypes);
+      const bW = Math.min(arch.w, blockW - 1);
+      const bH = Math.min(arch.h, blockH - 1);
+      if (bW < 2 || bH < 4) continue;
+
+      const placeC = cMin + Math.max(0, Math.floor((blockW - bW) / 2));
+      const placeR = rMax - bH; // Align doorway neatly facing the street pathway directly south!
+
+      if (
+        !overlapsLake(placeC, placeR, bW, bH, 1) &&
+        !areaHasRoadOrWater(placeC, placeR, bW, bH) &&
+        !overlapsExistingBuilding(placeC, placeR, bW, bH, 2)
+      ) {
+        const bldg = drawHousePrefab(placeC, placeR, bW, bH, arch.style, `${cityName} ${arch.label}`);
+        commitBuildingSafely(bldg);
+        cityBldgCount++;
+      }
     }
+  }
 
-    vBuildings.forEach(b => {
-      buildings.push(b);
-      scenery.push(...b.perimeterProps);
-      groundLoot.push(...b.interiorLoot);
-    });
+  villagesMeta.push({
+    x: cc0 * WORLD_TILE_SIZE,
+    y: cr0 * WORLD_TILE_SIZE,
+    w: safeCityW * WORLD_TILE_SIZE,
+    h: safeCityH * WORLD_TILE_SIZE,
+    name: `${cityName} (${cityBldgCount} Bldgs)`
+  });
 
-    villagesMeta.push({
-      x: (vc - 1) * WORLD_TILE_SIZE,
-      y: (vr - 1) * WORLD_TILE_SIZE,
-      w: 16 * WORLD_TILE_SIZE,
-      h: 16 * WORLD_TILE_SIZE,
-      name: vName
-    });
-    placedVillages++;
+  // =========================================================================
+  // LAYER 2B: RANDOMLY SCATTERED SAMPLE1 BUILDINGS ACROSS THE ENTIRE MAP
+  // Significantly increased rural & outskirts building presence (16-20+ houses/barns/villas)
+  // =========================================================================
+  const ruralArchetypes: Array<{ style: BuildingStyle; w: number; h: number; label: string }> = [
+    { style: 'stone', w: 3, h: 5, label: 'Meadow House' },
+    { style: 'wood', w: 2, h: 4, label: 'Field Barn' },
+    { style: 'terracotta', w: 2, h: 4, label: 'Outpost Cottage' },
+    { style: 'brick', w: 4, h: 4, label: 'Country Villa' },
+    { style: 'castle', w: 5, h: 4, label: 'Frontier Manor' },
+    { style: 'stone', w: 2, h: 4, label: 'Wayside Cabin' }
+  ];
+
+  const targetScatteredBuildings = 18;
+  let placedScattered = 0;
+  for (let attempt = 0; attempt < 260 && placedScattered < targetScatteredBuildings; attempt++) {
+    const arch = pick(ruralArchetypes);
+    const scCol = randInt(8, TILES_COUNT - arch.w - 8);
+    const scRow = randInt(8, TILES_COUNT - arch.h - 8);
+
+    // Keep clear of central player spawn (tile 78, 78)
+    const bCenterC = scCol + arch.w / 2;
+    const bCenterR = scRow + arch.h / 2;
+    if (Math.hypot(bCenterC - 78, bCenterR - 78) < 10) continue;
+
+    // Keep outside the designated City/Village district
+    if (overlapsCity(scCol, scRow, arch.w, arch.h, 4)) continue;
+
+    // Keep clear of lakes (with 2-tile shore margin so it sits cleanly beside or away from ponds)
+    if (overlapsLake(scCol, scRow, arch.w, arch.h, 2)) continue;
+
+    // Keep clear of roads and doorway apron (1 tile south of building)
+    if (areaHasRoadOrWater(scCol - 1, scRow - 1, arch.w + 2, arch.h + 3)) continue;
+
+    // Keep clear of other buildings (5-tile spacing across rural countryside)
+    if (overlapsExistingBuilding(scCol, scRow, arch.w, arch.h, 5)) continue;
+
+    const ruralBldg = drawHousePrefab(scCol, scRow, arch.w, arch.h, arch.style, arch.label);
+    commitBuildingSafely(ruralBldg);
+
+    // Small welcoming dirt doorstep path (2x2 tiles just south of doorway)
+    const doorTileC = Math.floor(ruralBldg.doorway.x / WORLD_TILE_SIZE);
+    const doorTileR = scRow + arch.h;
+    drawDirtRoad(tiles, doorTileC, doorTileR, 2, 'vertical', 2);
+
+    placedScattered++;
   }
 
   // Fallback road spurs toward lakes
@@ -2024,13 +2538,18 @@ function generateSuperAnimalStyleMap(seed: number = Date.now()): GeneratedWorldD
     for (let c = fCStart; c < fCEnd; c += 2) {
       if (tiles[r]?.[c]?.isRoad || tiles[r]?.[c]?.isWater) continue;
       if (Math.hypot(c - 78, r - 78) < 12) continue;
+      const wx = c * WORLD_TILE_SIZE + 16;
+      const wy = r * WORLD_TILE_SIZE + 28;
+      if (buildings.some(b => wx >= b.worldX - 36 && wx <= b.worldX + b.worldW + 36 && wy >= b.worldY - 36 && wy <= b.worldY + b.worldH + 36)) {
+        continue;
+      }
 
       const n = rng();
       if (n > 0.38) {
         scenery.push({
           id: `pine_forest_${propId++}`,
-          x: c * WORLD_TILE_SIZE + 16,
-          y: r * WORLD_TILE_SIZE + 28,
+          x: wx,
+          y: wy,
           type: 'pine_tree',
           width: 36,
           height: 48,
@@ -2083,78 +2602,78 @@ function generateSuperAnimalStyleMap(seed: number = Date.now()): GeneratedWorldD
   }
 
   // =========================================================================
-  // LAYER 3: 3 RANDOMIZED CAMPING OUTPOSTS
+  // LAYER 3: 3 RANDOMIZED SAMPLE1 CAMPING OUTPOSTS (DIRT CLEARING + GREEN 2x2 TENTS + CAMPFIRE)
   // =========================================================================
   for (let campIdx = 1; campIdx <= 3; campIdx++) {
-    for (let attempt = 0; attempt < 25; attempt++) {
-      const cc = randInt(26, 134);
-      const cr = randInt(22, 136);
+    for (let attempt = 0; attempt < 35; attempt++) {
+      const cc = randInt(24, 134);
+      const cr = randInt(20, 136);
       if (Math.hypot(cc - 78, cr - 78) < 14) continue;
-      if (tiles[cr]?.[cc]?.isWater || tiles[cr]?.[cc]?.isRoad) continue;
-      if (overlapsLake(cc - 3, cr - 3, 6, 6)) continue;
-      const insideBldg = buildings.some(
-        b => cc * WORLD_TILE_SIZE >= b.worldX - 100 && cc * WORLD_TILE_SIZE <= b.worldX + b.worldW + 100 &&
-             cr * WORLD_TILE_SIZE >= b.worldY - 100 && cr * WORLD_TILE_SIZE <= b.worldY + b.worldH + 100
-      );
-      if (insideBldg) continue;
+      if (overlapsCity(cc - 4, cr - 3, 8, 6, 2)) continue;
+      if (overlapsLake(cc - 4, cr - 3, 8, 6, 1)) continue;
+      if (areaHasRoadOrWater(cc - 3, cr - 2, 7, 5)) continue;
+      if (overlapsExistingBuilding(cc - 3, cr - 2, 7, 5, 2)) continue;
+
+      // Sample1 rounded dirt clearing underneath tents & campfire
+      drawDirtPatch(tiles, cc - 3, cr - 2, 7, 5);
 
       const campX = cc * WORLD_TILE_SIZE;
       const campY = cr * WORLD_TILE_SIZE;
       scenery.push(
         {
           id: `camp${campIdx}_tent_1`,
-          x: campX - 24,
-          y: campY - 10,
+          x: campX - 36,
+          y: campY + 6,
           type: 'tent',
-          width: 44,
-          height: 40,
-          footprintRadius: 18,
-          hp: 100,
-          maxHp: 100,
+          width: 64,
+          height: 64,
+          footprintRadius: 24,
+          hp: 110,
+          maxHp: 110,
           materialDrop: 'wood',
           dropAmount: 4,
           spriteKey: 'prop_tent',
-          sheetCol: 15,
-          sheetRow: 24
+          sheetCol: 46,
+          sheetRow: 10
         },
         {
           id: `camp${campIdx}_tent_2`,
-          x: campX + 34,
-          y: campY - 12,
+          x: campX + 52,
+          y: campY + 6,
           type: 'tent',
-          width: 44,
-          height: 40,
-          footprintRadius: 18,
-          hp: 100,
-          maxHp: 100,
+          width: 64,
+          height: 64,
+          footprintRadius: 24,
+          hp: 110,
+          maxHp: 110,
           materialDrop: 'wood',
           dropAmount: 4,
           spriteKey: 'prop_tent',
-          sheetCol: 13,
-          sheetRow: 24
+          sheetCol: 46,
+          sheetRow: 10
         },
         {
-          id: `camp${campIdx}_stump_1`,
-          x: campX + 4,
-          y: campY + 18,
-          type: 'tree_stump',
-          width: 32,
-          height: 32,
-          footprintRadius: 12,
-          hp: 50,
-          maxHp: 50,
+          id: `camp${campIdx}_campfire`,
+          x: campX + 8,
+          y: campY + 12,
+          type: 'campfire',
+          width: 30,
+          height: 30,
+          footprintRadius: 10,
+          hp: 40,
+          maxHp: 40,
           materialDrop: 'wood',
-          dropAmount: 3,
-          spriteKey: 'prop_tree_stump',
-          sheetCol: 28,
-          sheetRow: 9
+          dropAmount: 2,
+          spriteKey: 'prop_campfire',
+          sheetCol: 14,
+          sheetRow: 8
         }
       );
       groundLoot.push(
         {
           id: `camp${campIdx}_loot_1`,
-          x: campX + 4,
-          y: campY - 2,
+          x: campX + 8,
+          y: campY - 12,
           type: campIdx % 2 === 0 ? 'shield_cell' : 'banana',
           name: campIdx % 2 === 0 ? 'Outpost Shield Battery' : 'Outpost Rations',
           spriteKey: campIdx % 2 === 0 ? 'loot_shield_cell' : 'loot_banana',
@@ -2164,8 +2683,8 @@ function generateSuperAnimalStyleMap(seed: number = Date.now()): GeneratedWorldD
         },
         {
           id: `camp${campIdx}_loot_2`,
-          x: campX - 32,
-          y: campY + 20,
+          x: campX + 52,
+          y: campY + 26,
           type: 'speed_flask',
           name: 'Camp Speed Catalyst',
           spriteKey: 'loot_speed_flask',
@@ -2481,10 +3000,15 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const [activeSkinId, setActiveSkinId] = useState<string>('quantum_physicist');
   const [showInstructorSkinDrawer, setShowInstructorSkinDrawer] = useState<boolean>(false);
 
-  // Supply Crate Modal
+  // Supply Crate Modal & Storm-Eye Air-Drop Alerts
   const [activeCrateModal, setActiveCrateModal] = useState<SupplyCrate | null>(null);
   const [crateQuestionTimer, setCrateQuestionTimer] = useState<number>(3);
   const [crateFeedback, setCrateFeedback] = useState<string | null>(null);
+  const [crateDropBanner, setCrateDropBanner] = useState<string | null>(null);
+
+  // Skin Special Ability Cooldowns & HUD Feedback
+  const [skinAbilityFlash, setSkinAbilityFlash] = useState<string | null>(null);
+  const [slimeBounceCooldownUntil, setSlimeBounceCooldownUntil] = useState<number>(0);
 
   // Victory Celebration Modal
   const [winnerCelebration, setWinnerCelebration] = useState<{ name: string; avatar: string } | null>(null);
@@ -2552,6 +3076,49 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const acousticShieldUntilRef = useRef<number>(0);
   const speedBoostUntilRef = useRef<number>(0);
   const lastShotTimeRef = useRef<number>(0);
+
+  // Skin Special Ability Refs (High-Frequency Loop Safe)
+  const currentStormRadiusRef = useRef<number>(3600);
+  const soulBurnsRef = useRef<Array<{ targetUid: string; ticksRemaining: number; nextTickAt: number; damagePerTick: number }>>([]);
+  const lastSiphonAtRef = useRef<number>(0);
+  const lastRiverHealAtRef = useRef<number>(0);
+  const lastEcholocationAtRef = useRef<number>(0);
+  const echolocationRingsRef = useRef<Array<{ x: number; y: number; startedAt: number; maxRadius: number }>>([]);
+  const lastCataclysmAtRef = useRef<number>(0);
+  const shadowBlinkUntilRef = useRef<number>(0);
+  const slimeBounceCooldownUntilRef = useRef<number>(0);
+  const brittleGuardCooldownUntilRef = useRef<number>(0);
+  const brittleInvulnUntilRef = useRef<number>(0);
+  const royalAbsorptionCooldownUntilRef = useRef<number>(0);
+  const crateIgniteCooldownRef = useRef<Record<string, number>>({});
+  const lastCrateDropTriggerRef = useRef<number>(0);
+
+  const flashSkinAbility = useCallback((label: string) => {
+    setSkinAbilityFlash(label);
+    setTimeout(() => {
+      setSkinAbilityFlash(prev => (prev === label ? null : prev));
+    }, 2400);
+  }, []);
+
+  const findValidCratePointInStormEye = useCallback(
+    (center: { x: number; y: number }, radius: number): { x: number; y: number } => {
+      for (let attempt = 0; attempt < 25; attempt++) {
+        const pt = samplePointWithinStormEye(center, radius, MAP_SIZE);
+        const col = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(pt.x / WORLD_TILE_SIZE)));
+        const row = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(pt.y / WORLD_TILE_SIZE)));
+        const tile = worldDataRef.current?.tiles[row]?.[col];
+        if (tile?.isWater) continue;
+        const insideBldg = worldDataRef.current?.buildings?.some(
+          b => pt.x >= b.hitbox.x - 24 && pt.x <= b.hitbox.x + b.hitbox.w + 24 &&
+               pt.y >= b.hitbox.y - 24 && pt.y <= b.hitbox.y + b.hitbox.h + 24
+        );
+        if (insideBldg) continue;
+        return pt;
+      }
+      return samplePointWithinStormEye(center, radius, MAP_SIZE);
+    },
+    []
+  );
 
   const setPlayerCoords = useCallback((x: number, y: number) => {
     const cx = Math.max(35, Math.min(MAP_SIZE - 35, x));
@@ -2654,6 +3221,19 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       if (me) {
         if (me.hp < prevLocalHpRef.current) {
           lastDamageTimeRef.current = Date.now();
+        }
+        if (me.brittleGuardUsedAt && me.brittleGuardUsedAt + 25000 > brittleGuardCooldownUntilRef.current) {
+          brittleGuardCooldownUntilRef.current = me.brittleGuardUsedAt + 25000;
+          brittleInvulnUntilRef.current = Date.now() + 1500;
+          addFloatingText(playerPosRef.current.x, playerPosRef.current.y - 36, '💀 BRITTLE GUARD SAVED YOU!', '#f59e0b');
+          spawnParticles(playerPosRef.current.x, playerPosRef.current.y, '#e7e5e4', 'stone_chip', 18, 5);
+          flashSkinAbility('Brittle Guard Triggered!');
+        }
+        if (me.royalAbsorptionUsedAt && me.royalAbsorptionUsedAt + 10000 > royalAbsorptionCooldownUntilRef.current) {
+          royalAbsorptionCooldownUntilRef.current = me.royalAbsorptionUsedAt + 10000;
+          addFloatingText(playerPosRef.current.x, playerPosRef.current.y - 36, '👑 ROYAL ABSORPTION -> +BRICKS!', '#34d399');
+          spawnParticles(playerPosRef.current.x, playerPosRef.current.y, '#34d399', 'spark', 14, 4);
+          flashSkinAbility('Royal Absorption +Bricks!');
         }
         if (!me.isAlive && prevLocalHpRef.current > 0 && localDeathTimeRef.current === 0) {
           localDeathTimeRef.current = Date.now();
@@ -2774,6 +3354,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     const isTeacher = user.role === 'instructor' || gameProfile?.role === 'instructor';
     const initialAvatar = activeSkinId || gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist';
     const initialWeapon = gameProfile?.equippedWeapon || 'bunsen_burner';
+    const resolvedSkin = getFantasySkin(initialAvatar);
+    const isKnightHero = resolvedSkin.id === 'knight_hero';
 
     ensureArenaPlayer({
       uid: user.id,
@@ -2785,8 +3367,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       angle: 0,
       hp: 100,
       maxHp: 100,
-      shield: 50,
-      maxShield: 100,
+      shield: isKnightHero ? 70 : 50,
+      maxShield: isKnightHero ? 120 : 100,
       wood: Math.max(10, gameProfile?.wood ?? 20),
       brick: Math.max(10, gameProfile?.brick ?? 10),
       metal: Math.max(5, gameProfile?.metal ?? 5),
@@ -2794,6 +3376,84 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       kills: 0
     });
   }, [user?.id, user?.name, user?.role, activeSkinId, gameProfile?.equippedSkin, gameProfile?.avatar, gameProfile?.equippedWeapon]);
+
+  // Periodic Random Supply Crate Drop strictly within the Eye of the Storm
+  const triggerStormEyeCrateDrop = useCallback(async (forceDrop: boolean = false) => {
+    const center = stormCenter.current;
+    const radius = currentStormRadiusRef.current;
+    const cratesNow = cratesRef.current;
+    const cratesInEye = cratesNow.filter(
+      c => !c.isClaimed && Math.hypot(c.x - center.x, c.y - center.y) <= radius
+    );
+
+    if (!forceDrop && (cratesInEye.length >= 8 || cratesNow.filter(c => !c.isClaimed).length >= 12)) {
+      return;
+    }
+
+    const pt = findValidCratePointInStormEye(center, radius);
+    const created = await dropMidGameSupplyCrate({
+      center,
+      radius,
+      x: pt.x,
+      y: pt.y
+    });
+    if (created) {
+      if (!cratesRef.current.some(c => c.id === created.id)) {
+        const nextCrates = [...cratesRef.current, created];
+        cratesRef.current = nextCrates;
+        setCrates(nextCrates);
+      }
+      soundEngine.playSupplyDrop();
+      spawnParticles(pt.x, pt.y, '#facc15', 'spark', 18, 5);
+      addFloatingText(pt.x, pt.y - 28, '📦 SUPPLY CRATE DROPPED!', '#facc15');
+      setCrateDropBanner('📦 Science Supply Crate air-dropped inside the Eye of the Storm!');
+      setTimeout(() => {
+        setCrateDropBanner(prev =>
+          prev === '📦 Science Supply Crate air-dropped inside the Eye of the Storm!' ? null : prev
+        );
+      }, 3600);
+    }
+  }, [findValidCratePointInStormEye]);
+
+  useEffect(() => {
+    const isTeacherUser = user?.role === 'instructor' || gameProfile?.role === 'instructor';
+
+    const maybeDropPeriodicCrate = (forceIfEmpty: boolean = false) => {
+      if (showMapEditor || activeCrateModalRef.current) return;
+      const bStatus = battleStateRef.current?.status;
+      const canPlayNow = isOwnerTester || bStatus === 'IN_PROGRESS';
+      if (!canPlayNow) return;
+
+      // Multi-client deduplication: only the owner tester, instructor, or lowest-UID alive client spawns periodic crates
+      const aliveUids = arenaPlayersRef.current
+        .filter(p => p.isAlive && !p.uid.startsWith('dummy_'))
+        .map(p => p.uid)
+        .sort();
+      const isElectedDropper =
+        isOwnerTester ||
+        isTeacherUser ||
+        aliveUids.length === 0 ||
+        aliveUids[0] === user.id;
+      if (!isElectedDropper) return;
+
+      const now = Date.now();
+      if (!forceIfEmpty && now - lastCrateDropTriggerRef.current < 14000) return;
+      lastCrateDropTriggerRef.current = now;
+
+      const cratesInEye = cratesRef.current.filter(
+        c => !c.isClaimed && Math.hypot(c.x - stormCenter.current.x, c.y - stormCenter.current.y) <= currentStormRadiusRef.current
+      );
+      if (forceIfEmpty && cratesInEye.length >= 3) return;
+      triggerStormEyeCrateDrop(false).catch(() => {});
+    };
+
+    const initialTimer = setTimeout(() => maybeDropPeriodicCrate(true), 4500);
+    const interval = setInterval(() => maybeDropPeriodicCrate(false), 16000);
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(interval);
+    };
+  }, [user.id, user?.role, gameProfile?.role, isOwnerTester, showMapEditor, triggerStormEyeCrateDrop]);
 
   // Auto-resize canvas viewport (supports Fullscreen mode and responsive display)
   useEffect(() => {
@@ -2869,12 +3529,30 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     await equipItem(user.id, 'weapon', wId);
   };
 
-  // Switch skin immediately in arena (Instructors have full access to all 18 fantasy skins)
+  // Switch skin immediately in arena (Instructors have full access to all 19 fantasy skins)
   const handleSelectSkin = async (skinId: string) => {
+    const nextSkinDef = getFantasySkin(skinId);
+    const prevSkinId = effectiveSkinDefRef.current.id;
     setActiveSkinId(skinId);
     effectiveSkinIdRef.current = skinId;
-    effectiveSkinDefRef.current = getFantasySkin(skinId);
+    effectiveSkinDefRef.current = nextSkinDef;
     soundEngine.playRotate();
+
+    // Knight Hero — Crown of Glory: +20 max shield capacity (120 vs 100)
+    const nextMaxShield = nextSkinDef.id === 'knight_hero' ? 120 : 100;
+    let nextShield = shieldRef.current;
+    if (nextSkinDef.id === 'knight_hero' && prevSkinId !== 'knight_hero') {
+      nextShield = Math.min(120, nextShield + 20);
+      addFloatingText(playerPosRef.current.x, playerPosRef.current.y - 34, '👑 CROWN OF GLORY: 120 MAX SHIELD!', '#fbbf24');
+      flashSkinAbility('Crown of Glory (+20 Max Shield)');
+    } else if (nextSkinDef.id !== 'knight_hero' && nextShield > 100) {
+      nextShield = 100;
+    } else {
+      flashSkinAbility(`${nextSkinDef.name}: ${nextSkinDef.ability.split(':')[0]}`);
+    }
+    shieldRef.current = nextShield;
+    setLocalShield(nextShield);
+
     await equipItem(user.id, 'skin', skinId);
     ensureArenaPlayer({
       uid: user.id,
@@ -2886,8 +3564,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       angle: facingAngleRef.current,
       hp: hpRef.current,
       maxHp: 100,
-      shield: shieldRef.current,
-      maxShield: 100,
+      shield: nextShield,
+      maxShield: nextMaxShield,
       wood: woodRef.current,
       brick: brickRef.current,
       metal: metalRef.current,
@@ -2927,13 +3605,14 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
   // Solo Testing Helper: Restore HP, shield, and grant infinite materials
   const handleRestoreHealthAndMats = () => {
+    const maxSh = effectiveSkinDefRef.current.id === 'knight_hero' ? 120 : 100;
     hpRef.current = 100;
-    shieldRef.current = 100;
+    shieldRef.current = maxSh;
     woodRef.current += 500;
     brickRef.current += 500;
     metalRef.current += 500;
     setLocalHp(100);
-    setLocalShield(100);
+    setLocalShield(maxSh);
     setLocalWood(woodRef.current);
     setLocalBrick(brickRef.current);
     setLocalMetal(metalRef.current);
@@ -3017,6 +3696,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       } else if (key === 'e' || key === 'q') {
         e.preventDefault();
         triggerSpecialPowerRef.current();
+      } else if (key === 'g') {
+        e.preventDefault();
+        triggerSlimeBounceRef.current();
       } else if (key === 'm') {
         e.preventDefault();
         setMinimapExpanded(prev => !prev);
@@ -3060,21 +3742,31 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     const rot = buildRotationRef.current;
     const id = `struct_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
 
+    const isPaladin = effectiveSkinDefRef.current.id === 'paladin';
+    const hpMult = isPaladin ? 1.25 : 1;
+
     if (type === 'wood_wall') {
       if (woodRef.current < 10) return;
       woodRef.current = Math.max(0, woodRef.current - 10);
       setLocalWood(woodRef.current);
+      const wallHp = Math.round(100 * hpMult);
       soundEngine.playSpatialBuild('wood_wall', wx, wy, px, py);
-      spawnParticles(wx, wy, '#f59e0b', 'wood_chip', 8, 4);
-      addFloatingText(wx, wy - 18, `-10 🪵 Wall (${rot}°)`, '#fde68a');
+      spawnParticles(wx, wy, isPaladin ? '#facc15' : '#f59e0b', 'wood_chip', 8, 4);
+      addFloatingText(
+        wx,
+        wy - 18,
+        isPaladin ? `-10 🪵 Wall (${wallHp} HP Holy Bulwark!)` : `-10 🪵 Wall (${rot}°)`,
+        isPaladin ? '#fde047' : '#fde68a'
+      );
+      if (isPaladin) flashSkinAbility('Holy Bulwark (+25% Structure HP)');
 
       await placeArenaStructure({
         id,
         x: wx,
         y: wy,
         type: 'wood_wall',
-        hp: 100,
-        maxHp: 100,
+        hp: wallHp,
+        maxHp: wallHp,
         ownerId: user.id,
         createdAt: new Date().toISOString(),
         rotation: rot
@@ -3084,20 +3776,27 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       if (brickRef.current < 15) return;
       brickRef.current = Math.max(0, brickRef.current - 15);
       setLocalBrick(brickRef.current);
+      const rampHp = Math.round(120 * hpMult);
       const hgUntil = Date.now() + 10000;
       highGroundUntilRef.current = hgUntil;
       setHighGroundUntil(hgUntil);
       soundEngine.playSpatialBuild('brick_ramp', wx, wy, px, py);
-      spawnParticles(wx, wy, '#fb923c', 'stone_chip', 10, 4);
-      addFloatingText(wx, wy - 22, `HIGH GROUND +20% DMG (${rot}°)`, '#fb923c');
+      spawnParticles(wx, wy, isPaladin ? '#facc15' : '#fb923c', 'stone_chip', 10, 4);
+      addFloatingText(
+        wx,
+        wy - 22,
+        isPaladin ? `HIGH GROUND +20% DMG (${rampHp} HP Bulwark!)` : `HIGH GROUND +20% DMG (${rot}°)`,
+        isPaladin ? '#fde047' : '#fb923c'
+      );
+      if (isPaladin) flashSkinAbility('Holy Bulwark (+25% Structure HP)');
 
       await placeArenaStructure({
         id,
         x: wx,
         y: wy,
         type: 'brick_ramp',
-        hp: 120,
-        maxHp: 120,
+        hp: rampHp,
+        maxHp: rampHp,
         ownerId: user.id,
         createdAt: new Date().toISOString(),
         rotation: rot
@@ -3107,20 +3806,27 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       if (metalRef.current < 15) return;
       metalRef.current = Math.max(0, metalRef.current - 15);
       setLocalMetal(metalRef.current);
+      const bunkerHp = Math.round(250 * hpMult);
       const msUntil = Date.now() + 5000;
       metalShieldUntilRef.current = msUntil;
       setMetalShieldUntil(msUntil);
       soundEngine.playSpatialBuild('metal_bunker', wx, wy, px, py);
-      spawnParticles(wx, wy, '#22d3ee', 'electric', 12, 5);
-      addFloatingText(wx, wy - 22, `METAL SHIELD -50% DMG (${rot}°)`, '#38bdf8');
+      spawnParticles(wx, wy, isPaladin ? '#facc15' : '#22d3ee', 'electric', 12, 5);
+      addFloatingText(
+        wx,
+        wy - 22,
+        isPaladin ? `HOLY BULWARK METAL (${bunkerHp} HP + Shield)` : `METAL SHIELD -50% DMG (${rot}°)`,
+        isPaladin ? '#fde047' : '#38bdf8'
+      );
+      if (isPaladin) flashSkinAbility('Holy Bulwark (+25% Metal Fortification)');
 
       await placeArenaStructure({
         id,
         x: wx,
         y: wy,
         type: 'metal_bunker',
-        hp: 250,
-        maxHp: 250,
+        hp: bunkerHp,
+        maxHp: bunkerHp,
         ownerId: user.id,
         createdAt: new Date().toISOString(),
         rotation: rot
@@ -3132,6 +3838,54 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     }
   };
 
+  // Slime — Viscous Form Active Spring Bounce [G]
+  const triggerSlimeBounceRef = useRef<() => void>(() => {});
+  const triggerSlimeBounce = async () => {
+    if (!isAliveRef.current || effectiveSkinDefRef.current.id !== 'slime') return;
+    const now = Date.now();
+    if (now < slimeBounceCooldownUntilRef.current) return;
+    slimeBounceCooldownUntilRef.current = now + 6000;
+    setSlimeBounceCooldownUntil(now + 6000);
+
+    const px = playerPosRef.current.x;
+    const py = playerPosRef.current.y;
+    const ang = facingAngleRef.current;
+    let bounceAngle = ang;
+
+    // Bounce along open space or ricochet off nearby scenery/building
+    let targetX = px + Math.cos(ang) * 165;
+    let targetY = py + Math.sin(ang) * 165;
+    const hitBldg = worldDataRef.current?.buildings?.some(b =>
+      getBuildingHitboxes(b).some(
+        hb => targetX > hb.x && targetX < hb.x + hb.w && targetY > hb.y && targetY < hb.y + hb.h
+      )
+    );
+    if (hitBldg || targetX < 60 || targetX > MAP_SIZE - 60 || targetY < 60 || targetY > MAP_SIZE - 60) {
+      bounceAngle = ang + Math.PI * 0.75;
+      targetX = Math.max(60, Math.min(MAP_SIZE - 60, px + Math.cos(bounceAngle) * 130));
+      targetY = Math.max(60, Math.min(MAP_SIZE - 60, py + Math.sin(bounceAngle) * 130));
+    }
+
+    spawnParticles(px, py, '#10b981', 'spark', 14, 5);
+    setPlayerCoords(targetX, targetY);
+    spawnParticles(targetX, targetY, '#34d399', 'spark', 16, 6);
+    soundEngine.playEatBanana();
+    addFloatingText(targetX, targetY - 26, '🟢 VISCOUS BOUNCE!', '#34d399');
+    flashSkinAbility('Viscous Bounce!');
+
+    arenaPlayersRef.current.forEach(p => {
+      if (p.uid !== user.id && p.isAlive && Math.hypot(p.x - targetX, p.y - targetY) < 110) {
+        damageArenaPlayer(p.uid, 18, user.id).then(res => {
+          if (res.killed) setKills(k => k + 1);
+        });
+        addFloatingText(p.x, p.y - 28, '-18 SLIME SLAM', '#10b981');
+      }
+    });
+
+    await updatePlayerPosition(user.id, { x: Math.round(targetX), y: Math.round(targetY) });
+  };
+  triggerSlimeBounceRef.current = triggerSlimeBounce;
+
   // 4. Special Power Activation
   const triggerSpecialPowerRef = useRef<() => void>(() => {});
   const triggerSpecialPower = async () => {
@@ -3139,15 +3893,25 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     const px = playerPosRef.current.x;
     const py = playerPosRef.current.y;
     const ang = facingAngleRef.current;
-    const cooldownMs = (equippedPower.stats?.cooldownSeconds || 20) * 1000;
+    const skinId = effectiveSkinDefRef.current.id;
+    const isWarlock = skinId === 'warlock';
+    const isKnightHero = skinId === 'knight_hero';
+    const maxShieldCap = isKnightHero ? 120 : 100;
+
+    let cooldownMs = (equippedPower.stats?.cooldownSeconds || 20) * 1000;
+    if (isWarlock) {
+      // Warlock — Cosmic Shift: Power cooldown reduced by 25%
+      cooldownMs = Math.round(cooldownMs * 0.75);
+      flashSkinAbility('Cosmic Shift (-25% Cooldown)');
+    }
     setPowerCooldownUntil(Date.now() + cooldownMs);
 
     if (equippedPower.id === 'element_shield') {
-      const nextShield = Math.min(100, shieldRef.current + 40);
+      const nextShield = Math.min(maxShieldCap, shieldRef.current + 40);
       shieldRef.current = nextShield;
       setLocalShield(nextShield);
       spawnParticles(px, py, '#38bdf8', 'electric', 15, 4);
-      addFloatingText(px, py - 25, '+40 SHIELD!', '#38bdf8');
+      addFloatingText(px, py - 25, `+40 SHIELD!`, '#38bdf8');
       await updatePlayerPosition(user.id, { shield: nextShield });
     } else if (equippedPower.id === 'damage_boost') {
       const ddUntil = Date.now() + 5000;
@@ -3156,13 +3920,23 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       spawnParticles(px, py, '#f43f5e', 'flame', 15, 5);
       addFloatingText(px, py - 25, '2X DAMAGE ACTIVE!', '#fb7185');
     } else if (equippedPower.id === 'quantum_dash') {
-      const dashDist = 240;
+      const dashDist = isWarlock ? 280 : 240;
       const newX = Math.max(60, Math.min(MAP_SIZE - 60, px + Math.cos(ang) * dashDist));
       const newY = Math.max(60, Math.min(MAP_SIZE - 60, py + Math.sin(ang) * dashDist));
       spawnParticles(px, py, '#a855f7', 'electric', 20, 6);
       setPlayerCoords(newX, newY);
-      spawnParticles(newX, newY, '#a855f7', 'spark', 15, 5);
-      addFloatingText(newX, newY - 20, 'QUANTUM DASH', '#c084fc');
+      spawnParticles(newX, newY, isWarlock ? '#d946ef' : '#a855f7', 'spark', 18, 5);
+      addFloatingText(newX, newY - 20, isWarlock ? '🔮 COSMIC SHIFT BLINK (-25% CD)' : 'QUANTUM DASH', '#c084fc');
+      if (isWarlock) {
+        arenaPlayersRef.current.forEach(p => {
+          if (p.uid !== user.id && p.isAlive && Math.hypot(p.x - newX, p.y - newY) < 120) {
+            damageArenaPlayer(p.uid, 20, user.id).then(res => {
+              if (res.killed) setKills(k => k + 1);
+            });
+            addFloatingText(p.x, p.y - 30, '-20 VOID SHIFT', '#d946ef');
+          }
+        });
+      }
       await updatePlayerPosition(user.id, { x: Math.round(newX), y: Math.round(newY) });
     } else if (equippedPower.id === 'matter_synthesizer') {
       woodRef.current += 15;
@@ -3204,6 +3978,15 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     const worldMouseX = Math.max(60, Math.min(MAP_SIZE - 60, mouseCanvasX + cameraRef.current.x));
     const worldMouseY = Math.max(60, Math.min(MAP_SIZE - 60, mouseCanvasY + cameraRef.current.y));
 
+    const skinId = effectiveSkinDefRef.current.id;
+
+    // Shadow Assassin — Shadow Blink: +18% movement speed surge immediately after weapon discharge
+    if (skinId === 'shadow_assassin') {
+      shadowBlinkUntilRef.current = now + 2500;
+      spawnParticles(px, py, '#8b5cf6', 'smoke', 6, 3);
+      flashSkinAbility('Shadow Blink (+18% Speed)');
+    }
+
     if (isAlt) {
       // --- ALTERNATE FIRE MODE ---
       const alt = curWeapon.stats?.altFire;
@@ -3215,7 +3998,16 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         return;
       }
 
-      const altCooldownMs = (alt.altCooldownSeconds || 3) * 1000;
+      // Overlord — Cataclysmic Might: Alternate fire recharge rate doubled (50% cooldown)
+      // Warlock — Cosmic Shift: Teleport alt-fire cooldown reduced by 25%
+      let altCooldownMs = (alt.altCooldownSeconds || 3) * 1000;
+      if (skinId === 'overlord') {
+        altCooldownMs = Math.round(altCooldownMs * 0.5);
+        flashSkinAbility('Cataclysmic Might (2x Alt Recharge)');
+      } else if (skinId === 'warlock' && alt.altType === 'teleport') {
+        altCooldownMs = Math.round(altCooldownMs * 0.75);
+        flashSkinAbility('Cosmic Shift (-25% Teleport CD)');
+      }
       setAltFireCooldownUntil(now + altCooldownMs);
 
       let altDmg = alt.altDamage || 40;
@@ -3499,8 +4291,29 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     if (isHighGround) finalDamage = Math.round(finalDamage * 1.2);
     if (isDoubleDamage) finalDamage = finalDamage * 2;
 
-    const speed = curWeapon.id === 'laser_pointer' ? 24 : (curWeapon.id === 'biohazard_railgun' ? 22 : 18);
-    const beamColor = curWeapon.stats?.beamColor || '#f97316';
+    // Elite Archer — Wind Walker: Firing while sprinting/moving boosts precision, speed (+20%), and damage (+20%)
+    const isWindWalkerActive = skinId === 'elitearcher' && isLocallyMovingRef.current;
+    if (isWindWalkerActive) {
+      finalDamage = Math.round(finalDamage * 1.2);
+      flashSkinAbility('Wind Walker (+20% Sprint Precision DMG)');
+    }
+
+    const baseSpeed = curWeapon.id === 'laser_pointer' ? 24 : (curWeapon.id === 'biohazard_railgun' ? 22 : 18);
+    // Archer — Eagle Eye: +35% projectile velocity & +30% range
+    const isEagleEye = skinId === 'archer_hero';
+    const speed = isEagleEye
+      ? baseSpeed * 1.35
+      : isWindWalkerActive
+        ? baseSpeed * 1.2
+        : baseSpeed;
+    const projRange = isEagleEye
+      ? Math.round((curWeapon.stats?.range || 520) * 1.3)
+      : (curWeapon.stats?.range || 520);
+    const beamColor = skinId === 'dragon_slayer'
+      ? '#f97316'
+      : isWindWalkerActive
+        ? '#2dd4bf'
+        : (curWeapon.stats?.beamColor || '#f97316');
 
     const proj: Projectile = {
       id: `proj_${now}_${Math.random()}`,
@@ -3508,12 +4321,14 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       y: py + Math.sin(aimRad) * 26,
       vx: Math.cos(aimRad) * speed,
       vy: Math.sin(aimRad) * speed,
-      rangeRemaining: curWeapon.stats?.range || 520,
+      rangeRemaining: projRange,
       damage: finalDamage,
       ownerId: user.id,
       weaponId: curWeapon.id,
       color: beamColor,
-      isHighGround
+      isHighGround,
+      isDragonBlood: skinId === 'dragon_slayer',
+      isWindWalker: isWindWalkerActive
     };
 
     projectilesRef.current.push(proj);
@@ -3524,7 +4339,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       px + Math.cos(aimRad) * 28,
       py + Math.sin(aimRad) * 28,
       beamColor,
-      'spark',
+      skinId === 'dragon_slayer' ? 'flame' : 'spark',
       4,
       3
     );
@@ -3557,27 +4372,28 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         }
       }
 
-      // Building solid hitbox collision (Roof and walls block player movement)
+      // Building solid hitbox collision (Roof and walls block player movement; compound wings supported)
       if (worldDataRef.current?.buildings) {
         for (const bldg of worldDataRef.current.buildings) {
-          const hb = bldg.hitbox;
-          if (
-            testX + collRadius > hb.x &&
-            testX - collRadius < hb.x + hb.w &&
-            testY + collRadius > hb.y &&
-            testY - collRadius < hb.y + hb.h
-          ) {
-            const dw = bldg.doorway;
-            const isAtDoorX = testX >= dw.x && testX <= dw.x + dw.w;
-            const isAtDoorY = testY >= dw.y - 12 && testY <= dw.y + dw.h + 12;
-            if (isAtDoorX && isAtDoorY) {
-              const roofLimitY = hb.y + WORLD_TILE_SIZE * (bldg.height >= 4 ? 2 : 1);
-              if (testY < roofLimitY) {
-                return true;
+          for (const hb of getBuildingHitboxes(bldg)) {
+            if (
+              testX + collRadius > hb.x &&
+              testX - collRadius < hb.x + hb.w &&
+              testY + collRadius > hb.y &&
+              testY - collRadius < hb.y + hb.h
+            ) {
+              const dw = bldg.doorway;
+              const isAtDoorX = testX >= dw.x && testX <= dw.x + dw.w;
+              const isAtDoorY = testY >= dw.y - 12 && testY <= dw.y + dw.h + 12;
+              if (isAtDoorX && isAtDoorY) {
+                const roofLimitY = bldg.hitbox.y + WORLD_TILE_SIZE * (bldg.height >= 4 ? 2 : 1);
+                if (testY < roofLimitY) {
+                  return true;
+                }
+                continue;
               }
-              continue;
+              return true;
             }
-            return true;
           }
         }
       }
@@ -3639,9 +4455,20 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
       let px = playerPosRef.current.x;
       let py = playerPosRef.current.y;
+      const activeSkinIdLoop = effectiveSkinDefRef.current.id;
+      const isRogueStealth =
+        activeSkinIdLoop === 'rogue' &&
+        now - lastShotTimeRef.current > 1500 &&
+        now - lastDamageTimeRef.current > 1500;
+      const isShadowBlinking = activeSkinIdLoop === 'shadow_assassin' && now < shadowBlinkUntilRef.current;
+      const isSlime = activeSkinIdLoop === 'slime';
+      const maxShieldCapLoop = activeSkinIdLoop === 'knight_hero' ? 120 : 100;
+      const loopSpeedMult = (isRogueStealth ? 1.15 : 1) * (isShadowBlinking ? 1.18 : 1);
+
       const speedPxPerSec = getSkinMovementSpeedPxPerSec(
         effectiveSkinDefRef.current,
-        now < speedBoostUntilRef.current
+        now < speedBoostUntilRef.current,
+        loopSpeedMult
       );
 
       // --- 1. LOCAL PLAYER SMOOTH DELTA-TIME MOVEMENT & AXIS-SLIDING COLLISION ---
@@ -3682,6 +4509,30 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             }
           }
 
+          // Slime — Viscous Form: smooth perpendicular obstacle slip when pressing straight into an edge
+          if (!moved && isSlime) {
+            const slipStep = speedPxPerSec * dt * 0.85;
+            if (Math.abs(dirX) >= Math.abs(dirY)) {
+              for (const sy of [-slipStep, slipStep]) {
+                const candY = Math.max(35, Math.min(MAP_SIZE - 35, py + sy));
+                if (!isPositionBlocked(px, candY, 0, sy)) {
+                  py = candY;
+                  moved = true;
+                  break;
+                }
+              }
+            } else {
+              for (const sx of [-slipStep, slipStep]) {
+                const candX = Math.max(35, Math.min(MAP_SIZE - 35, px + sx));
+                if (!isPositionBlocked(candX, py, sx, 0)) {
+                  px = candX;
+                  moved = true;
+                  break;
+                }
+              }
+            }
+          }
+
           playerPosRef.current.x = px;
           playerPosRef.current.y = py;
           isLocallyMovingRef.current = moved;
@@ -3695,10 +4546,12 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               const tileCol = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(px / WORLD_TILE_SIZE)));
               const tileRow = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(py / WORLD_TILE_SIZE)));
               const surface = worldDataRef.current?.tiles[tileRow]?.[tileCol]?.surface || 'grass';
-              soundEngine.playSpatialFootstep(px, py, px, py, surface);
+              soundEngine.playSpatialFootstep(px, py, px, py, surface, isRogueStealth ? 0.2 : 1);
             }
 
-            if (Math.random() < 0.22 * frameScale) {
+            if (isShadowBlinking && Math.random() < 0.55 * frameScale) {
+              spawnParticles(px - dirX * 10, py - dirY * 10, '#8b5cf6', 'smoke', 1, 1.5);
+            } else if (Math.random() < 0.22 * frameScale) {
               spawnParticles(px - dirX * 10, py - dirY * 10, '#64748b', 'dust', 1, 1);
             }
           }
@@ -3709,11 +4562,10 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         // Unstuck safeguard: ensure player is never trapped inside building walls/roofs
         if (worldDataRef.current?.buildings) {
           for (const bldg of worldDataRef.current.buildings) {
-            const hb = bldg.hitbox;
-            if (
-              px > hb.x + 10 && px < hb.x + hb.w - 10 &&
-              py > hb.y + 10 && py < hb.y + hb.h - 10
-            ) {
+            const insideAnyWing = getBuildingHitboxes(bldg).some(
+              hb => px > hb.x + 10 && px < hb.x + hb.w - 10 && py > hb.y + 10 && py < hb.y + hb.h - 10
+            );
+            if (insideAnyWing) {
               const dw = bldg.doorway;
               const isAtDoor = px >= dw.x && px <= dw.x + dw.w && py >= dw.y - 10 && py <= dw.y + dw.h + 10;
               if (!isAtDoor) {
@@ -3776,7 +4628,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                   addFloatingText(px, py - 25, '+25 HP Banana Snack! 🍌', '#facc15');
                   spawnParticles(px, py, '#facc15', 'banana_peel', 6, 2);
                 } else if (loot.type === 'shield_cell') {
-                  const nextSh = Math.min(100, shieldRef.current + (loot.grantShield || 30));
+                  const nextSh = Math.min(maxShieldCapLoop, shieldRef.current + (loot.grantShield || 30));
                   shieldRef.current = nextSh;
                   setLocalShield(nextSh);
                   addFloatingText(px, py - 25, '+30 Shield Battery! ⚡', '#22d3ee');
@@ -3791,7 +4643,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                   addFloatingText(px, py - 25, '+15🪵 +10🧱 +5⚙️ Crate', '#4ade80');
                 } else {
                   const nextHp = Math.min(100, hpRef.current + 15);
-                  const nextSh = Math.min(100, shieldRef.current + 15);
+                  const nextSh = Math.min(maxShieldCapLoop, shieldRef.current + 15);
                   hpRef.current = nextHp;
                   shieldRef.current = nextSh;
                   speedBoostUntilRef.current = now + 6000;
@@ -3863,6 +4715,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       const elapsedSec = isMatchActive ? Math.max(0, (now - matchStartTimeRef.current) / 1000) : 0;
       const storm = calculateStormState(elapsedSec, targetFinalCenterRef.current);
       stormCenter.current = storm.center;
+      currentStormRadiusRef.current = storm.radius;
 
       if (storm.isSurging && !wasSurgingRef.current && isMatchActive) {
         soundEngine.playStormSurgeAlert();
@@ -3882,15 +4735,33 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         setIsSurgeActive(storm.isSurging && isMatchActive);
       }
 
-      // Storm Damage Outside Eye
+      // Storm Damage Outside Eye (Dark Knight reduces storm damage by 50%; Skeleton Warrior Brittle Guard saves fatal hit)
       const distFromCenter = Math.hypot(px - stormCenter.current.x, py - stormCenter.current.y);
       const isOutsideEye = distFromCenter > storm.radius;
-      if (isOutsideEye && playerAlive && isMatchActive) {
+      if (isOutsideEye && playerAlive && isMatchActive && now >= brittleInvulnUntilRef.current) {
         if (now - lastStormDamageTimeRef.current >= 1000) {
           lastStormDamageTimeRef.current = now;
           soundEngine.playSpatialHit(px, py, px, py);
-          addFloatingText(px, py - 32, '⚡ -8 STORM DAMAGE', '#c084fc');
-          const nextHp = Math.max(0, hpRef.current - 8);
+          const isDarkKnight = activeSkinIdLoop === 'dark_knight';
+          const stormHit = isDarkKnight ? 4 : 8;
+          addFloatingText(
+            px,
+            py - 32,
+            isDarkKnight ? '⚔️ -4 STORM (HEAVY ARMOR)' : '⚡ -8 STORM DAMAGE',
+            isDarkKnight ? '#94a3b8' : '#c084fc'
+          );
+          if (isDarkKnight) flashSkinAbility('Heavy Armor (-50% Storm DMG)');
+
+          let nextHp = Math.max(0, hpRef.current - stormHit);
+          if (nextHp <= 0 && activeSkinIdLoop === 'skeleton_warrior' && now >= brittleGuardCooldownUntilRef.current) {
+            nextHp = 20;
+            brittleGuardCooldownUntilRef.current = now + 25000;
+            brittleInvulnUntilRef.current = now + 1500;
+            addFloatingText(px, py - 42, '💀 BRITTLE GUARD SAVED YOU!', '#f59e0b');
+            spawnParticles(px, py, '#e7e5e4', 'stone_chip', 18, 5);
+            flashSkinAbility('Brittle Guard (20 HP Save)');
+          }
+
           hpRef.current = nextHp;
           setLocalHp(nextHp);
           if (nextHp <= 0) {
@@ -3898,12 +4769,111 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             setIsAlive(false);
           }
           damageArenaPlayer(user.id, 8, undefined, true).then(res => {
-            if (res.killed) {
+            if (res.killed && !(activeSkinIdLoop === 'skeleton_warrior' && res.brittleGuardTriggered)) {
               isAliveRef.current = false;
               setIsAlive(false);
             }
           });
         }
+      }
+
+      // --- 4B. SKIN PASSIVE AURAS & PERIODIC EFFECTS ---
+      if (playerAlive) {
+        // White Mage — Aura of Restoration: +5 Shield & +3 HP/sec near water tiles (3-tile radius)
+        if (activeSkinIdLoop === 'white_mage' && now - lastRiverHealAtRef.current >= 1000) {
+          const pCol = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(px / WORLD_TILE_SIZE)));
+          const pRow = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(py / WORLD_TILE_SIZE)));
+          let nearWater = false;
+          for (let dr = -3; dr <= 3 && !nearWater; dr++) {
+            for (let dc = -3; dc <= 3 && !nearWater; dc++) {
+              if (worldDataRef.current?.tiles[pRow + dr]?.[pCol + dc]?.isWater) {
+                nearWater = true;
+              }
+            }
+          }
+          if (nearWater) {
+            lastRiverHealAtRef.current = now;
+            const prevHp = hpRef.current;
+            const prevSh = shieldRef.current;
+            const nextHp = Math.min(100, prevHp + 3);
+            const nextSh = Math.min(maxShieldCapLoop, prevSh + 5);
+            if (nextHp > prevHp || nextSh > prevSh) {
+              hpRef.current = nextHp;
+              shieldRef.current = nextSh;
+              setLocalHp(nextHp);
+              setLocalShield(nextSh);
+              spawnParticles(px, py, '#fbbf24', 'spark', 7, 2.5);
+              addFloatingText(px, py - 32, '✨ +3HP +5🛡️ Restoration', '#fde047');
+              flashSkinAbility('Aura of Restoration (Near Water)');
+              updatePlayerPosition(user.id, { hp: nextHp, shield: nextSh }).catch(() => {});
+            }
+          }
+        }
+
+        // Bat — Echolocation: Sonar pulse every 1.5s revealing enemies within 950px
+        if (activeSkinIdLoop === 'bat' && now - lastEcholocationAtRef.current >= 1500) {
+          lastEcholocationAtRef.current = now;
+          echolocationRingsRef.current.push({ x: px, y: py, startedAt: now, maxRadius: 420 });
+          const detectedEnemies = arenaPlayersRef.current.filter(
+            p => p.uid !== user.id && p.isAlive && Math.hypot(p.x - px, p.y - py) <= 950
+          );
+          if (detectedEnemies.length > 0) {
+            soundEngine.playSonarPing();
+            flashSkinAbility(`Echolocation (${detectedEnemies.length} detected)`);
+          }
+        }
+        echolocationRingsRef.current = echolocationRingsRef.current.filter(r => now - r.startedAt < 1100);
+
+        // Overlord — Cataclysmic Might: 140px Storm Eye aura deals 6 dmg/sec to nearby enemies
+        if (activeSkinIdLoop === 'overlord' && now - lastCataclysmAtRef.current >= 1000) {
+          const nearbyTargets = arenaPlayersRef.current.filter(
+            p => p.uid !== user.id && p.isAlive && Math.hypot(p.x - px, p.y - py) <= 140
+          );
+          if (nearbyTargets.length > 0) {
+            lastCataclysmAtRef.current = now;
+            spawnParticles(px, py, '#dc2626', 'flame', 10, 4);
+            nearbyTargets.forEach(target => {
+              addFloatingText(target.x, target.y - 30, '-6🔥 Cataclysm', '#fb7185');
+              spawnParticles(target.x, target.y, '#dc2626', 'spark', 6, 3);
+              damageArenaPlayer(target.uid, 6, user.id).then(res => {
+                if (res.killed) {
+                  setKills(prev => prev + 1);
+                  addFloatingText(target.x, target.y - 46, 'ELIMINATED! 💀', '#fbbf24');
+                }
+              });
+            });
+          }
+        }
+      }
+
+      // Necromancer — Soul Harvester DoT burn ticks
+      if (soulBurnsRef.current.length > 0) {
+        const remainingBurns: typeof soulBurnsRef.current = [];
+        for (const burn of soulBurnsRef.current) {
+          if (now >= burn.nextTickAt) {
+            const target = arenaPlayersRef.current.find(p => p.uid === burn.targetUid && p.isAlive);
+            if (target) {
+              spawnParticles(target.x, target.y, '#06b6d4', 'flame', 6, 2.5);
+              addFloatingText(target.x, target.y - 28, `-${burn.damagePerTick}🔥 SOUL BURN`, '#22d3ee');
+              damageArenaPlayer(target.uid, burn.damagePerTick, user.id).then(res => {
+                if (res.killed) {
+                  setKills(prev => prev + 1);
+                  addFloatingText(target.x, target.y - 46, 'SOUL HARVESTED! 💀', '#22d3ee');
+                }
+              });
+            }
+            if (burn.ticksRemaining > 1) {
+              remainingBurns.push({
+                ...burn,
+                ticksRemaining: burn.ticksRemaining - 1,
+                nextTickAt: now + 600
+              });
+            }
+          } else {
+            remainingBurns.push(burn);
+          }
+        }
+        soulBurnsRef.current = remainingBurns;
       }
 
       // --- 5. SUPPLY CRATE COLLISION ---
@@ -3946,12 +4916,43 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         // Collision with building walls and roofs
         if (worldDataRef.current?.buildings) {
           for (const bldg of worldDataRef.current.buildings) {
-            const hb = bldg.hitbox;
-            if (p.x >= hb.x && p.x <= hb.x + hb.w && p.y >= hb.y && p.y <= hb.y + hb.h) {
+            const hitWing = getBuildingHitboxes(bldg).some(
+              hb => p.x >= hb.x && p.x <= hb.x + hb.w && p.y >= hb.y && p.y <= hb.y + hb.h
+            );
+            if (hitWing) {
               hit = true;
               soundEngine.playSpatialHit(p.x, p.y, px, py);
               spawnParticles(p.x, p.y, '#94a3b8', 'stone_chip', 5, 2.5);
               break;
+            }
+          }
+        }
+
+        // Dragon's Blood — Dragon Slayer projectiles passing within 30px of an unclaimed Supply Crate trigger a fiery ignition blast
+        if (p.isDragonBlood && p.ownerId === user.id) {
+          for (const cr of cratesRef.current) {
+            if (!cr.isClaimed && Math.hypot(p.x - cr.x, p.y - cr.y) < 30) {
+              const lastIgnite = crateIgniteCooldownRef.current[cr.id] || 0;
+              if (now - lastIgnite > 1200) {
+                crateIgniteCooldownRef.current[cr.id] = now;
+                hit = true;
+                spawnParticles(cr.x, cr.y, '#f97316', 'flame', 22, 6);
+                addFloatingText(cr.x, cr.y - 30, '🐉🔥 CRATE IGNITION!', '#fb923c');
+                soundEngine.playSpatialHit(cr.x, cr.y, px, py);
+                flashSkinAbility("Dragon's Blood (Crate Blast)");
+                arenaPlayersRef.current.forEach(en => {
+                  if (en.uid !== user.id && en.isAlive && Math.hypot(en.x - cr.x, en.y - cr.y) < 120) {
+                    damageArenaPlayer(en.uid, 28, user.id).then(res => {
+                      if (res.killed) {
+                        setKills(prev => prev + 1);
+                        addFloatingText(en.x, en.y - 48, 'ELIMINATED! 💀', '#fbbf24');
+                      }
+                    });
+                    addFloatingText(en.x, en.y - 28, '-28 🔥 BLAST', '#f97316');
+                  }
+                });
+                break;
+              }
             }
           }
         }
@@ -3963,7 +4964,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               const dist = Math.hypot(p.x - sc.x, p.y - sc.y);
               if (dist < sc.footprintRadius) {
                 hit = true;
-                sc.hp -= p.damage;
+                const propDmg = p.isDragonBlood ? p.damage * 2 : p.damage;
+                sc.hp -= propDmg;
                 soundEngine.playSpatialHit(p.x, p.y, px, py);
 
                 if (sc.materialDrop === 'wood') {
@@ -3977,16 +4979,22 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 if (sc.hp <= 0 && p.ownerId === user.id) {
                   if (sc.materialDrop === 'wood') {
                     woodRef.current += sc.dropAmount;
-                    setLocalWood(woodRef.current);
                   }
                   if (sc.materialDrop === 'brick') {
                     brickRef.current += sc.dropAmount;
-                    setLocalBrick(brickRef.current);
                   }
                   if (sc.materialDrop === 'metal') {
                     metalRef.current += sc.dropAmount;
-                    setLocalMetal(metalRef.current);
                   }
+                  if (activeSkinIdLoop === 'goblin') {
+                    woodRef.current += 3;
+                    brickRef.current += 1;
+                    addFloatingText(sc.x, sc.y - 36, '👺 +3🪵 +1🧱 Snatched!', '#4ade80');
+                    flashSkinAbility('Gold Snatcher (Loot Bonus)');
+                  }
+                  setLocalWood(woodRef.current);
+                  setLocalBrick(brickRef.current);
+                  setLocalMetal(metalRef.current);
                   addFloatingText(sc.x, sc.y - 20, `+${sc.dropAmount} ${sc.materialDrop.toUpperCase()}`, '#4ade80');
                 }
                 break;
@@ -4002,9 +5010,21 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             if (distToStruct < 28) {
               if (p.isHighGround && st.type === 'wood_wall') continue;
               hit = true;
-              damageArenaStructure(st.id, p.damage);
+              const structDmg = p.isDragonBlood ? p.damage * 2 : p.damage;
+              damageArenaStructure(st.id, structDmg).then(res => {
+                if (res.destroyed && p.ownerId === user.id && activeSkinIdLoop === 'goblin') {
+                  woodRef.current += 8;
+                  brickRef.current += 4;
+                  metalRef.current += 2;
+                  setLocalWood(woodRef.current);
+                  setLocalBrick(brickRef.current);
+                  setLocalMetal(metalRef.current);
+                  addFloatingText(st.x, st.y - 26, '👺 +8🪵 +4🧱 +2⚙️ SNATCHED!', '#4ade80');
+                  flashSkinAbility('Gold Snatcher (Structure Loot!)');
+                }
+              });
               soundEngine.playSpatialHit(p.x, p.y, px, py);
-              spawnParticles(p.x, p.y, '#94a3b8', 'stone_chip', 6, 3);
+              spawnParticles(p.x, p.y, p.isDragonBlood ? '#f97316' : '#94a3b8', p.isDragonBlood ? 'flame' : 'stone_chip', 6, 3);
               break;
             }
           }
@@ -4018,13 +5038,61 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               if (distToEnemy < 24) {
                 hit = true;
                 soundEngine.playSpatialHit(enemy.x, enemy.y, px, py);
-                spawnParticles(enemy.x, enemy.y, '#ef4444', 'spark', 8, 4);
+                spawnParticles(enemy.x, enemy.y, p.isDragonBlood ? '#f97316' : '#ef4444', p.isDragonBlood ? 'flame' : 'spark', 8, 4);
                 addFloatingText(enemy.x, enemy.y - 32, `-${p.damage}`, '#ef4444');
 
+                // Dragon's Blood — Flame splash 12 dmg to other nearby enemies within 95px
+                if (p.isDragonBlood && p.ownerId === user.id) {
+                  spawnParticles(enemy.x, enemy.y, '#f97316', 'flame', 14, 5);
+                  arenaPlayersRef.current.forEach(other => {
+                    if (other.uid !== enemy.uid && other.uid !== user.id && other.isAlive && Math.hypot(other.x - enemy.x, other.y - enemy.y) < 95) {
+                      damageArenaPlayer(other.uid, 12, user.id).then(r => {
+                        if (r.killed) setKills(prev => prev + 1);
+                      });
+                      addFloatingText(other.x, other.y - 28, '-12🔥 SPLASH', '#fb923c');
+                    }
+                  });
+                }
+
+                // Cultist — Dark Siphon (+5 HP on hit, 1.5s CD)
+                if (p.ownerId === user.id && activeSkinIdLoop === 'cultist' && now - lastSiphonAtRef.current >= 1500) {
+                  lastSiphonAtRef.current = now;
+                  const nextHp = Math.min(100, hpRef.current + 5);
+                  hpRef.current = nextHp;
+                  setLocalHp(nextHp);
+                  addFloatingText(px, py - 28, '🧛 +5 HP Siphon', '#f472b6');
+                  flashSkinAbility('Dark Siphon (+5 HP)');
+                }
+
+                // Necromancer — Soul Harvester (3-tick 4 dmg Soul Burn)
+                if (p.ownerId === user.id && activeSkinIdLoop === 'necromancer') {
+                  soulBurnsRef.current = [
+                    ...soulBurnsRef.current.filter(b => b.targetUid !== enemy.uid),
+                    { targetUid: enemy.uid, ticksRemaining: 3, nextTickAt: now + 600, damagePerTick: 4 }
+                  ];
+                  flashSkinAbility('Soul Harvester (Burn Applied)');
+                }
+
                 damageArenaPlayer(enemy.uid, p.damage, p.ownerId).then(res => {
+                  if (res.brittleGuardTriggered) {
+                    addFloatingText(enemy.x, enemy.y - 44, '💀 BRITTLE GUARD!', '#f59e0b');
+                  }
+                  if (res.bricksGained && res.bricksGained > 0) {
+                    addFloatingText(enemy.x, enemy.y - 44, `👑 ABSORBED (+${res.bricksGained}🧱)`, '#34d399');
+                  }
                   if (res.killed && p.ownerId === user.id) {
                     setKills(prev => prev + 1);
                     addFloatingText(enemy.x, enemy.y - 48, 'ELIMINATED! 💀', '#fbbf24');
+                    if (activeSkinIdLoop === 'cultist') {
+                      const nextHp = Math.min(100, hpRef.current + 25);
+                      const nextSh = Math.min(100, shieldRef.current + 15);
+                      hpRef.current = nextHp;
+                      shieldRef.current = nextSh;
+                      setLocalHp(nextHp);
+                      setLocalShield(nextSh);
+                      addFloatingText(px, py - 38, '🧛 BLOOD RITUAL: +25HP +15🛡️', '#f472b6');
+                      flashSkinAbility('Blood Ritual (+25HP +15🛡️)');
+                    }
                   }
                 });
                 break;
@@ -4120,7 +5188,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       }
 
       // =======================================================================
-      // LAYER 1 (STRUCTURED WATER & DIRT REGIONS): 9-Slice Ponds & Dirt Roads
+      // LAYER 1 (STRUCTURED WATER, WATER LILIES & DIRT REGIONS): 9-Slice Ponds & Dirt Roads
       // =======================================================================
       if (worldDataRef.current) {
         for (let r = startRow; r <= endRow; r++) {
@@ -4144,9 +5212,40 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                   WORLD_TILE_SIZE,
                   WORLD_TILE_SIZE
                 );
+                // Render Sample1 water lilies on top of interior water tiles
+                if (tile.isWater && tile.lilyCol !== undefined && tile.lilyRow !== undefined) {
+                  const { sx: lsx, sy: lsy } = getTileSourceCoords(tile.lilyCol, tile.lilyRow);
+                  ctx.drawImage(
+                    sheetImg,
+                    lsx,
+                    lsy,
+                    TILE_SIZE,
+                    TILE_SIZE,
+                    tx,
+                    ty,
+                    WORLD_TILE_SIZE,
+                    WORLD_TILE_SIZE
+                  );
+                }
               } else {
-                ctx.fillStyle = tile.baseColor;
+                ctx.fillStyle = tile.isWater ? '#63c5cf' : tile.baseColor;
                 ctx.fillRect(tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+                if (tile.isWater && tile.lilyCol !== undefined) {
+                  ctx.fillStyle = '#4ba86d';
+                  ctx.beginPath();
+                  ctx.arc(tx + 16, ty + 16, 9, 0, Math.PI * 2);
+                  ctx.fill();
+                  if (tile.lilyCol === 25) {
+                    ctx.fillStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.arc(tx + 16, ty + 15, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#facc15';
+                    ctx.beginPath();
+                    ctx.arc(tx + 16, ty + 15, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                  }
+                }
               }
             }
           }
@@ -4154,9 +5253,11 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       }
 
       // =======================================================================
-      // LAYER 2 (PREFAB STRUCTURES): 4x4 and 3x3 Houses (Roof, Walls, Doors)
+      // LAYER 2 (PREFAB STRUCTURES): Sample1 Gabled Houses, Barns, Cottages & Manors
       // =======================================================================
       if (worldDataRef.current?.buildings) {
+        const prevSmooth = ctx.imageSmoothingEnabled;
+        ctx.imageSmoothingEnabled = false;
         for (const bldg of worldDataRef.current.buildings) {
           const hb = bldg.hitbox;
           // Viewport culling check
@@ -4169,16 +5270,32 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             continue;
           }
 
-          // Soft building ground shadow
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
-          ctx.fillRect(hb.x + 4, hb.y + hb.h - 8, hb.w, 14);
+          // Soft building ground shadow under each wing hitbox
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+          for (const wingHb of getBuildingHitboxes(bldg)) {
+            ctx.fillRect(wingHb.x + 3, wingHb.y + wingHb.h - 6, wingHb.w, 10);
+          }
 
-          // Draw building tiles (Roof Top row -> Wall Middle rows -> Door/Foundation Bottom row)
+          // Draw multi-layered building tiles (Backdrop Wall -> Roof/Gable/Window/Door -> Trim/Weathervane)
           for (const t of bldg.tiles) {
             const tx = t.col * WORLD_TILE_SIZE;
             const ty = t.row * WORLD_TILE_SIZE;
 
             if (hasSheet) {
+              if (t.baseSheetCol !== undefined && t.baseSheetRow !== undefined) {
+                const { sx: bsx, sy: bsy } = getTileSourceCoords(t.baseSheetCol, t.baseSheetRow);
+                ctx.drawImage(
+                  sheetImg,
+                  bsx,
+                  bsy,
+                  TILE_SIZE,
+                  TILE_SIZE,
+                  tx,
+                  ty,
+                  WORLD_TILE_SIZE,
+                  WORLD_TILE_SIZE
+                );
+              }
               const { sx, sy } = getTileSourceCoords(t.sheetCol, t.sheetRow);
               ctx.drawImage(
                 sheetImg,
@@ -4191,12 +5308,27 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 WORLD_TILE_SIZE,
                 WORLD_TILE_SIZE
               );
+              if (t.overlayCol !== undefined && t.overlayRow !== undefined) {
+                const { sx: osx, sy: osy } = getTileSourceCoords(t.overlayCol, t.overlayRow);
+                ctx.drawImage(
+                  sheetImg,
+                  osx,
+                  osy,
+                  TILE_SIZE,
+                  TILE_SIZE,
+                  tx,
+                  ty,
+                  WORLD_TILE_SIZE,
+                  WORLD_TILE_SIZE
+                );
+              }
             } else {
-              ctx.fillStyle = t.isRoof ? '#991b1b' : '#64748b';
+              ctx.fillStyle = t.isRoof ? '#b48151' : '#e1d5ba';
               ctx.fillRect(tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
             }
           }
         }
+        ctx.imageSmoothingEnabled = prevSmooth;
       }
 
       // =======================================================================
@@ -4247,9 +5379,13 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                   row = 9;
                 }
               } else if (sc.type === 'tent') {
-                if (col === undefined || col === 5) {
-                  col = 15;
-                  row = 24;
+                // Sample1 green 2x2 A-frame tent (Kenney cols 46..47, rows 10..11)
+                col = 46;
+                row = 10;
+              } else if (sc.type === 'campfire') {
+                if (col === undefined) {
+                  col = 14;
+                  row = 8;
                 }
               } else if (sc.type === 'fence') {
                 if (col === undefined || col === 12) {
@@ -4275,7 +5411,27 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               if (hasSheet && col !== undefined && row !== undefined) {
                 cContext.imageSmoothingEnabled = false;
 
-                if (topRow !== undefined) {
+                if (sc.type === 'tent') {
+                  // Seamless 2x2 Sample1 Green Tent (cols 46..47, rows 10..11)
+                  const halfW = sc.width / 2;
+                  const halfH = sc.height / 2;
+                  const leftX = sc.x - halfW;
+                  const topY = sc.y - sc.height + 2;
+                  const parts = [
+                    { c: 46, r: 10, dx: 0, dy: 0 },
+                    { c: 47, r: 10, dx: halfW, dy: 0 },
+                    { c: 46, r: 11, dx: 0, dy: halfH },
+                    { c: 47, r: 11, dx: halfW, dy: halfH }
+                  ];
+                  for (const pt of parts) {
+                    const { sx: tsx, sy: tsy } = getTileSourceCoords(pt.c, pt.r);
+                    cContext.drawImage(
+                      sheetImg,
+                      tsx, tsy, TILE_SIZE, TILE_SIZE,
+                      leftX + pt.dx, topY + pt.dy, halfW, halfH
+                    );
+                  }
+                } else if (topRow !== undefined) {
                   // Two-tile tall structure (e.g. Kenney Pine / Round Tree: row 8 top crown + row 9 lower canopy & trunk)
                   const { sx: sxTop, sy: syTop } = getTileSourceCoords(col, topRow);
                   const { sx: sxBot, sy: syBot } = getTileSourceCoords(col, row);
@@ -4300,7 +5456,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                     halfH
                   );
                 } else {
-                  // Single tile prop (Stump, Tent, Fence, Flower, Crate, Barrel)
+                  // Single tile prop (Stump, Fence, Flower, Campfire, Crate, Barrel)
                   const { sx, sy } = getTileSourceCoords(col, row);
                   cContext.drawImage(
                     sheetImg,
@@ -4386,19 +5542,43 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                     cContext.ellipse(sc.x, sc.y - 12, 5, 2.5, 0, 0, Math.PI * 2);
                     cContext.fill();
                   } else if (sc.type === 'tent') {
-                    cContext.fillStyle = '#d97706';
+                    // Exact Sample1 green A-frame tent fallback
+                    cContext.fillStyle = '#4ba86d';
+                    cContext.strokeStyle = '#24633d';
+                    cContext.lineWidth = 2;
                     cContext.beginPath();
                     cContext.moveTo(sc.x - sc.width * 0.45, sc.y);
                     cContext.lineTo(sc.x + sc.width * 0.45, sc.y);
-                    cContext.lineTo(sc.x, sc.y - sc.height * 0.85);
+                    cContext.lineTo(sc.x + sc.width * 0.35, sc.y - sc.height * 0.58);
+                    cContext.lineTo(sc.x, sc.y - sc.height * 0.9);
+                    cContext.lineTo(sc.x - sc.width * 0.35, sc.y - sc.height * 0.58);
                     cContext.closePath();
                     cContext.fill();
-                    cContext.fillStyle = '#1e293b';
+                    cContext.stroke();
+                    cContext.fillStyle = '#5eb780';
                     cContext.beginPath();
-                    cContext.moveTo(sc.x - 6, sc.y);
-                    cContext.lineTo(sc.x + 6, sc.y);
-                    cContext.lineTo(sc.x, sc.y - sc.height * 0.5);
+                    cContext.moveTo(sc.x - sc.width * 0.32, sc.y);
+                    cContext.lineTo(sc.x + sc.width * 0.32, sc.y);
+                    cContext.lineTo(sc.x, sc.y - sc.height * 0.88);
                     cContext.closePath();
+                    cContext.fill();
+                    cContext.fillStyle = '#307e4d';
+                    cContext.beginPath();
+                    cContext.moveTo(sc.x - 10, sc.y);
+                    cContext.lineTo(sc.x + 10, sc.y);
+                    cContext.lineTo(sc.x, sc.y - sc.height * 0.45);
+                    cContext.closePath();
+                    cContext.fill();
+                  } else if (sc.type === 'campfire') {
+                    cContext.fillStyle = '#8f673f';
+                    cContext.fillRect(sc.x - 10, sc.y - 6, 20, 6);
+                    cContext.fillStyle = '#f97316';
+                    cContext.beginPath();
+                    cContext.arc(sc.x, sc.y - 10, 7, 0, Math.PI * 2);
+                    cContext.fill();
+                    cContext.fillStyle = '#facc15';
+                    cContext.beginPath();
+                    cContext.arc(sc.x, sc.y - 9, 4, 0, Math.PI * 2);
                     cContext.fill();
                   } else if (sc.type === 'fence') {
                     cContext.fillStyle = '#92400e';
@@ -4459,7 +5639,16 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               cContext.save();
               const bob = Math.sin(cNow / 240) * 4;
 
-              // Glowing ground halo
+              // Glowing ground halo (Discoverer Loot Sensor enhances visibility)
+              const isDiscovererLoop = activeSkinIdLoop === 'discoverer';
+              if (isDiscovererLoop) {
+                const sensorPulse = (Math.sin(cNow / 180) + 1) * 0.5;
+                cContext.strokeStyle = 'rgba(250, 204, 21, 0.85)';
+                cContext.lineWidth = 2;
+                cContext.beginPath();
+                cContext.arc(loot.x, loot.y, 18 + sensorPulse * 7, 0, Math.PI * 2);
+                cContext.stroke();
+              }
               cContext.fillStyle = loot.type === 'banana' ? 'rgba(250, 204, 21, 0.25)' : 'rgba(34, 211, 238, 0.25)';
               cContext.beginPath();
               cContext.ellipse(loot.x, loot.y + 6, 14, 6, 0, 0, Math.PI * 2);
@@ -4703,6 +5892,27 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       ) => {
         cContext.save();
         cContext.translate(pX, pY);
+
+        // Rogue Shadow Step stealth shimmer when out of combat
+        const dollSkinId = getFantasySkin(skinId).id;
+        if (dollSkinId === 'rogue' && isLocal && isRogueStealth) {
+          cContext.globalAlpha = 0.6;
+        }
+
+        // Overlord Cataclysmic Might 140px Storm Eye aura ring
+        if (dollSkinId === 'overlord' && isLocal && !(!isAliveRef.current)) {
+          const auraSpin = cNow / 700;
+          cContext.save();
+          cContext.rotate(auraSpin);
+          cContext.strokeStyle = 'rgba(220, 38, 38, 0.45)';
+          cContext.lineWidth = 2.5;
+          cContext.setLineDash([14, 10]);
+          cContext.beginPath();
+          cContext.arc(0, 0, 140, 0, Math.PI * 2);
+          cContext.stroke();
+          cContext.setLineDash([]);
+          cContext.restore();
+        }
 
         // 1. LAYER 1: DROP SHADOW
         cContext.fillStyle = 'rgba(0, 0, 0, 0.45)';
@@ -4952,8 +6162,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         cContext.fillRect(-barW / 2, 4, barW * hpPct, barH);
 
         if (shield > 0) {
-          const shPct = Math.max(0, shield / 100);
-          cContext.fillStyle = '#06b6d4';
+          const maxSh = getFantasySkin(resolvedSkinId).id === 'knight_hero' ? 120 : 100;
+          const shPct = Math.max(0, Math.min(1, shield / maxSh));
+          cContext.fillStyle = getFantasySkin(resolvedSkinId).id === 'knight_hero' ? '#fbbf24' : '#06b6d4';
           cContext.fillRect(-barW / 2, 9, barW * shPct, barH - 1);
         }
 
@@ -5139,6 +6350,79 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
       ctx.restore();
 
+      // (E2) SKIN PASSIVE OVERLAYS: BAT ECHOLOCATION SONAR & DISCOVERER LOOT COMPASS
+      if (playerAlive && activeSkinIdLoop === 'bat') {
+        ctx.save();
+        for (const ring of echolocationRingsRef.current) {
+          const progress = Math.min(1, (now - ring.startedAt) / 1100);
+          const rad = 30 + progress * ring.maxRadius;
+          ctx.strokeStyle = `rgba(168, 85, 247, ${(1 - progress) * 0.7})`;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(ring.x, ring.y, rad, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        // Highlight all alive enemies within 950px (even behind structures/buildings!)
+        arenaPlayersRef.current.forEach(en => {
+          if (en.uid !== user.id && en.isAlive) {
+            const dist = Math.hypot(en.x - px, en.y - py);
+            if (dist <= 950) {
+              const pulseSonar = (Math.sin(now / 150) + 1) * 0.5;
+              ctx.strokeStyle = '#c084fc';
+              ctx.lineWidth = 2.5;
+              ctx.beginPath();
+              ctx.arc(en.x, en.y, 26 + pulseSonar * 8, 0, Math.PI * 2);
+              ctx.stroke();
+              ctx.font = 'bold 10px monospace';
+              ctx.fillStyle = '#e9d5ff';
+              ctx.textAlign = 'center';
+              ctx.fillText(`🦇 ${Math.round(dist)}m`, en.x, en.y - 44);
+            }
+          }
+        });
+        ctx.restore();
+      }
+
+      if (playerAlive && activeSkinIdLoop === 'discoverer') {
+        const unclaimedCrates = cratesRef.current.filter(c => !c.isClaimed);
+        if (unclaimedCrates.length > 0) {
+          let nearest = unclaimedCrates[0];
+          let nearestDist = Math.hypot(nearest.x - px, nearest.y - py);
+          for (const cr of unclaimedCrates) {
+            const d = Math.hypot(cr.x - px, cr.y - py);
+            if (d < nearestDist) {
+              nearest = cr;
+              nearestDist = d;
+            }
+          }
+          if (nearestDist > 85) {
+            const dirAng = Math.atan2(nearest.y - py, nearest.x - px);
+            const ptrX = px + Math.cos(dirAng) * 95;
+            const ptrY = py + Math.sin(dirAng) * 95;
+            ctx.save();
+            ctx.translate(ptrX, ptrY);
+            ctx.rotate(dirAng);
+            ctx.fillStyle = '#facc15';
+            ctx.strokeStyle = '#0f172a';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(14, 0);
+            ctx.lineTo(-8, -8);
+            ctx.lineTo(-4, 0);
+            ctx.lineTo(-8, 8);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.rotate(-dirAng);
+            ctx.font = 'bold 10px monospace';
+            ctx.fillStyle = '#fef08a';
+            ctx.textAlign = 'center';
+            ctx.fillText(`🧭📦 ${Math.round(nearestDist)}m`, 0, -16);
+            ctx.restore();
+          }
+        }
+      }
+
       // (F) LAYER 5: FLOATING COMBAT TEXTS
       floatingTextsRef.current.forEach(ft => {
         ctx.save();
@@ -5313,20 +6597,36 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     const isCorrect = idx === crateModal.question.answerIndex;
 
     if (isCorrect) {
-      setCrateFeedback('✅ Correct! Supply rewards claimed!');
+      const skinId = effectiveSkinDefRef.current.id;
+      const isGoblin = skinId === 'goblin';
+      const maxShCap = skinId === 'knight_hero' ? 120 : 100;
+      setCrateFeedback(
+        isGoblin
+          ? '✅ Correct! Supply rewards claimed + 👺 +50% Goblin Bonus!'
+          : '✅ Correct! Supply rewards claimed!'
+      );
       soundEngine.playVictory();
+
+      // Immediately remove crate locally so fast movement doesn't re-trigger it
+      const nextCrates = cratesRef.current.filter(c => c.id !== crateModal.id);
+      cratesRef.current = nextCrates;
+      setCrates(nextCrates);
+
       await claimSupplyCrate(crateModal.id, user.id, crateModal.rewardType);
       if (crateModal.rewardType === 'shield') {
-        const nextSh = Math.min(100, shieldRef.current + 50);
+        const nextSh = Math.min(maxShCap, shieldRef.current + 50);
         shieldRef.current = nextSh;
         setLocalShield(nextSh);
       } else {
-        woodRef.current += 20;
-        brickRef.current += 15;
-        metalRef.current += 10;
+        woodRef.current += isGoblin ? 30 : 20;
+        brickRef.current += isGoblin ? 23 : 15;
+        metalRef.current += isGoblin ? 15 : 10;
         setLocalWood(woodRef.current);
         setLocalBrick(brickRef.current);
         setLocalMetal(metalRef.current);
+      }
+      if (isGoblin) {
+        flashSkinAbility('Gold Snatcher (+50% Crate Bonus!)');
       }
       setTimeout(() => {
         activeCrateModalRef.current = null;
@@ -5370,13 +6670,23 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             <span className="text-xl">{equippedSkin.icon}</span>
             <div className="hidden sm:block">
               <span className="text-sm font-bold text-slate-800 block leading-tight">{user.name}</span>
-              <span className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-slate-600 flex items-center gap-1.5 flex-wrap">
                 <span>{equippedSkinDef.name}</span>
                 <span className="text-[10px] font-mono bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded border border-amber-300">
                   ⚡ SPD {equippedSkinDef.speed}
                 </span>
                 <span className="text-[10px] font-mono bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded border border-sky-300">
                   🛡️ DEF {equippedSkinDef.defense}
+                </span>
+                <span
+                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded border transition ${
+                    skinAbilityFlash
+                      ? 'bg-emerald-100 text-emerald-900 border-emerald-400 ring-1 ring-emerald-400'
+                      : 'bg-purple-50 text-purple-800 border-purple-200'
+                  }`}
+                  title={equippedSkinDef.ability}
+                >
+                  ✨ {skinAbilityFlash || equippedSkinDef.ability.split(':')[0]}
                 </span>
               </span>
             </div>
@@ -5399,20 +6709,25 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           </div>
 
           {/* Shield Bar */}
-          <div className="space-y-0.5">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-              <span className="flex items-center gap-1 text-sky-700">
-                <Shield className="w-3.5 h-3.5 fill-sky-600 text-sky-600" />
-                <span>Shield: {localShield}/100</span>
-              </span>
-            </div>
-            <div className="w-24 sm:w-32 h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-300">
-              <div 
-                className="h-full bg-sky-600 transition-all duration-150"
-                style={{ width: `${Math.max(0, localShield)}%` }}
-              />
-            </div>
-          </div>
+          {(() => {
+            const maxShCap = equippedSkinDef.id === 'knight_hero' ? 120 : 100;
+            return (
+              <div className="space-y-0.5">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-800">
+                  <span className="flex items-center gap-1 text-sky-700">
+                    <Shield className="w-3.5 h-3.5 fill-sky-600 text-sky-600" />
+                    <span>Shield: {localShield}/{maxShCap}</span>
+                  </span>
+                </div>
+                <div className="w-24 sm:w-32 h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-300">
+                  <div 
+                    className={`h-full transition-all duration-150 ${equippedSkinDef.id === 'knight_hero' ? 'bg-amber-500' : 'bg-sky-600'}`}
+                    style={{ width: `${Math.max(0, Math.min(100, (localShield / maxShCap) * 100))}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Center: Match Timer, Alive Counter, Kills & Storm Alert */}
@@ -5581,6 +6896,16 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           </div>
         )}
 
+        {/* 📦 PERIODIC STORM-EYE SUPPLY CRATE DROP BANNER */}
+        {crateDropBanner && !isSurgeActive && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+            <div className="flex items-center gap-2 bg-amber-950/95 border-2 border-amber-400 text-amber-100 px-4 py-2 rounded-2xl font-bold text-xs sm:text-sm tracking-wide shadow-[0_0_25px_rgba(251,191,36,0.65)] backdrop-blur-md">
+              <Package className="w-4 h-4 text-amber-300" />
+              <span>{crateDropBanner}</span>
+            </div>
+          </div>
+        )}
+
         {/* =====================================================================
             DYNAMIC MINIMAP HUD OVERLAY (TOP-RIGHT CORNER)
             ===================================================================== */}
@@ -5657,7 +6982,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                       />
                     ))}
 
-                    {/* Randomized Villages */}
+                    {/* Designated City / Village District (<= 15% of map) */}
                     {meta.villages.map((vil, idx) => (
                       <rect
                         key={`mvil_${idx}`}
@@ -5667,9 +6992,24 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                         height={vil.h}
                         rx="40"
                         fill="#334155"
-                        opacity="0.55"
+                        opacity="0.45"
                         stroke="#fbbf24"
-                        strokeWidth="16"
+                        strokeWidth="18"
+                      />
+                    ))}
+
+                    {/* Sample1 Buildings (City Cluster + Scattered Homesteads) */}
+                    {(worldDataRef.current?.buildings || []).map((bldg, idx) => (
+                      <rect
+                        key={`mbldg_${bldg.id || idx}`}
+                        x={bldg.worldX}
+                        y={bldg.worldY}
+                        width={bldg.worldW}
+                        height={bldg.worldH}
+                        fill="#d97706"
+                        stroke="#fef3c7"
+                        strokeWidth="12"
+                        opacity="0.92"
                       />
                     ))}
 
@@ -5720,21 +7060,36 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 opacity="0.85" 
               />
 
-              {/* Ground Loot Bananas & Caches */}
+              {/* Ground Loot Bananas & Caches (Enhanced for Discoverer) */}
               <g id="minimap-ground-loot">
                 {(worldDataRef.current?.groundLoot || [])
                   .filter(l => !l.isCollected && Number.isFinite(l.x) && Number.isFinite(l.y))
                   .map(l => (
-                    <circle key={`loot_${l.id}`} cx={l.x} cy={l.y} r="35" fill="#facc15" opacity="0.8" />
+                    <circle
+                      key={`loot_${l.id}`}
+                      cx={l.x}
+                      cy={l.y}
+                      r={equippedSkinDef.id === 'discoverer' ? '60' : '35'}
+                      fill={equippedSkinDef.id === 'discoverer' ? '#fde047' : '#facc15'}
+                      opacity={equippedSkinDef.id === 'discoverer' ? '0.95' : '0.8'}
+                    />
                   ))}
               </g>
 
-              {/* Supply Drops */}
+              {/* Supply Drops (Highlighted inside Storm Eye) */}
               <g id="minimap-crates">
                 {(crates || [])
                   .filter(c => !c.isClaimed && Number.isFinite(c.x) && Number.isFinite(c.y))
                   .map(c => (
-                    <circle key={`crate_${c.id}`} cx={c.x} cy={c.y} r="80" fill="#facc15" stroke="#ffffff" strokeWidth="25" />
+                    <circle
+                      key={`crate_${c.id}`}
+                      cx={c.x}
+                      cy={c.y}
+                      r={equippedSkinDef.id === 'discoverer' ? '125' : '85'}
+                      fill="#facc15"
+                      stroke="#ffffff"
+                      strokeWidth="25"
+                    />
                   ))}
               </g>
 
@@ -5754,13 +7109,28 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                   ))}
               </g>
 
-              {/* Enemy Players (Red) */}
+              {/* Enemy Players (Red; Bat Sonar Pings Highlighted Within 950px) */}
               <g id="minimap-enemies">
                 {(arenaPlayers || [])
                   .filter(p => p.uid !== user.id && p.isAlive && Number.isFinite(p.x) && Number.isFinite(p.y))
-                  .map(p => (
-                    <circle key={`player_${p.uid}`} cx={p.x} cy={p.y} r="90" fill="#ef4444" stroke="#ffffff" strokeWidth="25" />
-                  ))}
+                  .map(p => {
+                    const isBatSonarPing = equippedSkinDef.id === 'bat' && Math.hypot(p.x - localX, p.y - localY) <= 950;
+                    return (
+                      <g key={`player_${p.uid}`}>
+                        {isBatSonarPing && (
+                          <circle cx={p.x} cy={p.y} r="170" fill="none" stroke="#c084fc" strokeWidth="28" opacity="0.85" />
+                        )}
+                        <circle
+                          cx={p.x}
+                          cy={p.y}
+                          r={isBatSonarPing ? '105' : '90'}
+                          fill={isBatSonarPing ? '#c084fc' : '#ef4444'}
+                          stroke="#ffffff"
+                          strokeWidth="25"
+                        />
+                      </g>
+                    );
+                  })}
               </g>
 
               {/* Camera Viewport Bounding Box */}
@@ -5884,9 +7254,18 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             </button>
 
             <button
+              onClick={() => triggerStormEyeCrateDrop(true)}
+              className="px-3 py-1.5 rounded-xl bg-yellow-900/80 hover:bg-yellow-800 text-yellow-200 border border-yellow-500/60 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+              title="Spawn a Science Supply Crate randomly inside the current Eye of the Storm"
+            >
+              <span>📦</span>
+              <span>Drop Crate in Eye</span>
+            </button>
+
+            <button
               onClick={handleRestoreHealthAndMats}
               className="px-3 py-1.5 rounded-xl bg-emerald-900/80 hover:bg-emerald-800 text-emerald-200 border border-emerald-500/60 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-              title="Restore 100 HP, 100 Shield, and add 500 Wood/Brick/Metal"
+              title="Restore 100 HP, Max Shield, and add 500 Wood/Brick/Metal"
             >
               <span>✨</span>
               <span>Max HP + 500 Mats</span>
@@ -6069,6 +7448,28 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             <span>{equippedPower.icon} {equippedPower.name}</span>
           </button>
 
+          {/* Slime Active Skin Ability [G] */}
+          {equippedSkinDef.id === 'slime' && (
+            <button
+              onClick={triggerSlimeBounce}
+              disabled={Date.now() < slimeBounceCooldownUntil}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
+                Date.now() >= slimeBounceCooldownUntil
+                  ? 'bg-emerald-950/60 border-emerald-400/70 text-emerald-200 hover:bg-emerald-900/70'
+                  : 'bg-slate-900 border-slate-800 text-slate-500'
+              }`}
+              title={equippedSkinDef.ability}
+            >
+              <span className="px-1.5 py-0.5 rounded bg-emerald-400 text-slate-950 text-[10px] font-black">G</span>
+              <span>🟢 Bounce</span>
+              {Date.now() < slimeBounceCooldownUntil && (
+                <span className="text-[10px] font-mono text-rose-400">
+                  {((slimeBounceCooldownUntil - Date.now()) / 1000).toFixed(1)}s
+                </span>
+              )}
+            </button>
+          )}
+
           <div className="h-6 w-px bg-slate-800" />
 
           {/* Quick-Select Weapon Arsenal (10 Weapons) */}
@@ -6140,12 +7541,13 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 {isOwnerTester && (
                   <button
                     onClick={() => {
+                      const maxSh = effectiveSkinDefRef.current.id === 'knight_hero' ? 120 : 100;
                       localDeathTimeRef.current = 0;
                       hpRef.current = 100;
-                      shieldRef.current = 100;
+                      shieldRef.current = maxSh;
                       isAliveRef.current = true;
                       setLocalHp(100);
-                      setLocalShield(100);
+                      setLocalShield(maxSh);
                       setIsAlive(true);
                       setWinnerCelebration(null);
                     }}
@@ -6349,10 +7751,14 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           <span><strong>Mouse click:</strong> Aim and fire</span>
           <span><strong>1, 2, 3:</strong> Build defenses</span>
           <span><strong>E:</strong> Science ability</span>
+          {equippedSkinDef.id === 'slime' && <span><strong>G:</strong> Viscous Bounce</span>}
           <span><strong>M:</strong> Toggle radar map</span>
+          <span className="text-purple-800 font-semibold" title={equippedSkinDef.ability}>
+            <strong>{equippedSkinDef.icon} {equippedSkinDef.name}:</strong> {equippedSkinDef.ability}
+          </span>
         </div>
         <span className="text-xs text-slate-600 font-semibold">
-          Stay inside the white circle safe zone to avoid storm damage.
+          Supply crates drop periodically inside the storm eye.
         </span>
       </div>
 

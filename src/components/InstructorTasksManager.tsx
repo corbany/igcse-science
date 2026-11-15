@@ -29,7 +29,11 @@ import {
   ExternalLink,
   Settings,
   Send,
-  UserCheck
+  UserCheck,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  RotateCcw
 } from 'lucide-react';
 import { 
   ClassTask, 
@@ -61,13 +65,15 @@ interface InstructorTasksManagerProps {
   classes: ClassItem[];
   selectedClassId?: string;
   onNavigateToLessons?: (subtopicCode?: string) => void;
+  onOpenTaskAnalytics?: () => void;
 }
 
 export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
   currentUser,
   classes,
   selectedClassId: initialSelectedClassId,
-  onNavigateToLessons
+  onNavigateToLessons,
+  onOpenTaskAnalytics
 }) => {
   const [tasks, setTasks] = useState<ClassTask[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -122,6 +128,62 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
   const [sendingEmailTaskId, setSendingEmailTaskId] = useState<string | null>(null);
   const [copiedLinkTaskId, setCopiedLinkTaskId] = useState<string | null>(null);
   const [additionalEmailsInput, setAdditionalEmailsInput] = useState<string>('');
+
+  // Task Analysis (Student Submission Roster) per-column sort & filter state
+  type SubSortCol = 'student' | 'status' | 'deadline' | 'activity' | 'completedOn';
+  const [subSort, setSubSort] = useState<{ column: SubSortCol | null; direction: 'asc' | 'desc' }>({ column: null, direction: 'asc' });
+  const [subColFilters, setSubColFilters] = useState<{
+    student: string;
+    status: 'all' | 'completed' | 'incomplete' | 'not_started';
+    deadline: 'all' | 'on_time' | 'overdue' | 'pending';
+    activity: 'all' | 'slides_read' | 'slides_pending' | 'tl_green' | 'tl_amber' | 'tl_red' | 'tl_done' | 'pq_done' | 'pq_high' | 'pq_low';
+    completedOn: 'all' | 'completed' | 'not_completed';
+  }>({
+    student: '',
+    status: 'all',
+    deadline: 'all',
+    activity: 'all',
+    completedOn: 'all'
+  });
+
+  const isSubNumericCol = (col: SubSortCol) => col === 'activity' || col === 'completedOn';
+
+  const toggleSubSort = (col: SubSortCol) => {
+    const firstDir: 'asc' | 'desc' = isSubNumericCol(col) ? 'desc' : 'asc';
+    const secondDir: 'asc' | 'desc' = firstDir === 'asc' ? 'desc' : 'asc';
+    setSubSort(prev => {
+      if (prev.column !== col) return { column: col, direction: firstDir };
+      if (prev.direction === firstDir) return { column: col, direction: secondDir };
+      return { column: null, direction: 'asc' };
+    });
+  };
+
+  const setSubColumnOrder = (col: SubSortCol, value: string) => {
+    if (value === 'default') {
+      if (subSort.column === col) setSubSort({ column: null, direction: 'asc' });
+    } else {
+      setSubSort({ column: col, direction: value as 'asc' | 'desc' });
+    }
+  };
+
+  const resetSubFiltersAndSort = () => {
+    setSubSort({ column: null, direction: 'asc' });
+    setSubColFilters({
+      student: '',
+      status: 'all',
+      deadline: 'all',
+      activity: 'all',
+      completedOn: 'all'
+    });
+  };
+
+  const hasActiveSubFiltersOrSort =
+    subSort.column !== null ||
+    subColFilters.student.trim() !== '' ||
+    subColFilters.status !== 'all' ||
+    subColFilters.deadline !== 'all' ||
+    subColFilters.activity !== 'all' ||
+    subColFilters.completedOn !== 'all';
 
   // Email Dispatch & 1-Click Modal state
   const [showSmtpModal, setShowSmtpModal] = useState<boolean>(false);
@@ -771,6 +833,18 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
+            {onOpenTaskAnalytics && (
+              <button
+                type="button"
+                onClick={onOpenTaskAnalytics}
+                className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#FDFBF7] dark:bg-black hover:bg-white dark:hover:bg-zinc-900 text-[#1E293B] dark:text-slate-200 border-2 border-black dark:border-white font-semibold text-xs transition shadow-xs shrink-0 cursor-pointer"
+                title="Open class-wide Task Completion Matrix"
+              >
+                <CheckSquare className="w-4 h-4 text-slate-700 dark:text-slate-300" />
+                <span>Task Analytics</span>
+              </button>
+            )}
+
             <button
               onClick={() => setShowSmtpModal(true)}
               className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#FDFBF7] dark:bg-black hover:bg-white dark:hover:bg-zinc-900 text-[#1E293B] dark:text-slate-200 border-2 border-black dark:border-white font-semibold text-xs transition shadow-xs shrink-0"
@@ -1172,140 +1246,376 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                         No students enrolled yet or waiting for initial activity.
                       </div>
                     ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs">
-                          <thead>
-                            <tr className="border-b border-slate-300 dark:border-zinc-800 text-slate-600 dark:text-slate-400 font-semibold">
-                              <th className="pb-2.5">Student</th>
-                              <th className="pb-2.5">Status</th>
-                              <th className="pb-2.5">Deadline State</th>
-                              <th className="pb-2.5">Activity / Result</th>
-                              <th className="pb-2.5 text-right">Completed On</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-[#E2E8F0] dark:divide-zinc-800">
-                            {subs.map(sub => {
-                              const isSubOverdue = isOverdue && sub.status !== 'completed';
+                      (() => {
+                        const filteredSubs = subs.filter(sub => {
+                          const isSubOverdue = isOverdue && sub.status !== 'completed';
+                          const deadlineState = sub.status === 'completed' ? 'on_time' : isSubOverdue ? 'overdue' : 'pending';
+                          const tlPct = sub.trafficLightQuizScore;
+                          const hasTLQuiz = Boolean(sub.trafficLightQuizCompleted || tlPct !== undefined);
+                          const pqPct = sub.practiceQuizScore ?? (sub.quizCompleted ? sub.quizScore : undefined);
 
-                              return (
-                                <tr key={sub.studentId} className="hover:bg-white dark:hover:bg-zinc-900/60 transition">
-                                  <td className="py-2.5 font-medium text-[#1E293B] dark:text-slate-200">
-                                    <div className="font-semibold">{sub.studentName}</div>
-                                    <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{sub.studentEmail}</div>
-                                  </td>
+                          if (subColFilters.student.trim()) {
+                            const q = subColFilters.student.toLowerCase();
+                            if (
+                              !(sub.studentName || '').toLowerCase().includes(q) &&
+                              !(sub.studentEmail || '').toLowerCase().includes(q)
+                            ) {
+                              return false;
+                            }
+                          }
+                          if (subColFilters.status !== 'all' && sub.status !== subColFilters.status) {
+                            return false;
+                          }
+                          if (subColFilters.deadline !== 'all' && deadlineState !== subColFilters.deadline) {
+                            return false;
+                          }
+                          if (subColFilters.activity !== 'all') {
+                            if (subColFilters.activity === 'slides_read' && !sub.slidesCompleted) return false;
+                            if (subColFilters.activity === 'slides_pending' && sub.slidesCompleted) return false;
+                            if (subColFilters.activity === 'tl_green' && sub.trafficLight !== 'green') return false;
+                            if (subColFilters.activity === 'tl_amber' && sub.trafficLight !== 'orange') return false;
+                            if (subColFilters.activity === 'tl_red' && sub.trafficLight !== 'red') return false;
+                            if (subColFilters.activity === 'tl_done' && !hasTLQuiz) return false;
+                            if (subColFilters.activity === 'pq_done' && pqPct === undefined) return false;
+                            if (subColFilters.activity === 'pq_high' && (pqPct === undefined || pqPct < 80)) return false;
+                            if (subColFilters.activity === 'pq_low' && (pqPct === undefined || pqPct >= 50)) return false;
+                          }
+                          if (subColFilters.completedOn === 'completed' && !sub.completedAt) return false;
+                          if (subColFilters.completedOn === 'not_completed' && Boolean(sub.completedAt)) return false;
+                          return true;
+                        });
 
-                                  <td className="py-2.5">
-                                    <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold inline-flex items-center gap-1 ${
-                                      sub.status === 'completed'
-                                        ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
-                                        : sub.status === 'incomplete'
-                                          ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
-                                          : 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-zinc-700'
-                                    }`}>
-                                      {sub.status === 'completed' && <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />}
-                                      {sub.status === 'incomplete' && <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400" />}
-                                      {sub.status === 'not_started' && <span className="w-2 h-2 rounded-full bg-slate-400"></span>}
-                                      <span>
-                                        {sub.status === 'completed' ? 'Completed' :
-                                         sub.status === 'incomplete' ? 'In Progress' : 'Not Started'}
-                                      </span>
-                                    </span>
-                                  </td>
+                        const displayedSubs = subSort.column
+                          ? [...filteredSubs].sort((a, b) => {
+                              const dir = subSort.direction === 'asc' ? 1 : -1;
+                              const statusOrder: Record<string, number> = { completed: 2, incomplete: 1, not_started: 0 };
+                              const getDeadlineOrder = (s: TaskSubmission) =>
+                                s.status === 'completed' ? 2 : isOverdue ? 0 : 1;
+                              const getActivityScore = (s: TaskSubmission) => {
+                                const slidesScore = s.slidesCompleted
+                                  ? 100
+                                  : s.slidesTotalCount && s.slidesTotalCount > 0
+                                    ? Math.round(((s.slidesReadCount || 0) / s.slidesTotalCount) * 100)
+                                    : (s.slidesReadCount || 0) > 0 ? 50 : 0;
+                                const tlScore = s.trafficLightQuizScore ?? (s.trafficLight === 'green' ? 85 : s.trafficLight === 'orange' ? 60 : s.trafficLight === 'red' ? 30 : 0);
+                                const pqScore = s.practiceQuizScore ?? (s.quizCompleted ? (s.quizScore ?? 0) : 0);
+                                return slidesScore + tlScore + pqScore;
+                              };
 
-                                  <td className="py-2.5">
-                                    {sub.status === 'completed' ? (
-                                      <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">On Time</span>
-                                    ) : isSubOverdue ? (
-                                      <span className="text-[11px] font-bold text-rose-700 dark:text-rose-400 flex items-center gap-1">
-                                        <AlertTriangle className="w-3 h-3" />
-                                        <span>Overdue</span>
-                                      </span>
-                                    ) : (
-                                      <span className="text-[11px] text-slate-500 dark:text-slate-400">Pending</span>
-                                    )}
-                                  </td>
+                              switch (subSort.column) {
+                                case 'student':
+                                  return dir * (a.studentName || '').localeCompare(b.studentName || '', undefined, { sensitivity: 'base' });
+                                case 'status':
+                                  return dir * ((statusOrder[a.status] ?? 0) - (statusOrder[b.status] ?? 0));
+                                case 'deadline':
+                                  return dir * (getDeadlineOrder(a) - getDeadlineOrder(b));
+                                case 'activity':
+                                  return dir * (getActivityScore(a) - getActivityScore(b));
+                                case 'completedOn': {
+                                  const tA = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+                                  const tB = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+                                  return dir * (tA - tB);
+                                }
+                                default:
+                                  return 0;
+                              }
+                            })
+                          : filteredSubs;
 
-                                  <td className="py-2.5 text-[#1E293B] dark:text-slate-300">
-                                    {(() => {
-                                      const reqLen = task.requiredQuizLength || sub.requiredQuizLength || 10;
-                                      const needsPQ = task.type === 'both' || task.type === 'practice_quiz' || task.type === 'exam_paper';
-                                      const tlPct = sub.trafficLightQuizScore;
-                                      const hasTLQuiz = Boolean(sub.trafficLightQuizCompleted || tlPct !== undefined);
-                                      const pqPct = sub.practiceQuizScore ?? (sub.quizCompleted ? sub.quizScore : undefined);
-                                      const pqLen = sub.practiceQuizLength || reqLen;
+                        return (
+                          <div className="space-y-2.5">
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                              <span className="text-slate-600 dark:text-slate-400 font-medium">
+                                Showing <strong className="text-slate-900 dark:text-white">{displayedSubs.length}</strong> of <strong className="text-slate-900 dark:text-white">{subs.length}</strong> student{subs.length === 1 ? '' : 's'}
+                                {subSort.column && (
+                                  <span className="ml-2 text-[11px] text-slate-500 dark:text-slate-400">
+                                    • Ordered by <strong className="text-slate-800 dark:text-slate-200">{subSort.column}</strong> ({isSubNumericCol(subSort.column) ? (subSort.direction === 'desc' ? 'High → Low' : 'Low → High') : (subSort.direction === 'asc' ? 'A → Z' : 'Z → A')})
+                                  </span>
+                                )}
+                              </span>
+                              {hasActiveSubFiltersOrSort && (
+                                <button
+                                  type="button"
+                                  onClick={resetSubFiltersAndSort}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-zinc-700 text-[11px] font-bold transition"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                  <span>Reset Filters &amp; Order</span>
+                                </button>
+                              )}
+                            </div>
 
-                                      return (
-                                        <div className="flex flex-col gap-1">
-                                          {/* 1. Slide reading status */}
-                                          <div className="flex items-center gap-1.5">
-                                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Slides:</span>
-                                            {sub.slidesCompleted ? (
-                                              <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-bold">
-                                                ✓ All Read{sub.slidesTotalCount ? ` (${sub.slidesReadCount || sub.slidesTotalCount}/${sub.slidesTotalCount})` : ''}
-                                              </span>
-                                            ) : (sub.slidesReadCount || 0) > 0 ? (
-                                              <span className="text-[10px] text-amber-700 dark:text-amber-300 font-semibold">
-                                                Reading ({sub.slidesReadCount}/{sub.slidesTotalCount || '?'})
-                                              </span>
-                                            ) : (
-                                              <span className="text-[10px] text-slate-500">Pending Slides</span>
-                                            )}
-                                          </div>
+                            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-black">
+                              <table className="w-full text-left text-xs">
+                                <thead className="bg-[#FDFBF7] dark:bg-zinc-900 text-slate-600 dark:text-slate-300 font-semibold border-b border-slate-300 dark:border-zinc-800">
+                                  <tr>
+                                    <th className="p-2.5">
+                                      <button type="button" onClick={() => toggleSubSort('student')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition">
+                                        <span>Student</span>
+                                        {subSort.column === 'student' ? (
+                                          <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                            {subSort.direction === 'asc' ? 'A→Z' : 'Z→A'}
+                                          </span>
+                                        ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                                      </button>
+                                    </th>
+                                    <th className="p-2.5">
+                                      <button type="button" onClick={() => toggleSubSort('status')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition">
+                                        <span>Status</span>
+                                        {subSort.column === 'status' ? (subSort.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                                      </button>
+                                    </th>
+                                    <th className="p-2.5">
+                                      <button type="button" onClick={() => toggleSubSort('deadline')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition">
+                                        <span>Deadline State</span>
+                                        {subSort.column === 'deadline' ? (subSort.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                                      </button>
+                                    </th>
+                                    <th className="p-2.5">
+                                      <button type="button" onClick={() => toggleSubSort('activity')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition">
+                                        <span>Activity / Result</span>
+                                        {subSort.column === 'activity' ? (
+                                          <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                            {subSort.direction === 'desc' ? 'Hi→Lo' : 'Lo→Hi'}
+                                          </span>
+                                        ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                                      </button>
+                                    </th>
+                                    <th className="p-2.5 text-right">
+                                      <button type="button" onClick={() => toggleSubSort('completedOn')} className="inline-flex items-center gap-1 justify-end ml-auto hover:text-black dark:hover:text-white transition">
+                                        <span>Completed On</span>
+                                        {subSort.column === 'completedOn' ? (subSort.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                                      </button>
+                                    </th>
+                                  </tr>
+                                  {/* Per-column inline filter & order row */}
+                                  <tr className="bg-slate-50/90 dark:bg-zinc-950 border-t border-slate-200 dark:border-zinc-800 font-normal align-top">
+                                    <th className="p-1.5 space-y-1">
+                                      <select
+                                        value={subSort.column === 'student' ? subSort.direction : 'default'}
+                                        onChange={e => setSubColumnOrder('student', e.target.value)}
+                                        className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                                      >
+                                        <option value="default">Order: Default</option>
+                                        <option value="asc">A → Z (Alphabetical)</option>
+                                        <option value="desc">Z → A (Reverse)</option>
+                                      </select>
+                                      <input
+                                        type="text"
+                                        value={subColFilters.student}
+                                        onChange={e => setSubColFilters(prev => ({ ...prev, student: e.target.value }))}
+                                        placeholder="Search name/email..."
+                                        className="w-full min-w-[120px] px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 font-medium"
+                                      />
+                                    </th>
+                                    <th className="p-1.5">
+                                      <select
+                                        value={subColFilters.status}
+                                        onChange={e => setSubColFilters(prev => ({ ...prev, status: e.target.value as any }))}
+                                        className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                                      >
+                                        <option value="all">All Statuses</option>
+                                        <option value="completed">Completed</option>
+                                        <option value="incomplete">In Progress</option>
+                                        <option value="not_started">Not Started</option>
+                                      </select>
+                                    </th>
+                                    <th className="p-1.5">
+                                      <select
+                                        value={subColFilters.deadline}
+                                        onChange={e => setSubColFilters(prev => ({ ...prev, deadline: e.target.value as any }))}
+                                        className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                                      >
+                                        <option value="all">All Deadlines</option>
+                                        <option value="on_time">On Time</option>
+                                        <option value="overdue">Overdue</option>
+                                        <option value="pending">Pending</option>
+                                      </select>
+                                    </th>
+                                    <th className="p-1.5 space-y-1">
+                                      <select
+                                        value={subSort.column === 'activity' ? subSort.direction : 'default'}
+                                        onChange={e => setSubColumnOrder('activity', e.target.value)}
+                                        className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                                      >
+                                        <option value="default">Order: Default</option>
+                                        <option value="desc">High → Low (Score/Progress)</option>
+                                        <option value="asc">Low → High (Score/Progress)</option>
+                                      </select>
+                                      <select
+                                        value={subColFilters.activity}
+                                        onChange={e => setSubColFilters(prev => ({ ...prev, activity: e.target.value as any }))}
+                                        className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                                      >
+                                        <option value="all">All Activity</option>
+                                        <option value="slides_read">Slides Read ✓</option>
+                                        <option value="slides_pending">Slides Pending</option>
+                                        <option value="tl_green">TL: Green</option>
+                                        <option value="tl_amber">TL: Amber</option>
+                                        <option value="tl_red">TL: Red</option>
+                                        <option value="tl_done">TL Quiz Done</option>
+                                        <option value="pq_done">Practice Quiz Done</option>
+                                        <option value="pq_high">Practice Quiz ≥ 80%</option>
+                                        <option value="pq_low">Practice Quiz &lt; 50%</option>
+                                      </select>
+                                    </th>
+                                    <th className="p-1.5 text-right space-y-1">
+                                      <select
+                                        value={subSort.column === 'completedOn' ? subSort.direction : 'default'}
+                                        onChange={e => setSubColumnOrder('completedOn', e.target.value)}
+                                        className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                                      >
+                                        <option value="default">Order: Default</option>
+                                        <option value="desc">Newest → Oldest</option>
+                                        <option value="asc">Oldest → Newest</option>
+                                      </select>
+                                      <select
+                                        value={subColFilters.completedOn}
+                                        onChange={e => setSubColFilters(prev => ({ ...prev, completedOn: e.target.value as any }))}
+                                        className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                                      >
+                                        <option value="all">All Dates</option>
+                                        <option value="completed">Completed Only</option>
+                                        <option value="not_completed">Pending Only</option>
+                                      </select>
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-[#E2E8F0] dark:divide-zinc-800">
+                                  {displayedSubs.length === 0 ? (
+                                    <tr>
+                                      <td colSpan={5} className="p-6 text-center text-xs text-slate-500 dark:text-slate-400">
+                                        No students match the selected column filters.{' '}
+                                        <button type="button" onClick={resetSubFiltersAndSort} className="underline font-bold text-slate-800 dark:text-slate-200">
+                                          Reset filters
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ) : displayedSubs.map(sub => {
+                                    const isSubOverdue = isOverdue && sub.status !== 'completed';
 
-                                          {/* 2. Traffic Light Quiz status */}
-                                          <div className="flex items-center gap-1.5">
-                                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">TL Quiz:</span>
-                                            {hasTLQuiz ? (
-                                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700">
-                                                {sub.trafficLight && (
-                                                  <span className={`w-2 h-2 rounded-full ${
-                                                    sub.trafficLight === 'green' ? 'bg-emerald-500' :
-                                                    sub.trafficLight === 'orange' ? 'bg-amber-500' : 'bg-rose-500'
-                                                  }`}></span>
-                                                )}
-                                                <span>
-                                                  {sub.trafficLight === 'green' ? 'Green' : sub.trafficLight === 'orange' ? 'Amber' : sub.trafficLight === 'red' ? 'Red' : 'Done'}
-                                                  {tlPct !== undefined ? ` (${tlPct}%)` : ''}
-                                                </span>
-                                              </span>
-                                            ) : sub.trafficLight ? (
-                                              <span className="text-[10px] text-amber-700 dark:text-amber-300">
-                                                Self-rating: {sub.trafficLight === 'orange' ? 'Amber' : sub.trafficLight} (TL Quiz pending)
-                                              </span>
-                                            ) : (
-                                              <span className="text-[10px] text-slate-500">Pending TL Quiz</span>
-                                            )}
-                                          </div>
+                                    return (
+                                      <tr key={sub.studentId} className="hover:bg-slate-50 dark:hover:bg-zinc-900/60 transition">
+                                        <td className="p-2.5 font-medium text-[#1E293B] dark:text-slate-200">
+                                          <div className="font-semibold">{sub.studentName}</div>
+                                          <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{sub.studentEmail}</div>
+                                        </td>
 
-                                          {/* 3. Exact-length Practice Quiz status */}
-                                          {needsPQ && (
-                                            <div className="flex items-center gap-1.5">
-                                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Practice Quiz:</span>
-                                              {pqPct !== undefined ? (
-                                                <span className="font-bold text-sky-800 dark:text-sky-300 text-[10px] bg-sky-50 dark:bg-sky-950/40 px-1.5 py-0.5 rounded border border-sky-300 dark:border-sky-700">
-                                                  {pqPct}% ({pqLen} Qs)
-                                                </span>
-                                              ) : (
-                                                <span className="text-[10px] text-slate-500">Pending ({reqLen} Qs)</span>
-                                              )}
-                                            </div>
+                                        <td className="p-2.5">
+                                          <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold inline-flex items-center gap-1 ${
+                                            sub.status === 'completed'
+                                              ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
+                                              : sub.status === 'incomplete'
+                                                ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
+                                                : 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-zinc-700'
+                                          }`}>
+                                            {sub.status === 'completed' && <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />}
+                                            {sub.status === 'incomplete' && <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400" />}
+                                            {sub.status === 'not_started' && <span className="w-2 h-2 rounded-full bg-slate-400"></span>}
+                                            <span>
+                                              {sub.status === 'completed' ? 'Completed' :
+                                               sub.status === 'incomplete' ? 'In Progress' : 'Not Started'}
+                                            </span>
+                                          </span>
+                                        </td>
+
+                                        <td className="p-2.5">
+                                          {sub.status === 'completed' ? (
+                                            <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">On Time</span>
+                                          ) : isSubOverdue ? (
+                                            <span className="text-[11px] font-bold text-rose-700 dark:text-rose-400 flex items-center gap-1">
+                                              <AlertTriangle className="w-3 h-3" />
+                                              <span>Overdue</span>
+                                            </span>
+                                          ) : (
+                                            <span className="text-[11px] text-slate-500 dark:text-slate-400">Pending</span>
                                           )}
-                                        </div>
-                                      );
-                                    })()}
-                                  </td>
+                                        </td>
 
-                                  <td className="py-2.5 text-right text-slate-500 dark:text-slate-400 font-mono text-[11px]">
-                                    {sub.completedAt 
-                                      ? new Date(sub.completedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                                      : '—'}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
+                                        <td className="p-2.5 text-[#1E293B] dark:text-slate-300">
+                                          {(() => {
+                                            const reqLen = task.requiredQuizLength || sub.requiredQuizLength || 10;
+                                            const needsPQ = task.type === 'both' || task.type === 'practice_quiz' || task.type === 'exam_paper';
+                                            const tlPct = sub.trafficLightQuizScore;
+                                            const hasTLQuiz = Boolean(sub.trafficLightQuizCompleted || tlPct !== undefined);
+                                            const pqPct = sub.practiceQuizScore ?? (sub.quizCompleted ? sub.quizScore : undefined);
+                                            const pqLen = sub.practiceQuizLength || reqLen;
+
+                                            return (
+                                              <div className="flex flex-col gap-1">
+                                                {/* 1. Slide reading status */}
+                                                <div className="flex items-center gap-1.5">
+                                                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Slides:</span>
+                                                  {sub.slidesCompleted ? (
+                                                    <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-bold">
+                                                      ✓ All Read{sub.slidesTotalCount ? ` (${sub.slidesReadCount || sub.slidesTotalCount}/${sub.slidesTotalCount})` : ''}
+                                                    </span>
+                                                  ) : (sub.slidesReadCount || 0) > 0 ? (
+                                                    <span className="text-[10px] text-amber-700 dark:text-amber-300 font-semibold">
+                                                      Reading ({sub.slidesReadCount}/{sub.slidesTotalCount || '?'})
+                                                    </span>
+                                                  ) : (
+                                                    <span className="text-[10px] text-slate-500">Pending Slides</span>
+                                                  )}
+                                                </div>
+
+                                                {/* 2. Traffic Light Quiz status */}
+                                                <div className="flex items-center gap-1.5">
+                                                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">TL Quiz:</span>
+                                                  {hasTLQuiz ? (
+                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700">
+                                                      {sub.trafficLight && (
+                                                        <span className={`w-2 h-2 rounded-full ${
+                                                          sub.trafficLight === 'green' ? 'bg-emerald-500' :
+                                                          sub.trafficLight === 'orange' ? 'bg-amber-500' : 'bg-rose-500'
+                                                        }`}></span>
+                                                      )}
+                                                      <span>
+                                                        {sub.trafficLight === 'green' ? 'Green' : sub.trafficLight === 'orange' ? 'Amber' : sub.trafficLight === 'red' ? 'Red' : 'Done'}
+                                                        {tlPct !== undefined ? ` (${tlPct}%)` : ''}
+                                                      </span>
+                                                    </span>
+                                                  ) : sub.trafficLight ? (
+                                                    <span className="text-[10px] text-amber-700 dark:text-amber-300">
+                                                      Self-rating: {sub.trafficLight === 'orange' ? 'Amber' : sub.trafficLight} (TL Quiz pending)
+                                                    </span>
+                                                  ) : (
+                                                    <span className="text-[10px] text-slate-500">Pending TL Quiz</span>
+                                                  )}
+                                                </div>
+
+                                                {/* 3. Exact-length Practice Quiz status */}
+                                                {needsPQ && (
+                                                  <div className="flex items-center gap-1.5">
+                                                    <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Practice Quiz:</span>
+                                                    {pqPct !== undefined ? (
+                                                      <span className="font-bold text-sky-800 dark:text-sky-300 text-[10px] bg-sky-50 dark:bg-sky-950/40 px-1.5 py-0.5 rounded border border-sky-300 dark:border-sky-700">
+                                                        {pqPct}% ({pqLen} Qs)
+                                                      </span>
+                                                    ) : (
+                                                      <span className="text-[10px] text-slate-500">Pending ({reqLen} Qs)</span>
+                                                    )}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            );
+                                          })()}
+                                        </td>
+
+                                        <td className="p-2.5 text-right text-slate-500 dark:text-slate-400 font-mono text-[11px]">
+                                          {sub.completedAt 
+                                            ? new Date(sub.completedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                            : '—'}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      })()
                     )}
                   </div>
                 )}

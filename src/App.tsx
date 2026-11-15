@@ -27,6 +27,7 @@ import { subscribeToBattleState, BattleEventState } from './services/firebaseGam
 import { ScienceSubject, UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, SubtopicSlideProgress, QuizLengthRecord, TaskWithSubmission, ClassTask } from './types';
 import { resolveSubtopicByQuery } from './data/subtopicSlidesData';
 import { logCompletedActivity } from './services/activityService';
+import { evaluateStudentBadges } from './services/badgeService';
 import { 
   Users,
   ShieldAlert,
@@ -63,6 +64,9 @@ const defaultProgress: StudentProgress = {
   savedNotes: {},
   quizScores: {},
   practiceQuizByLength: {},
+  cumulativeQuizPoints: 0,
+  cumulativeQuizzesCount: 0,
+  bestTotalXP: 0,
   lastActive: new Date().toISOString()
 };
 
@@ -356,6 +360,25 @@ export default function App() {
     return () => window.removeEventListener('igcse_progress_updated', handleProgressUpdated);
   }, []);
 
+  const applyMonotonicBadgesAndXP = (candidate: StudentProgress, profile?: UserProfile | null): StudentProgress => {
+    const badgeEval = evaluateStudentBadges(candidate, profile);
+    const mergedMap = new Map<string, string>();
+    (candidate.earnedBadges || []).forEach(b => {
+      if (b?.badgeId) mergedMap.set(b.badgeId, b.unlockedAt);
+    });
+    badgeEval.unlockedBadges.forEach(b => {
+      if (!mergedMap.has(b.id)) {
+        mergedMap.set(b.id, b.unlockedAt || new Date().toISOString());
+      }
+    });
+    const mergedEarned = Array.from(mergedMap.entries()).map(([badgeId, unlockedAt]) => ({ badgeId, unlockedAt }));
+    return {
+      ...candidate,
+      earnedBadges: mergedEarned,
+      bestTotalXP: Math.max(candidate.bestTotalXP || 0, badgeEval.totalXP, profile?.xp || 0)
+    };
+  };
+
   // Handler functions for progress updates
   const handleUpdateSlidesRead = (subtopicCode: string, slideProgress: SubtopicSlideProgress) => {
     setProgress(prev => {
@@ -363,7 +386,7 @@ export default function App() {
       if (slideProgress.allSlidesRead) {
         completedSet.add(subtopicCode);
       }
-      const updated: StudentProgress = {
+      const updated = applyMonotonicBadgesAndXP({
         ...prev,
         completedLessons: Array.from(completedSet),
         slidesReadBySubtopic: {
@@ -371,7 +394,7 @@ export default function App() {
           [subtopicCode]: slideProgress
         },
         lastActive: new Date().toISOString()
-      };
+      }, effectiveUser || user);
       try {
         localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
       } catch {}
@@ -459,18 +482,52 @@ export default function App() {
 
     let updatedProgressRef: StudentProgress | null = null;
     setProgress(prev => {
-      const updated: StudentProgress = {
+      const prevSubScores = Object.values(prev.subtopicQuizScores || {});
+      const prevMainScores = Object.values(prev.quizScores || {});
+      const prevLengthRecords = Object.values(prev.practiceQuizByLength || {});
+      const prevLengthDates = new Set(prevLengthRecords.map(r => r?.date).filter(Boolean));
+      const prevUnrecordedMain = prevMainScores.filter(q => q && !prevLengthDates.has(q.date));
+
+      const prevSubSum = prevSubScores.reduce((acc, s) => acc + (s?.score || 0), 0);
+      const prevMainSum = prevMainScores.reduce((acc, q) => acc + (q?.score || 0), 0);
+      const prevLengthSum = prevLengthRecords.reduce((acc, r) => acc + (r?.score || 0), 0) +
+        prevUnrecordedMain.reduce((acc, q) => acc + (q?.score || 0), 0);
+
+      const prevBaselinePoints = Math.max(
+        prev.cumulativeQuizPoints || 0,
+        prevSubSum + prevMainSum,
+        prevSubSum + prevLengthSum
+      );
+      const prevBaselineCount = Math.max(
+        prev.cumulativeQuizzesCount || 0,
+        prevSubScores.length + prevMainScores.length,
+        prevSubScores.length + prevLengthRecords.length + prevUnrecordedMain.length
+      );
+
+      // Keep highest subject benchmark so a shorter (<40 question) or lower quiz never reduces subject score or badges
+      const existingSubjectScore = prev.quizScores?.[subject];
+      const existingPct = existingSubjectScore ? (existingSubjectScore.score / Math.max(1, existingSubjectScore.total)) : -1;
+      const newPct = score / safeTotal;
+      const shouldUpdateSubjectScore =
+        !existingSubjectScore ||
+        newPct > existingPct ||
+        (newPct === existingPct && score >= existingSubjectScore.score);
+
+      const updated = applyMonotonicBadgesAndXP({
         ...prev,
         quizScores: {
           ...prev.quizScores,
-          [subject]: { score, total: safeTotal, date: nowIso }
+          [subject]: shouldUpdateSubjectScore ? { score, total: safeTotal, date: nowIso } : existingSubjectScore
         },
         practiceQuizByLength: {
           ...(prev.practiceQuizByLength || {}),
           [recordKey]: lengthRecord
         },
+        cumulativeQuizPoints: prevBaselinePoints + score,
+        cumulativeQuizzesCount: prevBaselineCount + 1,
         lastActive: nowIso
-      };
+      }, effectiveUser || user);
+
       updatedProgressRef = updated;
       try {
         localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
@@ -537,7 +594,30 @@ export default function App() {
       if (prev.slidesReadBySubtopic?.[subtopicCode]?.allSlidesRead) {
         completedSet.add(subtopicCode);
       }
-      const updated: StudentProgress = {
+
+      const prevSubScores = Object.values(prev.subtopicQuizScores || {});
+      const prevMainScores = Object.values(prev.quizScores || {});
+      const prevLengthRecords = Object.values(prev.practiceQuizByLength || {});
+      const prevLengthDates = new Set(prevLengthRecords.map(r => r?.date).filter(Boolean));
+      const prevUnrecordedMain = prevMainScores.filter(q => q && !prevLengthDates.has(q.date));
+
+      const prevSubSum = prevSubScores.reduce((acc, s) => acc + (s?.score || 0), 0);
+      const prevMainSum = prevMainScores.reduce((acc, q) => acc + (q?.score || 0), 0);
+      const prevLengthSum = prevLengthRecords.reduce((acc, r) => acc + (r?.score || 0), 0) +
+        prevUnrecordedMain.reduce((acc, q) => acc + (q?.score || 0), 0);
+
+      const prevBaselinePoints = Math.max(
+        prev.cumulativeQuizPoints || 0,
+        prevSubSum + prevMainSum,
+        prevSubSum + prevLengthSum
+      );
+      const prevBaselineCount = Math.max(
+        prev.cumulativeQuizzesCount || 0,
+        prevSubScores.length + prevMainScores.length,
+        prevSubScores.length + prevLengthRecords.length + prevUnrecordedMain.length
+      );
+
+      const updated = applyMonotonicBadgesAndXP({
         ...prev,
         completedLessons: Array.from(completedSet),
         trafficLights: {
@@ -548,8 +628,11 @@ export default function App() {
           ...(prev.subtopicQuizScores || {}),
           [subtopicCode]: result
         },
+        cumulativeQuizPoints: prevBaselinePoints + (result.score || 0),
+        cumulativeQuizzesCount: prevBaselineCount + 1,
         lastActive: new Date().toISOString()
-      };
+      }, effectiveUser || user);
+
       updatedProgressRef = updated;
       try {
         localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));

@@ -80,9 +80,13 @@
         "trafficLights": { "type": "object", "description": "Traffic light status per subtopic" },
         "weakTopics": { "type": "array", "description": "List of weak topic codes" },
         "totalQuizScore": { "type": "number", "description": "Cumulative total score across quizzes completed" },
+        "cumulativeQuizPoints": { "type": "number", "description": "Strictly non-decreasing cumulative quiz points" },
+        "cumulativeQuizzesCount": { "type": "number", "description": "Strictly non-decreasing count of quizzes completed" },
         "badgesCount": { "type": "number", "description": "Total number of virtual medal badges unlocked" },
+        "earnedBadges": { "type": "array", "description": "List of unlocked badge records with unlock timestamps" },
         "quizzesCompletedCount": { "type": "number", "description": "Number of quizzes taken" },
         "xp": { "type": "number", "description": "Aggregated experience points" },
+        "bestTotalXP": { "type": "number", "description": "Highest total XP achieved" },
         "streakDays": { "type": "number", "description": "Unbroken active study streak days" },
         "featuredBadgeId": { "type": "string", "description": "Identifier of the student's featured badge" }
       },
