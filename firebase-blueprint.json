@@ -21,8 +21,14 @@
         "metal": { "type": "number", "description": "Metal building material balance" },
         "avatar": { "type": "string", "description": "Equipped avatar skin ID" },
         "equippedSkin": { "type": "string", "description": "Equipped skin ID" },
+        "equippedWeapon": { "type": "string", "description": "Equipped weapon ID" },
+        "equippedPower": { "type": "string", "description": "Equipped special power ID" },
+        "level": { "type": "number", "description": "Student level calculated from total XP" },
+        "xp": { "type": "number", "description": "Total experience points earned" },
         "inventory": { "type": "array", "description": "List of all owned item IDs" },
-        "unlockedSkins": { "type": "array", "description": "List of unlocked avatar skin card IDs" }
+        "unlockedSkins": { "type": "array", "description": "List of unlocked avatar skin card IDs" },
+        "giftedPacks": { "type": "object", "description": "Map of booster pack IDs to remaining free gifted pack counts awarded by an instructor" },
+        "rewardHistory": { "type": "array", "description": "Recent instructor-awarded booster packs, gold, skins, and weapons" }
       },
       "required": ["uid", "name", "email", "role"]
     },
@@ -263,6 +269,24 @@
         "gold": { "type": "number", "description": "Gold awarded" }
       },
       "required": ["claimedAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app notification sent to students for new tasks or instructor rewards.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Notification document ID" },
+        "type": { "type": "string", "enum": ["task_assigned", "instructor_reward"], "description": "Notification category" },
+        "title": { "type": "string", "description": "Notification headline" },
+        "message": { "type": "string", "description": "Detailed notification body" },
+        "classId": { "type": "string", "description": "Related class ID if applicable" },
+        "targetStudentIds": { "type": "array", "description": "Recipient student UIDs" },
+        "rewardType": { "type": "string", "enum": ["booster_pack", "gold", "skin", "weapon"], "description": "Type of instructor reward" },
+        "rewardLabel": { "type": "string", "description": "Human-readable label of awarded reward" },
+        "awardedByName": { "type": "string", "description": "Instructor display name" },
+        "createdAt": { "type": "string", "description": "ISO timestamp when notification was created" }
+      },
+      "required": ["type", "title", "message", "targetStudentIds", "createdAt"]
     }
   },
   "firestore": {
@@ -321,6 +345,10 @@
     "/battleEvent/crates/{crateId}": {
       "schema": { "$ref": "#/entities/BattleCrate" },
       "description": "Science supply crates dropped in the arena."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "In-app notifications delivered to students for tasks and instructor rewards."
     }
   }
 }

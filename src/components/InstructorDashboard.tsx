@@ -43,10 +43,26 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  ClipboardCheck
+  ClipboardCheck,
+  Gift,
+  Package,
+  Coins,
+  Layers,
+  Crosshair,
+  Lock
 } from 'lucide-react';
 import { InstructorTasksManager } from './InstructorTasksManager';
 import { TaskAnalyticsPage } from './TaskAnalyticsPage';
+import { StudentRewardModal, RewardTargetStudent } from './StudentRewardModal';
+import {
+  UserGameProfile,
+  InstructorRewardType,
+  fetchStudentsGameProfilesMap,
+  subscribeToGameProfile,
+  calculateLevelFromXP
+} from '../services/firebaseGameService';
+import { ALL_FANTASY_SKINS, getFantasySkin, FANTASY_SKIN_ALIASES } from '../data/fantasySkinsData';
+import { ALL_WEAPON_ITEMS, BOOSTER_PACKS, RARITY_RANK, resolveWeaponItem } from '../data/gameCatalogData';
 import { 
   getActiveGoogleSlideSubtopics, 
   saveGoogleSlidesOverride, 
@@ -154,6 +170,15 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
 
   // Student individual analysis modal state
   const [selectedStudentForAnalysis, setSelectedStudentForAnalysis] = useState<ClassStudentItem | null>(null);
+  const [studentModalTab, setStudentModalTab] = useState<'academic' | 'game_collection'>('academic');
+  const [skinCollectionFilter, setSkinCollectionFilter] = useState<'all' | 'unlocked' | 'locked'>('all');
+  const [studentGameProfiles, setStudentGameProfiles] = useState<Record<string, UserGameProfile>>({});
+  const [rewardModalConfig, setRewardModalConfig] = useState<{
+    isOpen: boolean;
+    targets: RewardTargetStudent[];
+    initialRewardType?: InstructorRewardType;
+    initialItemId?: string;
+  }>({ isOpen: false, targets: [] });
   const [analysisSubjectFilter, setAnalysisSubjectFilter] = useState<'all' | 'biology' | 'chemistry' | 'physics'>('all');
   const [modalQuizSort, setModalQuizSort] = useState<{ column: 'topic' | 'subject' | 'score' | 'percentage' | 'result' | 'date' | null; direction: 'asc' | 'desc' }>({ column: null, direction: 'asc' });
   const [modalQuizFilters, setModalQuizFilters] = useState<{ topic: string; result: 'all' | 'passed' | 'review'; scoreRange: 'all' | 'high' | 'mid' | 'low' }>({
@@ -163,11 +188,12 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   });
 
   // Class Analysis (Enrolled Students table) per-column sort & filter state
-  type ClassSortCol = 'name' | 'tier' | 'decks' | 'syllabus' | 'trafficLights' | 'quizScores' | 'weakTopics' | 'lastActive';
+  type ClassSortCol = 'name' | 'tier' | 'gameLevel' | 'decks' | 'syllabus' | 'trafficLights' | 'quizScores' | 'weakTopics' | 'lastActive';
   const [classSort, setClassSort] = useState<{ column: ClassSortCol | null; direction: 'asc' | 'desc' }>({ column: null, direction: 'asc' });
   const [classColFilters, setClassColFilters] = useState<{
     student: string;
     tier: 'all' | 'Core' | 'Extended';
+    gameLevel: 'all' | 'has_packs' | 'lv5_plus' | 'high_gold';
     decks: 'all' | 'zero' | 'low' | 'mid' | 'high';
     syllabus: 'all' | 'zero' | 'low' | 'mid' | 'high';
     trafficLights: 'all' | 'has_green' | 'has_amber' | 'has_red' | 'unrated';
@@ -177,6 +203,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   }>({
     student: '',
     tier: 'all',
+    gameLevel: 'all',
     decks: 'all',
     syllabus: 'all',
     trafficLights: 'all',
@@ -301,6 +328,49 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
 
     return () => unsubscribe();
   }, [selectedClass?.id]);
+
+  // Batch fetch RPG profiles (level, gold, weapon packs, skins, weapons) for students in selected class
+  useEffect(() => {
+    const ids = classStudents.map(s => s.studentId).filter(Boolean);
+    if (ids.length === 0) return;
+    let active = true;
+    fetchStudentsGameProfilesMap(ids).then((map) => {
+      if (active) {
+        setStudentGameProfiles(prev => ({ ...prev, ...map }));
+      }
+    }).catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [classStudents]);
+
+  // Live subscribe to game profile when inspecting an individual student
+  useEffect(() => {
+    if (!selectedStudentForAnalysis?.studentId) return;
+    const sid = selectedStudentForAnalysis.studentId;
+    const unsub = subscribeToGameProfile(sid, (liveProfile) => {
+      setStudentGameProfiles(prev => ({ ...prev, [sid]: liveProfile }));
+    });
+    return () => unsub();
+  }, [selectedStudentForAnalysis?.studentId]);
+
+  const openStudentModal = (std: ClassStudentItem, tab: 'academic' | 'game_collection' = 'academic') => {
+    setSelectedStudentForAnalysis(std);
+    setStudentModalTab(tab);
+  };
+
+  const openRewardModal = (
+    targets: RewardTargetStudent[],
+    initialRewardType: InstructorRewardType = 'booster_pack',
+    initialItemId?: string
+  ) => {
+    setRewardModalConfig({
+      isOpen: true,
+      targets,
+      initialRewardType,
+      initialItemId
+    });
+  };
 
   const handleCreateClass = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -778,7 +848,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
   }, [classStudents]);
 
   const isClassNumericCol = (col: ClassSortCol) =>
-    col === 'decks' || col === 'syllabus' || col === 'trafficLights' || col === 'quizScores' || col === 'weakTopics' || col === 'lastActive';
+    col === 'gameLevel' || col === 'decks' || col === 'syllabus' || col === 'trafficLights' || col === 'quizScores' || col === 'weakTopics' || col === 'lastActive';
 
   const toggleClassSort = (col: ClassSortCol) => {
     const firstDir: 'asc' | 'desc' = isClassNumericCol(col) ? 'desc' : 'asc';
@@ -803,6 +873,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
     setClassColFilters({
       student: '',
       tier: 'all',
+      gameLevel: 'all',
       decks: 'all',
       syllabus: 'all',
       trafficLights: 'all',
@@ -816,6 +887,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
     classSort.column !== null ||
     classColFilters.student.trim() !== '' ||
     classColFilters.tier !== 'all' ||
+    classColFilters.gameLevel !== 'all' ||
     classColFilters.decks !== 'all' ||
     classColFilters.syllabus !== 'all' ||
     classColFilters.trafficLights !== 'all' ||
@@ -854,6 +926,21 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
       const totalTL = greenCount + orangeCount + redCount;
       const lastActiveMs = std.lastActive ? new Date(std.lastActive).getTime() : 0;
 
+      const gameProfile = studentGameProfiles[std.studentId];
+      const levelInfo = calculateLevelFromXP(gameProfile?.xp ?? std.xp ?? 0);
+      const gameLevel = Math.max(gameProfile?.level || 1, levelInfo.level);
+      const goldBalance = gameProfile?.gold ?? 100;
+      const unlockedSkinsCount = ALL_FANTASY_SKINS.filter(
+        s => s.id === 'cultist' || (gameProfile?.unlockedSkins || []).includes(s.id)
+      ).length;
+      const unlockedWeaponsCount = ALL_WEAPON_ITEMS.filter(
+        w => w.price === 0 || w.id === 'wpn_starter_blaster' || w.id === 'bunsen_burner' || (gameProfile?.inventory || []).includes(w.id)
+      ).length;
+      const pendingPacksCount = Object.values(gameProfile?.giftedPacks || {}).reduce(
+        (sum, n) => sum + Math.max(0, Number(n) || 0),
+        0
+      );
+
       return {
         std,
         bioPct,
@@ -867,10 +954,16 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         orangeCount,
         redCount,
         totalTL,
-        lastActiveMs: Number.isFinite(lastActiveMs) ? lastActiveMs : 0
+        lastActiveMs: Number.isFinite(lastActiveMs) ? lastActiveMs : 0,
+        gameProfile,
+        gameLevel,
+        goldBalance,
+        unlockedSkinsCount,
+        unlockedWeaponsCount,
+        pendingPacksCount
       };
     });
-  }, [classStudents]);
+  }, [classStudents, studentGameProfiles]);
 
   const displayedClassStudents = useMemo(() => {
     const now = Date.now();
@@ -886,6 +979,11 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
       }
       if (classColFilters.tier !== 'all' && (std.tier || 'Extended') !== classColFilters.tier) {
         return false;
+      }
+      if (classColFilters.gameLevel !== 'all') {
+        if (classColFilters.gameLevel === 'has_packs' && row.pendingPacksCount === 0) return false;
+        if (classColFilters.gameLevel === 'lv5_plus' && row.gameLevel < 5) return false;
+        if (classColFilters.gameLevel === 'high_gold' && row.goldBalance < 250) return false;
       }
       if (classColFilters.decks !== 'all') {
         if (classColFilters.decks === 'zero' && row.decksCompleted !== 0) return false;
@@ -938,6 +1036,10 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
           return dir * (a.std.name || '').localeCompare(b.std.name || '', undefined, { sensitivity: 'base' });
         case 'tier':
           return dir * (a.std.tier || 'Extended').localeCompare(b.std.tier || 'Extended');
+        case 'gameLevel': {
+          if (a.gameLevel !== b.gameLevel) return dir * (a.gameLevel - b.gameLevel);
+          return dir * (a.goldBalance - b.goldBalance);
+        }
         case 'decks':
           return dir * (a.decksCompleted - b.decksCompleted);
         case 'syllabus':
@@ -1624,7 +1726,20 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                                 {selectedStudentIdsForBatch.size} {selectedStudentIdsForBatch.size === 1 ? 'student' : 'students'} selected
                               </span>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const selected = classStudents
+                                    .filter(s => selectedStudentIdsForBatch.has(s.studentId))
+                                    .map(s => ({ studentId: s.studentId, name: s.name, email: s.email }));
+                                  openRewardModal(selected, 'booster_pack');
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-bold transition shadow-xs border border-emerald-800 cursor-pointer"
+                              >
+                                <Gift className="w-3.5 h-3.5" />
+                                <span>Reward Selected</span>
+                              </button>
                               <button
                                 type="button"
                                 onClick={handleOpenMoveModalBatch}
@@ -1693,6 +1808,16 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                                   <button type="button" onClick={() => toggleClassSort('tier')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
                                     <span>Tier</span>
                                     {classSort.column === 'tier' ? (classSort.direction === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+                                  </button>
+                                </th>
+                                <th className="p-3">
+                                  <button type="button" onClick={() => toggleClassSort('gameLevel')} className="inline-flex items-center gap-1 hover:text-black dark:hover:text-white transition text-left">
+                                    <span>Level &amp; Loadout</span>
+                                    {classSort.column === 'gameLevel' ? (
+                                      <span className="inline-flex items-center gap-0.5 text-[10px] font-mono bg-slate-900 text-white dark:bg-white dark:text-black px-1 py-0.5 rounded">
+                                        {classSort.direction === 'desc' ? 'Hi→Lo' : 'Lo→Hi'}
+                                      </span>
+                                    ) : <ArrowUpDown className="w-3 h-3 opacity-40" />}
                                   </button>
                                 </th>
                                 <th className="p-3">
@@ -1785,6 +1910,27 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                                     <option value="all">All Tiers</option>
                                     <option value="Core">Core</option>
                                     <option value="Extended">Extended</option>
+                                  </select>
+                                </th>
+                                <th className="p-1.5 space-y-1">
+                                  <select
+                                    value={classSort.column === 'gameLevel' ? classSort.direction : 'default'}
+                                    onChange={e => setClassColumnOrder('gameLevel', e.target.value)}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-semibold"
+                                  >
+                                    <option value="default">Order: Default</option>
+                                    <option value="desc">High → Low</option>
+                                    <option value="asc">Low → High</option>
+                                  </select>
+                                  <select
+                                    value={classColFilters.gameLevel}
+                                    onChange={e => setClassColFilters(prev => ({ ...prev, gameLevel: e.target.value as any }))}
+                                    className="w-full px-1.5 py-0.5 text-xs rounded-md bg-white dark:bg-black border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-slate-100 font-medium"
+                                  >
+                                    <option value="all">All Loadouts</option>
+                                    <option value="has_packs">Has Gifted Packs</option>
+                                    <option value="lv5_plus">Level 5+</option>
+                                    <option value="high_gold">250+ Gold</option>
                                   </select>
                                 </th>
                                 <th className="p-1.5 space-y-1">
@@ -1934,7 +2080,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                             <tbody className="divide-y divide-slate-200 dark:divide-zinc-800 bg-white dark:bg-black">
                               {displayedClassStudents.length === 0 ? (
                                 <tr>
-                                  <td colSpan={10} className="p-6 text-center text-xs text-slate-500 dark:text-slate-400">
+                                  <td colSpan={11} className="p-6 text-center text-xs text-slate-500 dark:text-slate-400">
                                     No students match the selected column filters.{' '}
                                     <button type="button" onClick={resetClassFiltersAndSort} className="underline font-bold text-slate-800 dark:text-slate-200">
                                       Reset filters
@@ -1942,7 +2088,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                                   </td>
                                 </tr>
                               ) : displayedClassStudents.map(row => {
-                                const { std, bioPct, chemPct, physPct, decksCompleted, slideDeckPct, syllabusPct, greenCount, orangeCount, redCount } = row;
+                                const { std, bioPct, chemPct, physPct, decksCompleted, slideDeckPct, syllabusPct, greenCount, orangeCount, redCount, gameLevel, goldBalance, unlockedSkinsCount, unlockedWeaponsCount, pendingPacksCount } = row;
                                 const isSelected = selectedStudentIdsForBatch.has(std.studentId);
                                 const bioScore = bioPct !== null ? bioPct : '-';
                                 const chemScore = chemPct !== null ? chemPct : '-';
@@ -1960,9 +2106,9 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                                     </td>
                                     <td className="p-3">
                                       <button
-                                        onClick={() => setSelectedStudentForAnalysis(std)}
+                                        onClick={() => openStudentModal(std, 'academic')}
                                         className="text-left group/std hover:opacity-90 transition"
-                                        title="Click to view detailed quiz results & syllabus analysis"
+                                        title="Click to view detailed quiz results, loadout & skin collections"
                                       >
                                         <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
                                           <span>{std.name}</span>
@@ -1975,6 +2121,26 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                                       <span className="px-2 py-0.5 rounded font-mono font-bold text-[10px] bg-[#FDFBF7] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 text-slate-800 dark:text-slate-200">
                                         {std.tier}
                                       </span>
+                                    </td>
+                                    <td className="p-3">
+                                      <button
+                                        type="button"
+                                        onClick={() => openStudentModal(std, 'game_collection')}
+                                        className="text-left space-y-0.5 hover:opacity-80 transition cursor-pointer"
+                                        title="Inspect student's levels, weapon packs, and skin collection"
+                                      >
+                                        <div className="text-[11px] font-bold text-slate-900 dark:text-white tabular-nums whitespace-nowrap">
+                                          Lv {gameLevel} · {goldBalance} Gold
+                                        </div>
+                                        <div className="text-[10px] text-slate-600 dark:text-slate-400 tabular-nums whitespace-nowrap">
+                                          {unlockedSkinsCount}/19 Skins · {unlockedWeaponsCount}/10 Weapons
+                                        </div>
+                                        {pendingPacksCount > 0 && (
+                                          <div className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 tabular-nums whitespace-nowrap">
+                                            {pendingPacksCount} unopened pack{pendingPacksCount === 1 ? '' : 's'}
+                                          </div>
+                                        )}
+                                      </button>
                                     </td>
                                     <td className="p-3">
                                       <div className="space-y-1">
@@ -2041,12 +2207,20 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                                     <td className="p-3">
                                       <div className="flex items-center gap-1.5">
                                         <button
-                                          onClick={() => setSelectedStudentForAnalysis(std)}
+                                          onClick={() => openStudentModal(std, 'academic')}
                                           className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white dark:bg-black hover:bg-slate-100 dark:hover:bg-zinc-900 text-slate-800 dark:text-white border border-black dark:border-white text-[11px] font-bold transition"
-                                          title="View individual practice quiz results & syllabus analysis"
+                                          title="View quiz results, syllabus progress & game collections"
                                         >
                                           <Eye className="w-3 h-3" />
                                           <span>Analysis</span>
+                                        </button>
+                                        <button
+                                          onClick={() => openRewardModal([{ studentId: std.studentId, name: std.name, email: std.email }], 'booster_pack')}
+                                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white border border-emerald-800 text-[11px] font-bold transition cursor-pointer"
+                                          title="Award booster packs, gold, skins, or weapons"
+                                        >
+                                          <Gift className="w-3 h-3" />
+                                          <span>Reward</span>
                                         </button>
                                         <button
                                           onClick={() => handleOpenMoveModalSingle(std)}
@@ -3498,14 +3672,52 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         const studentSlidePct = Math.min(100, Math.round((effectiveSlideDecks / 106) * 100));
         const studentSyllabusPct = Math.min(100, Math.round((studentDeckSet.size / 106) * 100));
 
+        const activeGameProfile = studentGameProfiles[selectedStudentForAnalysis.studentId];
+        const xpTotal = activeGameProfile?.xp ?? selectedStudentForAnalysis.xp ?? 0;
+        const xpProgress = calculateLevelFromXP(xpTotal);
+        const effectiveLevel = Math.max(activeGameProfile?.level || 1, xpProgress.level);
+        const studentGold = activeGameProfile?.gold ?? 100;
+        const studentUnlockedSkins = activeGameProfile?.unlockedSkins || ['cultist'];
+        const studentInventory = activeGameProfile?.inventory || ['cultist', 'wpn_starter_blaster', 'bunsen_burner'];
+        const equippedSkinId = activeGameProfile?.equippedSkin || activeGameProfile?.avatar || 'cultist';
+        const equippedSkinDef = getFantasySkin(equippedSkinId);
+        const equippedWeaponDef = resolveWeaponItem(activeGameProfile?.equippedWeapon);
+        const giftedPacksMap = activeGameProfile?.giftedPacks || {};
+        const totalUnopenedPacks = Object.values(giftedPacksMap).reduce((sum, n) => sum + Math.max(0, Number(n) || 0), 0);
+        const rewardLog = [...(activeGameProfile?.rewardHistory || [])].reverse();
+
+        const sortedSkinsForModal = [...ALL_FANTASY_SKINS].sort(
+          (a, b) => (RARITY_RANK[a.rarity]?.rank ?? 99) - (RARITY_RANK[b.rarity]?.rank ?? 99)
+        );
+        const unlockedSkinCountModal = sortedSkinsForModal.filter(
+          s => s.id === 'cultist' || studentUnlockedSkins.includes(s.id)
+        ).length;
+        const visibleSkinsForModal = sortedSkinsForModal.filter((s) => {
+          const isOwned = s.id === 'cultist' || studentUnlockedSkins.includes(s.id);
+          if (skinCollectionFilter === 'unlocked') return isOwned;
+          if (skinCollectionFilter === 'locked') return !isOwned;
+          return true;
+        });
+
+        const sortedWeaponsForModal = [...ALL_WEAPON_ITEMS].sort(
+          (a, b) => (RARITY_RANK[a.rarity]?.rank ?? 99) - (RARITY_RANK[b.rarity]?.rank ?? 99)
+        );
+        const unlockedWeaponCountModal = sortedWeaponsForModal.filter(
+          w => w.price === 0 || w.id === 'wpn_starter_blaster' || w.id === 'bunsen_burner' || studentInventory.includes(w.id)
+        ).length;
+
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-xs animate-in fade-in">
             <div className="bg-white dark:bg-black border-2 border-black dark:border-white rounded-2xl max-w-5xl w-full max-h-[92vh] overflow-y-auto shadow-xl p-6 sm:p-8 space-y-6 text-slate-900 dark:text-slate-100">
               {/* Modal Header */}
               <div className="flex items-start justify-between gap-4 pb-4 border-b border-slate-200 dark:border-zinc-800">
                 <div className="flex items-center gap-3.5">
-                  <div className="w-12 h-12 rounded-2xl bg-[#EBF3F5] dark:bg-zinc-900 border-2 border-black dark:border-white flex items-center justify-center text-slate-900 dark:text-white font-bold text-lg shadow-xs shrink-0">
-                    {selectedStudentForAnalysis.name.charAt(0).toUpperCase()}
+                  <div className="w-12 h-12 rounded-2xl bg-[#EBF3F5] dark:bg-zinc-900 border-2 border-black dark:border-white flex items-center justify-center text-slate-900 dark:text-white font-bold text-lg shadow-xs shrink-0 overflow-hidden">
+                    <img
+                      src={equippedSkinDef.portraitPath || equippedSkinDef.spritePath || `/assets/characters/${equippedSkinDef.id}.png`}
+                      alt={equippedSkinDef.name}
+                      className="w-10 h-10 object-contain pixelated"
+                    />
                   </div>
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
@@ -3517,20 +3729,64 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                         {selectedStudentForAnalysis.email || 'Student Email'}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-                      Individual Performance Diagnostic • Last Active: {selectedStudentForAnalysis.lastActive ? new Date(selectedStudentForAnalysis.lastActive).toLocaleDateString() : 'Recently'}
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5 tabular-nums">
+                      Level {effectiveLevel} · {studentGold} Gold · {unlockedSkinCountModal}/19 Skins · {unlockedWeaponCountModal}/10 Weapons · {totalUnopenedPacks} Gifted Pack{totalUnopenedPacks === 1 ? '' : 's'}
                     </p>
                   </div>
                 </div>
 
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => openRewardModal([{
+                      studentId: selectedStudentForAnalysis.studentId,
+                      name: selectedStudentForAnalysis.name,
+                      email: selectedStudentForAnalysis.email
+                    }], 'booster_pack')}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Gift className="w-4 h-4" />
+                    <span>Award Reward</span>
+                  </button>
+                  <button
+                    onClick={() => setSelectedStudentForAnalysis(null)}
+                    className="p-1.5 rounded-xl text-slate-500 hover:text-black dark:hover:text-white transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Section Switcher */}
+              <div className="flex items-center gap-2 border-b border-slate-200 dark:border-zinc-800 pb-3 flex-wrap">
                 <button
-                  onClick={() => setSelectedStudentForAnalysis(null)}
-                  className="p-1.5 rounded-xl text-slate-500 hover:text-black dark:hover:text-white transition"
+                  type="button"
+                  onClick={() => setStudentModalTab('academic')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-2 ${
+                    studentModalTab === 'academic'
+                      ? 'bg-slate-900 text-white dark:bg-white dark:text-black border-black dark:border-white'
+                      : 'bg-white dark:bg-black text-slate-700 dark:text-slate-300 border-slate-300 dark:border-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-900'
+                  }`}
                 >
-                  <X className="w-5 h-5" />
+                  <Award className="w-4 h-4" />
+                  <span>Academic &amp; Quizzes</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStudentModalTab('game_collection')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-2 ${
+                    studentModalTab === 'game_collection'
+                      ? 'bg-slate-900 text-white dark:bg-white dark:text-black border-black dark:border-white'
+                      : 'bg-white dark:bg-black text-slate-700 dark:text-slate-300 border-slate-300 dark:border-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-900'
+                  }`}
+                >
+                  <Package className="w-4 h-4" />
+                  <span>Levels, Weapon Packs &amp; Skins</span>
                 </button>
               </div>
 
+              {studentModalTab === 'academic' && (
+                <>
               {/* Top KPI Metrics Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div className="bg-[#FDFBF7] dark:bg-zinc-900/50 border border-slate-200 dark:border-zinc-800 rounded-2xl p-3.5">
@@ -3891,6 +4147,361 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                   )}
                 </div>
               </div>
+                </>
+              )}
+
+              {studentModalTab === 'game_collection' && (
+                <div className="space-y-6">
+                  {/* Level, XP, Gold & Active Loadout Overview */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="bg-[#FDFBF7] dark:bg-zinc-900/50 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-600 dark:text-slate-400 font-medium">Player Level</span>
+                        <span className="font-mono font-bold text-slate-900 dark:text-white">{xpProgress.progressPct}%</span>
+                      </div>
+                      <div className="text-2xl font-bold font-mono text-slate-900 dark:text-white tabular-nums">
+                        Level {effectiveLevel}
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
+                        <div
+                          className="h-full bg-slate-900 dark:bg-white rounded-full"
+                          style={{ width: `${xpProgress.progressPct}%` }}
+                        />
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+                        {xpTotal} total XP ({xpProgress.currentLevelXp}/{xpProgress.nextLevelXp} to next)
+                      </div>
+                    </div>
+
+                    <div className="bg-[#FDFBF7] dark:bg-zinc-900/50 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 flex flex-col justify-between">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">Gold Balance</span>
+                        <button
+                          type="button"
+                          onClick={() => openRewardModal([{
+                            studentId: selectedStudentForAnalysis.studentId,
+                            name: selectedStudentForAnalysis.name,
+                            email: selectedStudentForAnalysis.email
+                          }], 'gold')}
+                          className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 hover:underline cursor-pointer"
+                        >
+                          +Award Gold
+                        </button>
+                      </div>
+                      <div className="text-2xl font-bold font-mono text-slate-900 dark:text-white tabular-nums flex items-center gap-2 my-1">
+                        <Coins className="w-5 h-5 text-amber-600" />
+                        <span>{studentGold}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+                        Materials: {activeGameProfile?.wood ?? 25}W · {activeGameProfile?.brick ?? 15}B · {activeGameProfile?.metal ?? 10}M
+                      </div>
+                    </div>
+
+                    <div className="bg-[#FDFBF7] dark:bg-zinc-900/50 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 flex flex-col justify-between">
+                      <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">Equipped Skin</div>
+                      <div className="flex items-center gap-2.5 my-1">
+                        <img
+                          src={equippedSkinDef.portraitPath || equippedSkinDef.spritePath || `/assets/characters/${equippedSkinDef.id}.png`}
+                          alt={equippedSkinDef.name}
+                          className="w-9 h-9 rounded-lg object-contain bg-[#EDE6D8] dark:bg-zinc-950 border border-slate-300 dark:border-zinc-700 p-0.5 pixelated"
+                        />
+                        <div className="min-w-0">
+                          <div className="text-sm font-bold text-slate-900 dark:text-white truncate">{equippedSkinDef.name}</div>
+                          <div className="text-[11px] text-slate-500 capitalize">{equippedSkinDef.rarity}</div>
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+                        {unlockedSkinCountModal} of {ALL_FANTASY_SKINS.length} skins unlocked
+                      </div>
+                    </div>
+
+                    <div className="bg-[#FDFBF7] dark:bg-zinc-900/50 border border-slate-200 dark:border-zinc-800 rounded-2xl p-4 flex flex-col justify-between">
+                      <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">Equipped Weapon</div>
+                      <div className="flex items-center gap-2.5 my-1">
+                        <span className="text-2xl leading-none">{equippedWeaponDef.icon}</span>
+                        <div className="min-w-0">
+                          <div className="text-sm font-bold text-slate-900 dark:text-white truncate">{equippedWeaponDef.name}</div>
+                          <div className="text-[11px] text-slate-500 capitalize">
+                            {equippedWeaponDef.rarity} · {equippedWeaponDef.stats?.damage || 18} DMG
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+                        {unlockedWeaponCountModal} of {ALL_WEAPON_ITEMS.length} weapons unlocked
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Booster / Weapon Packs Section */}
+                  <div className="bg-white dark:bg-black border border-slate-200 dark:border-zinc-800 rounded-2xl p-5 space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                          <Package className="w-4 h-4" />
+                          <span>Weapon &amp; Science Booster Packs ({totalUnopenedPacks} Unopened)</span>
+                        </h4>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                          Gifted booster packs appear as free pack opens in the student's Shop.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openRewardModal([{
+                          studentId: selectedStudentForAnalysis.studentId,
+                          name: selectedStudentForAnalysis.name,
+                          email: selectedStudentForAnalysis.email
+                        }], 'booster_pack')}
+                        className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-black text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Gift className="w-3.5 h-3.5" />
+                        <span>Grant Booster Pack</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      {BOOSTER_PACKS.map((pack) => {
+                        const count = Math.max(0, Number(giftedPacksMap[pack.id] || 0));
+                        return (
+                          <div
+                            key={pack.id}
+                            className="p-3.5 rounded-xl bg-[#FDFBF7] dark:bg-zinc-900/50 border border-slate-200 dark:border-zinc-800 flex flex-col justify-between space-y-2.5"
+                          >
+                            <div>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">{pack.badge}</span>
+                                <span className={`text-xs font-mono font-bold tabular-nums ${count > 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-500'}`}>
+                                  {count} Unopened
+                                </span>
+                              </div>
+                              <div className="text-xs font-bold text-slate-900 dark:text-white mt-1">{pack.name}</div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => openRewardModal([{
+                                studentId: selectedStudentForAnalysis.studentId,
+                                name: selectedStudentForAnalysis.name,
+                                email: selectedStudentForAnalysis.email
+                              }], 'booster_pack', pack.id)}
+                              className="w-full py-1.5 rounded-lg bg-white dark:bg-black hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-zinc-700 text-[11px] font-bold cursor-pointer transition"
+                            >
+                              + Award {pack.badge}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Weapon Collection / Armory Section */}
+                  <div className="bg-white dark:bg-black border border-slate-200 dark:border-zinc-800 rounded-2xl p-5 space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                          <Crosshair className="w-4 h-4" />
+                          <span>Weapon Collection ({unlockedWeaponCountModal} / {ALL_WEAPON_ITEMS.length})</span>
+                        </h4>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                          Equipped, unlocked, and locked arena weapons for this student.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openRewardModal([{
+                          studentId: selectedStudentForAnalysis.studentId,
+                          name: selectedStudentForAnalysis.name,
+                          email: selectedStudentForAnalysis.email
+                        }], 'weapon')}
+                        className="px-3 py-1.5 rounded-lg bg-white dark:bg-black hover:bg-slate-100 dark:hover:bg-zinc-900 text-slate-900 dark:text-white border border-slate-300 dark:border-zinc-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Gift className="w-3.5 h-3.5" />
+                        <span>Award Weapon</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                      {sortedWeaponsForModal.map((weapon) => {
+                        const isOwned = weapon.price === 0 || weapon.id === 'wpn_starter_blaster' || weapon.id === 'bunsen_burner' || studentInventory.includes(weapon.id);
+                        const isEquipped = activeGameProfile?.equippedWeapon === weapon.id;
+                        const rankInfo = RARITY_RANK[weapon.rarity];
+
+                        return (
+                          <div
+                            key={weapon.id}
+                            className={`p-3 rounded-xl border flex items-start justify-between gap-2.5 ${
+                              isEquipped
+                                ? 'bg-[#EBF3F5] dark:bg-zinc-900 border-black dark:border-white'
+                                : isOwned
+                                ? 'bg-white dark:bg-black border-slate-300 dark:border-zinc-700'
+                                : 'bg-slate-50/70 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 opacity-75'
+                            }`}
+                          >
+                            <div className="flex items-start gap-2.5 min-w-0">
+                              <span className="text-xl leading-none mt-0.5 shrink-0">{weapon.icon}</span>
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{weapon.name}</div>
+                                <div className="text-[11px] text-slate-600 dark:text-slate-400 tabular-nums">
+                                  {rankInfo?.label || weapon.rarity} · {weapon.stats?.damage || 18} DMG · {weapon.stats?.fireRate || 2.5}/s
+                                </div>
+                                <div className="text-[10px] font-bold mt-0.5">
+                                  {isEquipped ? (
+                                    <span className="text-emerald-700 dark:text-emerald-400">Equipped</span>
+                                  ) : isOwned ? (
+                                    <span className="text-slate-600 dark:text-slate-400">Unlocked</span>
+                                  ) : (
+                                    <span className="text-slate-500">Locked</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            {!isOwned && (
+                              <button
+                                type="button"
+                                onClick={() => openRewardModal([{
+                                  studentId: selectedStudentForAnalysis.studentId,
+                                  name: selectedStudentForAnalysis.name,
+                                  email: selectedStudentForAnalysis.email
+                                }], 'weapon', weapon.id)}
+                                className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-black dark:bg-white dark:hover:bg-slate-200 text-white dark:text-black text-[10px] font-bold shrink-0 cursor-pointer"
+                              >
+                                Award
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Skin Collection Section */}
+                  <div className="bg-white dark:bg-black border border-slate-200 dark:border-zinc-800 rounded-2xl p-5 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                          <Layers className="w-4 h-4" />
+                          <span>Skin Collection ({unlockedSkinCountModal} / {ALL_FANTASY_SKINS.length})</span>
+                        </h4>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                          View unlocked champions or award missing skins directly.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {(['all', 'unlocked', 'locked'] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setSkinCollectionFilter(mode)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border capitalize cursor-pointer transition ${
+                              skinCollectionFilter === mode
+                                ? 'bg-slate-900 text-white dark:bg-white dark:text-black border-black dark:border-white'
+                                : 'bg-[#FDFBF7] dark:bg-zinc-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-zinc-700'
+                            }`}
+                          >
+                            {mode === 'all' ? `All (${ALL_FANTASY_SKINS.length})` : mode === 'unlocked' ? `Unlocked (${unlockedSkinCountModal})` : `Locked (${ALL_FANTASY_SKINS.length - unlockedSkinCountModal})`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                      {visibleSkinsForModal.map((skin) => {
+                        const isOwned = skin.id === 'cultist' || studentUnlockedSkins.includes(skin.id);
+                        const isEquipped = equippedSkinId === skin.id || FANTASY_SKIN_ALIASES[equippedSkinId] === skin.id;
+                        const rankInfo = RARITY_RANK[skin.rarity];
+
+                        return (
+                          <div
+                            key={skin.id}
+                            className={`p-3 rounded-xl border flex items-center justify-between gap-2.5 ${
+                              isEquipped
+                                ? 'bg-[#EBF3F5] dark:bg-zinc-900 border-black dark:border-white'
+                                : isOwned
+                                ? 'bg-white dark:bg-black border-slate-300 dark:border-zinc-700'
+                                : 'bg-slate-50/70 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 opacity-75'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="relative shrink-0">
+                                <img
+                                  src={skin.portraitPath || skin.spritePath || `/assets/characters/${skin.id}.png`}
+                                  alt={skin.name}
+                                  className={`w-10 h-10 rounded-lg object-contain bg-[#EDE6D8] dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 p-0.5 pixelated ${isOwned ? '' : 'grayscale opacity-60'}`}
+                                />
+                                {!isOwned && (
+                                  <Lock className="w-3 h-3 text-slate-700 dark:text-slate-300 absolute -top-1 -right-1 bg-white dark:bg-black rounded-full p-0.5 border border-slate-300" />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{skin.name}</div>
+                                <div className="text-[11px] text-slate-600 dark:text-slate-400 tabular-nums">
+                                  {rankInfo?.label || skin.rarity} · DEF {skin.defense} · SPD {skin.speed}
+                                </div>
+                                <div className="text-[10px] font-bold">
+                                  {isEquipped ? (
+                                    <span className="text-emerald-700 dark:text-emerald-400">Equipped</span>
+                                  ) : isOwned ? (
+                                    <span className="text-slate-600 dark:text-slate-400">Unlocked</span>
+                                  ) : (
+                                    <span className="text-slate-500">Locked</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {!isOwned && (
+                              <button
+                                type="button"
+                                onClick={() => openRewardModal([{
+                                  studentId: selectedStudentForAnalysis.studentId,
+                                  name: selectedStudentForAnalysis.name,
+                                  email: selectedStudentForAnalysis.email
+                                }], 'skin', skin.id)}
+                                className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-black dark:bg-white dark:hover:bg-slate-200 text-white dark:text-black text-[10px] font-bold shrink-0 cursor-pointer"
+                              >
+                                Award
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Reward History Log */}
+                  <div className="bg-[#FDFBF7] dark:bg-zinc-900/50 border border-slate-200 dark:border-zinc-800 rounded-2xl p-5 space-y-2.5">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Instructor Reward History ({rewardLog.length})
+                    </h4>
+                    {rewardLog.length === 0 ? (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        No manual instructor rewards have been granted to this student yet.
+                      </p>
+                    ) : (
+                      <div className="divide-y divide-slate-200 dark:divide-zinc-800">
+                        {rewardLog.slice(0, 10).map((entry) => (
+                          <div key={entry.id} className="py-2 flex items-center justify-between gap-3 text-xs">
+                            <div className="min-w-0">
+                              <span className="font-bold text-slate-900 dark:text-white">
+                                {entry.rewardType === 'gold'
+                                  ? `+${entry.quantity} Gold`
+                                  : entry.rewardType === 'booster_pack'
+                                  ? `${entry.quantity}× ${entry.itemName}`
+                                  : entry.itemName}
+                              </span>
+                              <span className="text-slate-500 dark:text-slate-400 ml-2">
+                                by {entry.awardedBy}{entry.note ? ` · "${entry.note}"` : ''}
+                              </span>
+                            </div>
+                            <span className="text-[11px] font-mono text-slate-500 tabular-nums shrink-0">
+                              {new Date(entry.awardedAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Modal Actions Footer */}
               <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-zinc-800 flex-wrap gap-2">
@@ -4144,11 +4755,29 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
                 onClick={() => setUpdateResultsModalSummary(null)}
                 className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-200 text-white dark:text-black font-bold text-xs transition shadow-xs border border-black"
               >
-                Close & View Analytics
+                Close &amp; View Analytics
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Instructor Reward Modal (Single Student or Batch) */}
+      {rewardModalConfig.isOpen && (
+        <StudentRewardModal
+          isOpen={rewardModalConfig.isOpen}
+          onClose={() => setRewardModalConfig(prev => ({ ...prev, isOpen: false }))}
+          targets={rewardModalConfig.targets}
+          instructor={currentUser}
+          studentProfiles={studentGameProfiles}
+          initialRewardType={rewardModalConfig.initialRewardType}
+          initialItemId={rewardModalConfig.initialItemId}
+          onRewardSuccess={(message, updatedProfiles) => {
+            setStudentGameProfiles(prev => ({ ...prev, ...updatedProfiles }));
+            setActionNotice(message);
+            setTimeout(() => setActionNotice(null), 5000);
+          }}
+        />
       )}
     </div>
   );

@@ -182,7 +182,7 @@ export const CURATED_PHY_QUESTIONS: Record<string, QuizQuestion[]> = {
       topicCode: 'P1',
       syllabusRef: 'P1.6.3',
       question: 'Which pair of energy resources are BOTH renewable?',
-      options: ['Geothermal and hydroelectric power', 'Coal and nuclear fission', 'Natural gas and solar cells', 'Crude oil and wind turbines'],
+      options: ['Geothermal and hydroelectric power', 'Coal and crude oil', 'Natural gas and solar cells', 'Coal and wind turbines'],
       correctIndex: 0,
       explanation: 'Renewable resources (solar, wind, hydro, tidal, geothermal, biofuels) replenish naturally; fossil fuels and nuclear fuel are finite.'
     },
@@ -196,7 +196,7 @@ export const CURATED_PHY_QUESTIONS: Record<string, QuizQuestion[]> = {
         'Low running cost and zero direct greenhouse gas emissions, but building dams floods habitats and displaces communities',
         'They rely completely on burning fossil fuels inside turbines',
         'They cannot respond quickly to peak electricity demand',
-        'They produce high-level radioactive waste every day'
+        'They release large amounts of sulfur dioxide and carbon dioxide every day'
       ],
       correctIndex: 0,
       explanation: 'Hydroelectric power is reliable and renewable with quick start-up, though reservoir flooding causes environmental/social impacts.'
@@ -207,7 +207,7 @@ export const CURATED_PHY_QUESTIONS: Record<string, QuizQuestion[]> = {
       topicCode: 'P1',
       syllabusRef: 'P1.6.3',
       question: 'Apart from geothermal, nuclear, and tidal energy, what is the original ultimate source of almost all Earth’s energy resources (wind, hydro, fossil fuels)?',
-      options: ['Radiation from the Sun', 'Earth’s molten iron core', 'Gravitational pull of the Moon', 'Radioactive decay in rocks'],
+      options: ['Radiation from the Sun', 'Earth’s molten iron core', 'Gravitational pull of the Moon', 'Chemical combustion of coal and natural gas'],
       correctIndex: 0,
       explanation: 'Solar heating drives winds and the water cycle (hydro), and ancient photosynthesis formed fossil fuels.'
     }
@@ -783,15 +783,15 @@ export const CURATED_PHY_QUESTIONS: Record<string, QuizQuestion[]> = {
       subject: 'physics',
       topicCode: 'P3',
       syllabusRef: 'P3.2.2',
-      question: 'What are the two conditions needed for total internal reflection (TIR) to happen in an optical fibre?',
+      question: 'What happens to a ray of light when it passes from inside a glass block out into air at an angle of 30° to the normal?',
       options: [
-        'Light must be travelling from an optically denser medium (glass) towards a less dense medium (air/cladding) AND the angle of incidence must exceed the critical angle',
-        'Light must travel from air into glass at an angle less than the critical angle',
-        'The glass core must be coated with matte black paint',
-        'Light must hit the boundary along the normal (angle = 0°)'
+        'It speeds up and bends AWAY from the normal (angle of refraction > 30°)',
+        'It slows down and bends TOWARDS the normal (angle of refraction < 30°)',
+        'It keeps the exact same speed and passes straight through without bending',
+        'It stops completely at the glass-air boundary'
       ],
       correctIndex: 0,
-      explanation: 'TIR requires denser → less dense boundary AND angle of incidence > critical angle (i > c).'
+      explanation: 'Air is optically less dense than glass, so light speeds up on exiting the glass and refracts away from the normal.'
     },
     {
       id: 'cp-p322-3',
@@ -802,7 +802,7 @@ export const CURATED_PHY_QUESTIONS: Record<string, QuizQuestion[]> = {
       options: [
         'It slows down upon entering glass but does not change direction',
         'It speeds up and bends by 45°',
-        'It undergoes total internal reflection back into air',
+        'It refracts away from the normal by 45°',
         'It splits into a red and violet spectrum immediately'
       ],
       correctIndex: 0,
@@ -868,7 +868,7 @@ export const CURATED_PHY_QUESTIONS: Record<string, QuizQuestion[]> = {
       options: [
         'Violet light slows down more than red light in glass, so it changes direction more sharply',
         'Red light has a higher frequency than violet light',
-        'Violet light undergoes total internal reflection twice inside the prism',
+        'Violet light has a longer wavelength than red light in vacuum',
         'Red light travels faster in vacuum than violet light'
       ],
       correctIndex: 0,
@@ -1292,45 +1292,45 @@ export const CURATED_PHY_QUESTIONS: Record<string, QuizQuestion[]> = {
       subject: 'physics',
       topicCode: 'P4',
       syllabusRef: 'P4.4',
-      question: 'What is the motor effect, and which rule predicts the force direction on a current-carrying wire in a magnetic field?',
+      question: 'What useful energy conversion takes place inside a simple electric motor?',
       options: [
-        'A current-carrying conductor in a magnetic field experiences a force perpendicular to both current and field; predicted by Fleming’s left-hand rule',
-        'Static charges attract uncharged plastics; predicted by Boyle’s law',
-        'Moving a magnet inside a coil melts the copper; predicted by Snell’s law',
-        'Voltage induces resistance along the wire; predicted by Ohm’s law'
+        'Electrical energy is converted into kinetic (rotational mechanical) energy',
+        'Kinetic energy is converted into chemical energy inside the battery',
+        'Gravitational potential energy is converted directly into thermal energy',
+        'Light energy is converted into electrical energy'
       ],
       correctIndex: 0,
-      explanation: 'Fleming’s Left-Hand Rule links ThuMb (Motion/Force), First finger (Magnetic Field N→S), and seCond finger (Conventional Current +→−).'
+      explanation: 'An electric motor uses current flowing through a coil in a magnetic field to produce rotation, transferring electrical energy into kinetic energy.'
     },
     {
       id: 'cp-p44-2',
       subject: 'physics',
       topicCode: 'P4',
       syllabusRef: 'P4.4',
-      question: 'Which three changes increase the strength of the magnetic field inside a solenoid electromagnet?',
+      question: 'How does an electric generator differ from an electric motor in terms of its main energy transfer?',
       options: [
-        'Increasing the current, increasing the number of turns on the coil, and inserting a soft iron core',
-        'Using an alternating wooden core and reducing the current',
-        'Cooling the iron core in oil and spacing the turns widely apart',
-        'Replacing copper wire with plastic tubing'
+        'A generator transfers kinetic (mechanical) energy into electrical energy',
+        'A generator transfers electrical energy into kinetic energy',
+        'A generator transfers chemical energy directly into nuclear energy',
+        'A generator only stores static charge without moving parts'
       ],
       correctIndex: 0,
-      explanation: 'More coil turns, larger d.c. current, and a soft iron core maximize magnetic field strength.'
+      explanation: 'In a generator, rotating a coil inside a magnetic field converts kinetic (mechanical) energy into electrical energy.'
     },
     {
       id: 'cp-p44-3',
       subject: 'physics',
       topicCode: 'P4',
       syllabusRef: 'P4.4',
-      question: 'Why is soft iron used for the core of an electromagnet rather than hard steel?',
+      question: 'A wind turbine spins a coil inside a magnetic field to supply power to a town. What sequence of useful energy transfers occurs from the moving air to the electrical supply?',
       options: [
-        'Soft iron magnetises strongly when current is switched on and loses its magnetism immediately when switched off',
-        'Soft iron stays permanently magnetised forever once switched off',
-        'Soft iron melts easily at room temperature',
-        'Steel does not conduct electricity inside a transformer'
+        'Kinetic energy of wind → kinetic energy of spinning turbine/coil → electrical energy from generator',
+        'Electrical energy → thermal energy → kinetic energy of wind',
+        'Chemical energy of wind → gravitational potential energy → light energy',
+        'Elastic energy → nuclear energy → electrical energy'
       ],
       correctIndex: 0,
-      explanation: 'Soft iron is a temporary magnetic material ideal for electromagnets and relays that need rapid on/off control.'
+      explanation: 'Moving air has kinetic energy, which turns the turbine blades and spins the generator coil to transfer kinetic energy into electrical energy.'
     }
   ],
 
@@ -1391,7 +1391,7 @@ export const CURATED_PHY_QUESTIONS: Record<string, QuizQuestion[]> = {
       question: 'Which nuclear process inside the Sun’s core releases vast amounts of energy during its stable main-sequence phase?',
       options: [
         'Nuclear fusion of hydrogen nuclei into helium nuclei',
-        'Nuclear fission of uranium atoms into lead',
+        'Gravitational friction between orbiting asteroids',
         'Combustion of hydrogen gas with atmospheric oxygen',
         'Chemical electrolysis of liquid helium'
       ],
@@ -1440,7 +1440,7 @@ export const CURATED_PHY_QUESTIONS: Record<string, QuizQuestion[]> = {
       options: [
         'Inward gravitational pull balances outward thermal/radiation pressure from core nuclear fusion',
         'Magnetism from planets balances solar wind friction',
-        'Centrifugal force balances nuclear fission decay',
+        'Centrifugal force balances electrostatic attraction between comets',
         'Dark energy pushes hydrogen atoms into helium'
       ],
       correctIndex: 0,

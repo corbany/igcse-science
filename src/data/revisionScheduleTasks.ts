@@ -323,19 +323,19 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
     subject: 'biology',
     slideRecap: {
       slideRange: 'Slides 1–3',
-      deckTitle: 'Aerobic vs Anaerobic Respiration & ATP in Mitochondria',
-      keyConcepts: 'Word and balanced symbol equation C₆H₁₂O₆ + 6O₂ ➔ 6CO₂ + 6H₂O; 5 uses of energy in living organisms; anaerobic respiration in muscles (lactic acid) vs yeast (alcohol + CO₂).'
+      deckTitle: 'Aerobic Respiration & Uses of Energy in Living Organisms',
+      keyConcepts: 'Word and balanced symbol equation C₆H₁₂O₆ + 6O₂ ➔ 6CO₂ + 6H₂O; uses of energy in living organisms (muscle contraction, protein synthesis, cell division, active transport, growth, body temperature maintenance); temperature/soda lime respirometer experiments.'
     },
     creativeTasks: [
       {
-        task: 'Feynman Technique: Explain to someone why respiration is NOT breathing in 60 seconds; state where in the cell it occurs and list 4 distinct ways your body uses the released energy.',
+        task: 'Feynman Technique: Explain to someone why respiration is NOT breathing in 60 seconds; state where in the cell it occurs and list 5 distinct ways your body uses the released energy.',
         type: 'feynman'
       },
       {
-        task: 'Syllabus Notebook Active Recall: "Why is less energy released per glucose molecule in anaerobic respiration compared to aerobic respiration? Give the 2-mark Cambridge answer."',
+        task: 'Syllabus Notebook Active Recall: "Explain why germinating peas in a vacuum flask cause a thermometer temperature reading to rise while soda lime absorbs carbon dioxide."',
         type: 'website_tool',
         toolTarget: 'notebook',
-        aiPrompt: 'Why is less energy released per glucose molecule in anaerobic respiration compared to aerobic respiration? Give the 2-mark Cambridge answer.'
+        aiPrompt: 'Explain why germinating peas in a vacuum flask cause a thermometer temperature reading to rise while soda lime absorbs carbon dioxide according to Cambridge 0653.'
       },
       {
         task: 'Launch Quiz Arena on B12: Aim for 100% on the respiration equation and energy pathways.',
@@ -431,11 +431,11 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
     slideRecap: {
       slideRange: 'Slides 1–3',
       deckTitle: 'Carbon Cycle & Human Environmental Impact',
-      keyConcepts: 'Carbon cycle processes (photosynthesis, respiration, combustion, decomposition); impacts of deforestation; fertilizer runoff leading to eutrophication.'
+      keyConcepts: 'Carbon cycle processes (photosynthesis, respiration, combustion, decomposition); impacts of deforestation on habitats, soil erosion, and atmospheric CO₂; conservation of species.'
     },
     creativeTasks: [
       {
-        task: 'Eutrophication Flowchart: Write out the 5 sequential steps of eutrophication on an index card: fertilizer runoff ➔ algal bloom ➔ blocked light/submerged plant death ➔ bacterial decomposer boom & oxygen depletion ➔ death of aquatic life.',
+        task: 'Deforestation Impact Flowchart: Map out the 4 major ecological consequences of clearing tropical forests: habitat destruction & biodiversity loss ➔ soil erosion by wind and rain ➔ flooding ➔ increased atmospheric CO₂.',
         type: 'sketch'
       },
       {
@@ -487,8 +487,8 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
     subject: 'chemistry',
     slideRecap: {
       slideRange: 'Slides 2–5',
-      deckTitle: 'Atomic Structure, Isotopes & Dot-and-Cross Bonding',
-      keyConcepts: 'Protons, neutrons, electrons; dot-and-cross diagrams for ionic bonding (NaCl, MgO) and covalent molecules (H₂O, CH₄, CO₂); properties of giant ionic lattices vs simple molecular substances.'
+      deckTitle: 'Atomic Structure, Electron Shells & Dot-and-Cross Bonding',
+      keyConcepts: 'Protons, neutrons, electrons (relative charges and masses); dot-and-cross diagrams for ionic bonding (NaCl, MgO) and covalent molecules (H₂O, CH₄, CO₂); properties of giant ionic lattices vs simple molecular substances.'
     },
     creativeTasks: [
       {
@@ -839,8 +839,8 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
     subject: 'physics',
     slideRecap: {
       slideRange: 'Slides 1–3',
-      deckTitle: 'Wave Speed Equation v = fλ, Snell\'s Law & EM Spectrum',
-      keyConcepts: 'Transverse vs longitudinal waves; wave equation v = f × λ; reflection and refraction index n = sin i / sin r; total internal reflection critical angle sin c = 1/n; ordering the electromagnetic spectrum from radio to gamma rays.'
+      deckTitle: 'Wave Speed Equation v = fλ, Reflection, Refraction & EM Spectrum',
+      keyConcepts: 'Transverse vs longitudinal waves; wave equation v = f × λ; reflection (i = r) and qualitative refraction (bending towards normal when slowing down); converging lenses; ordering the electromagnetic spectrum from radio to gamma rays.'
     },
     creativeTasks: [
       {
@@ -852,10 +852,10 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
         type: 'sketch'
       },
       {
-        task: 'Syllabus Notebook Active Recall: "Provide 2 multi-step Cambridge Paper 4 refraction calculation problems using Snell\'s law n = sin i / sin r, and grade my angle calculations."',
+        task: 'Syllabus Notebook Active Recall: "Explain why a light ray bends towards the normal when entering a glass block from air and away from the normal when exiting back into air, referencing wave speed."',
         type: 'website_tool',
         toolTarget: 'notebook',
-        aiPrompt: 'Provide 2 multi-step Cambridge Paper 4 refraction calculation problems using Snell\'s law n = sin i / sin r, and grade my angle calculations.'
+        aiPrompt: 'Explain why a light ray bends towards the normal when entering a glass block from air and away from the normal when exiting back into air, referencing wave speed.'
       }
     ]
   },
@@ -888,7 +888,7 @@ export const TOPIC_REVISION_CONFIGS: Record<string, TopicRevisionTaskConfig> = {
   },
   'P5': {
     code: 'P5',
-    title: 'Nuclear & Space Physics',
+    title: 'Space Physics',
     subject: 'physics',
     slideRecap: {
       slideRange: 'Slides 1–3',

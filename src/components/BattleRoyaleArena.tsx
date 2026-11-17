@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   Shield, 
   Heart, 
@@ -62,13 +62,104 @@ import {
   CHARACTER_ACTION_SHEETS,
   ActionSheets
 } from '../data/fantasySkinsData';
+import { resolveArenaWeaponId, hasWeaponInInventory } from '../data/gameCatalogData';
 import { MapDesignEditor } from './MapDesignEditor';
+import {
+  BattleRealtimeClient,
+  BattleTickTuple,
+  BattleShotEvent,
+  BattleDamageEvent
+} from '../services/battleRealtimeClient';
+import { getRandomizedPracticeVaultQuestions } from '../data/syllabusQuestionsBank';
 
 // ============================================================================
 // CONSTANTS & MAP METRICS
 // ============================================================================
 
 export const MAP_SIZE = 5120; // 5120px x 5120px massive open arena
+const TERRAIN_CHUNK_SIZE = 512; // 16x16 tiles cached per offscreen canvas chunk
+const SPATIAL_CELL_SIZE = 256; // 20x20 spatial grid for O(1) collision & culling
+const SPATIAL_GRID_DIM = Math.ceil(MAP_SIZE / SPATIAL_CELL_SIZE);
+
+const WEAPON_ITEM_MAP = new Map<string, ShopItem>(
+  SHOP_ITEMS.filter(i => i.category === 'weapon').map(w => [w.id, w])
+);
+
+const drawOutlinedText = (
+  c: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  fillStyle: string
+) => {
+  c.fillStyle = 'rgba(2, 6, 23, 0.88)';
+  c.fillText(text, x + 1, y + 1);
+  c.fillStyle = fillStyle;
+  c.fillText(text, x, y);
+};
+
+interface SpatialWorldIndex {
+  scenery: SceneryProp[][];
+  buildings: GeneratedBuilding[][];
+  cityWalls: CityWallSegment[][];
+  loot: GroundLootItem[][];
+}
+
+function buildSpatialWorldIndex(world: GeneratedWorldData | null): SpatialWorldIndex | null {
+  if (!world) return null;
+  const totalCells = SPATIAL_GRID_DIM * SPATIAL_GRID_DIM;
+  const scenery: SceneryProp[][] = Array.from({ length: totalCells }, () => []);
+  const buildings: GeneratedBuilding[][] = Array.from({ length: totalCells }, () => []);
+  const cityWalls: CityWallSegment[][] = Array.from({ length: totalCells }, () => []);
+  const loot: GroundLootItem[][] = Array.from({ length: totalCells }, () => []);
+
+  const clampCell = (v: number) => Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor(v / SPATIAL_CELL_SIZE)));
+
+  for (const sc of world.scenery || []) {
+    const cx = clampCell(sc.x);
+    const cy = clampCell(sc.y);
+    scenery[cy * SPATIAL_GRID_DIM + cx].push(sc);
+  }
+  for (const l of world.groundLoot || []) {
+    const cx = clampCell(l.x);
+    const cy = clampCell(l.y);
+    loot[cy * SPATIAL_GRID_DIM + cx].push(l);
+  }
+  for (const bldg of world.buildings || []) {
+    let minX = bldg.worldX;
+    let minY = bldg.worldY;
+    let maxX = bldg.worldX + bldg.worldW;
+    let maxY = bldg.worldY + bldg.worldH;
+    for (const hb of getBuildingHitboxes(bldg)) {
+      if (hb.x < minX) minX = hb.x;
+      if (hb.y < minY) minY = hb.y;
+      if (hb.x + hb.w > maxX) maxX = hb.x + hb.w;
+      if (hb.y + hb.h > maxY) maxY = hb.y + hb.h;
+    }
+    const c0 = clampCell(minX - 24);
+    const c1 = clampCell(maxX + 24);
+    const r0 = clampCell(minY - 24);
+    const r1 = clampCell(maxY + 24);
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        buildings[r * SPATIAL_GRID_DIM + c].push(bldg);
+      }
+    }
+  }
+  for (const wall of world.cityWalls || []) {
+    const c0 = clampCell(wall.x - 24);
+    const c1 = clampCell(wall.x + wall.w + 24);
+    const r0 = clampCell(wall.y - 24);
+    const r1 = clampCell(wall.y + wall.h + 24);
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        cityWalls[r * SPATIAL_GRID_DIM + c].push(wall);
+      }
+    }
+  }
+
+  return { scenery, buildings, cityWalls, loot };
+}
 
 // 1. Exact Kenney 16x16 Roguelike Sheet Slicing Math (16px tile + 1px border spacing)
 export const TILE_SIZE = 16;  // Kenney 16x16 sheet source tile
@@ -196,16 +287,25 @@ interface Projectile {
   id: string;
   x: number;
   y: number;
+  startX?: number;
+  startY?: number;
   vx: number;
   vy: number;
   rangeRemaining: number;
+  maxRange?: number;
   damage: number;
   ownerId: string;
   weaponId: string;
   color: string;
+  isAlt?: boolean;
+  altType?: string;
+  age?: number;
+  trail?: Array<{ x: number; y: number }>;
   isHighGround?: boolean;
   isDragonBlood?: boolean;
   isWindWalker?: boolean;
+  piercesEnemies?: boolean;
+  hitEnemyUids?: Set<string>;
 }
 
 interface ParticleFX {
@@ -220,6 +320,108 @@ interface ParticleFX {
   alpha: number;
   type: 'spark' | 'smoke' | 'flame' | 'electric' | 'wood_chip' | 'stone_chip' | 'dust' | 'banana_peel';
 }
+
+type WeaponVFX =
+  | {
+      id: string;
+      kind: 'shockwave';
+      x: number;
+      y: number;
+      maxRadius: number;
+      color: string;
+      secondaryColor?: string;
+      ringCount?: number;
+      lineWidth?: number;
+      startedAt: number;
+      durationMs: number;
+    }
+  | {
+      id: string;
+      kind: 'muzzle';
+      x: number;
+      y: number;
+      angle: number;
+      weaponId: string;
+      color: string;
+      isAlt?: boolean;
+      startedAt: number;
+      durationMs: number;
+    }
+  | {
+      id: string;
+      kind: 'beam';
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      color: string;
+      coreColor?: string;
+      width: number;
+      startedAt: number;
+      durationMs: number;
+    }
+  | {
+      id: string;
+      kind: 'lightning_nova';
+      x: number;
+      y: number;
+      maxRadius: number;
+      targets?: Array<{ x: number; y: number }>;
+      color: string;
+      seed: number;
+      startedAt: number;
+      durationMs: number;
+    }
+  | {
+      id: string;
+      kind: 'warp_tether';
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      startedAt: number;
+      durationMs: number;
+    }
+  | {
+      id: string;
+      kind: 'orbital_lock';
+      x: number;
+      y: number;
+      radius: number;
+      startedAt: number;
+      durationMs: number;
+    }
+  | {
+      id: string;
+      kind: 'orbital_beam';
+      x: number;
+      y: number;
+      radius: number;
+      startedAt: number;
+      durationMs: number;
+    }
+  | {
+      id: string;
+      kind: 'vortex';
+      x: number;
+      y: number;
+      radius: number;
+      startedAt: number;
+      durationMs: number;
+    }
+  | {
+      id: string;
+      kind: 'hazard_pool';
+      x: number;
+      y: number;
+      radius: number;
+      zoneKind: 'acid' | 'mutagen';
+      ownerId: string;
+      damagePerTick: number;
+      lastTickAt: number;
+      startedAt: number;
+      durationMs: number;
+    };
 
 interface FloatingText {
   id: string;
@@ -611,6 +813,23 @@ class ArenaSoundEngine {
   private currentStep: number = 0;
   public currentTrackIndex: number = 0;
   private noiseBuffer: AudioBuffer | null = null;
+  private activeSfxVoices: number = 0;
+  private readonly maxSfxVoices: number = 12;
+  private lastSfxByCat: Record<string, number> = {};
+
+  private claimSfxSlot(category: string, minGapMs: number): boolean {
+    if (!this.sfxEnabled) return false;
+    const now = performance.now();
+    const last = this.lastSfxByCat[category] || 0;
+    if (now - last < minGapMs) return false;
+    if (this.activeSfxVoices >= this.maxSfxVoices) return false;
+    this.lastSfxByCat[category] = now;
+    this.activeSfxVoices++;
+    setTimeout(() => {
+      if (this.activeSfxVoices > 0) this.activeSfxVoices--;
+    }, 180);
+    return true;
+  }
 
   public initCtx() {
     if (!this.ctx && typeof window !== 'undefined') {
@@ -713,6 +932,7 @@ class ArenaSoundEngine {
     surface: string = 'grass',
     volumeScale: number = 1
   ) {
+    if (!this.claimSfxSlot('step', 85)) return;
     const bus = this.getSpatialBus(sourceX, sourceY, listenerX, listenerY, Math.round(600 * Math.max(0.25, volumeScale)));
     if (!bus || !this.ctx) return;
 
@@ -769,6 +989,7 @@ class ArenaSoundEngine {
     listenerX?: number,
     listenerY?: number
   ) {
+    if (!this.claimSfxSlot('shoot', 42)) return;
     const bus = this.getSpatialBus(sourceX, sourceY, listenerX, listenerY, 2000);
     if (!bus || !this.ctx) return;
 
@@ -838,6 +1059,7 @@ class ArenaSoundEngine {
     listenerX?: number,
     listenerY?: number
   ) {
+    if (!this.claimSfxSlot('build', 55)) return;
     const bus = this.getSpatialBus(sourceX, sourceY, listenerX, listenerY, 1500);
     if (!bus || !this.ctx) return;
 
@@ -880,6 +1102,7 @@ class ArenaSoundEngine {
   }
 
   playSpatialHit(sourceX?: number, sourceY?: number, listenerX?: number, listenerY?: number) {
+    if (!this.claimSfxSlot('hit', 50)) return;
     const bus = this.getSpatialBus(sourceX, sourceY, listenerX, listenerY, 1400);
     if (!bus || !this.ctx) return;
 
@@ -2077,6 +2300,24 @@ export function drawDirtPatch(
   }
 }
 
+export interface CityWallSegment {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  orientation: 'h' | 'v';
+}
+
+export interface CityGateMarker {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  side: 'north' | 'south' | 'west' | 'east';
+}
+
 export interface MapLayoutMeta {
   seed: number;
   forestSide: 'west' | 'east' | 'north' | 'south';
@@ -2084,6 +2325,8 @@ export interface MapLayoutMeta {
   lakes: Array<{ x: number; y: number; w: number; h: number }>;
   roads: Array<{ x1: number; y1: number; x2: number; y2: number; width: number }>;
   villages: Array<{ x: number; y: number; w: number; h: number; name: string }>;
+  cityWalls?: CityWallSegment[];
+  cityGates?: CityGateMarker[];
   hub: { x: number; y: number };
 }
 
@@ -2092,6 +2335,8 @@ export interface GeneratedWorldData {
   scenery: SceneryProp[];
   groundLoot: GroundLootItem[];
   buildings: GeneratedBuilding[];
+  cityWalls?: CityWallSegment[];
+  cityGates?: CityGateMarker[];
   mapMeta?: MapLayoutMeta;
 }
 
@@ -2223,6 +2468,7 @@ function generateSuperAnimalStyleMap(seed: number = Date.now()): GeneratedWorldD
   }
 
   let cityRect = cityCandidateRegions[0];
+  let foundIdealCity = false;
   for (const cand of cityCandidateRegions) {
     let c = cand.c;
     let r = cand.r;
@@ -2231,12 +2477,24 @@ function generateSuperAnimalStyleMap(seed: number = Date.now()): GeneratedWorldD
     if (forestSide === 'north' && r < 26) r = 26;
     if (forestSide === 'south' && r + safeCityH > 134) r = 134 - safeCityH;
 
-    // Ensure central spawn (78,78) is outside or safely buffered from city blocks
+    // Ensure central spawn (78,78) AND arterial highways stay outside the walled city perimeter
     const centerInCity = 78 >= c - 4 && 78 <= c + safeCityW + 4 && 78 >= r - 4 && 78 <= r + safeCityH + 4;
-    if (!centerInCity) {
+    const nsTouchesCity = nsRoadCol + 3 >= c - 2 && nsRoadCol <= c + safeCityW + 2;
+    const ewTouchesCity = ewRoadRow + 3 >= r - 2 && ewRoadRow <= r + safeCityH + 2;
+    if (!centerInCity && !nsTouchesCity && !ewTouchesCity) {
       cityRect = { c, r };
+      foundIdealCity = true;
       break;
     }
+  }
+  if (!foundIdealCity) {
+    let fallbackC = nsRoadCol >= 78 ? 26 : 86;
+    let fallbackR = ewRoadRow >= 78 ? 26 : 86;
+    if (forestSide === 'west' && fallbackC < 26) fallbackC = 26;
+    if (forestSide === 'east' && fallbackC + safeCityW > 134) fallbackC = 134 - safeCityW;
+    if (forestSide === 'north' && fallbackR < 26) fallbackR = 26;
+    if (forestSide === 'south' && fallbackR + safeCityH > 134) fallbackR = 134 - safeCityH;
+    cityRect = { c: fallbackC, r: fallbackR };
   }
   // Final clamp away from forest border
   if (forestSide === 'west' && cityRect.c < 26) cityRect.c = 26;
@@ -2340,13 +2598,31 @@ function generateSuperAnimalStyleMap(seed: number = Date.now()): GeneratedWorldD
     return false;
   };
 
+  const cityWalls: CityWallSegment[] = [];
+  const cityGates: CityGateMarker[] = [];
+
+  const overlapsCityWallOrGate = (px: number, py: number, pad = 22) => {
+    for (const w of cityWalls) {
+      if (px >= w.x - pad && px <= w.x + w.w + pad && py >= w.y - pad && py <= w.y + w.h + pad) {
+        return true;
+      }
+    }
+    for (const g of cityGates) {
+      if (px >= g.x - pad && px <= g.x + g.w + pad && py >= g.y - pad && py <= g.y + g.h + pad) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   const commitBuildingSafely = (b: GeneratedBuilding) => {
-    // Filter perimeter props so trees/crates/bins never sit in water, roads, or neighboring buildings
+    // Filter perimeter props so trees/crates/bins never sit in water, roads, city walls/gates, or neighboring buildings
     const cleanProps = b.perimeterProps.filter(p => {
       const pc = Math.floor(p.x / WORLD_TILE_SIZE);
       const pr = Math.floor(p.y / WORLD_TILE_SIZE);
       const pt = tiles[pr]?.[pc];
       if (!pt || pt.isWater || pt.isRoad) return false;
+      if (overlapsCityWallOrGate(p.x, p.y, 18)) return false;
       const touchesOther = buildings.some(
         ob =>
           p.x >= ob.worldX - 18 &&
@@ -2408,6 +2684,123 @@ function generateSuperAnimalStyleMap(seed: number = Date.now()): GeneratedWorldD
     addRoad(mainCityVC, ewRoadRow, cr0 - ewRoadRow + 2, 'vertical', 2);
   } else if (cr0 + safeCityH < ewRoadRow) {
     addRoad(mainCityVC, cr0 + safeCityH - 1, ewRoadRow - (cr0 + safeCityH) + 3, 'vertical', 2);
+  }
+
+  // =========================================================================
+  // FORTIFIED CITY PERIMETER WALLS WITH TWO ROAD-ALIGNED GATE ENTRANCES
+  // =========================================================================
+  const wallLeftCol = cc0 - 1;
+  const wallRightCol = cc0 + safeCityW;
+  const wallTopRow = cr0 - 1;
+  const wallBotRow = cr0 + safeCityH;
+
+  // Pick 1 horizontal gate (West or East wall facing nsRoadCol) and 1 vertical gate (North or South wall facing ewRoadRow)
+  const hGateSide: 'west' | 'east' = nsRoadCol <= cc0 + Math.floor(safeCityW / 2) ? 'west' : 'east';
+  const vGateSide: 'north' | 'south' = ewRoadRow <= cr0 + Math.floor(safeCityH / 2) ? 'north' : 'south';
+
+  const hGateRows = 4; // 4 tiles = 128px wide gate opening
+  const hGateRowStart = Math.max(cr0 + 2, Math.min(cr0 + safeCityH - hGateRows - 2, mainCityHR - 1));
+  const vGateCols = 4; // 4 tiles = 128px wide gate opening
+  const vGateColStart = Math.max(cc0 + 2, Math.min(cc0 + safeCityW - vGateCols - 2, mainCityVC - 1));
+
+  // Ensure smooth dirt road approach right through both gatehouse entrances
+  if (hGateSide === 'west') {
+    drawDirtRoad(tiles, wallLeftCol - 2, mainCityHR, 4, 'horizontal', 2);
+    cityGates.push({
+      id: 'city_gate_west',
+      x: wallLeftCol * WORLD_TILE_SIZE,
+      y: hGateRowStart * WORLD_TILE_SIZE,
+      w: WORLD_TILE_SIZE,
+      h: hGateRows * WORLD_TILE_SIZE,
+      side: 'west'
+    });
+  } else {
+    drawDirtRoad(tiles, wallRightCol - 1, mainCityHR, 4, 'horizontal', 2);
+    cityGates.push({
+      id: 'city_gate_east',
+      x: wallRightCol * WORLD_TILE_SIZE,
+      y: hGateRowStart * WORLD_TILE_SIZE,
+      w: WORLD_TILE_SIZE,
+      h: hGateRows * WORLD_TILE_SIZE,
+      side: 'east'
+    });
+  }
+
+  if (vGateSide === 'north') {
+    drawDirtRoad(tiles, mainCityVC, wallTopRow - 2, 4, 'vertical', 2);
+    cityGates.push({
+      id: 'city_gate_north',
+      x: vGateColStart * WORLD_TILE_SIZE,
+      y: wallTopRow * WORLD_TILE_SIZE,
+      w: vGateCols * WORLD_TILE_SIZE,
+      h: WORLD_TILE_SIZE,
+      side: 'north'
+    });
+  } else {
+    drawDirtRoad(tiles, mainCityVC, wallBotRow - 1, 4, 'vertical', 2);
+    cityGates.push({
+      id: 'city_gate_south',
+      x: vGateColStart * WORLD_TILE_SIZE,
+      y: wallBotRow * WORLD_TILE_SIZE,
+      w: vGateCols * WORLD_TILE_SIZE,
+      h: WORLD_TILE_SIZE,
+      side: 'south'
+    });
+  }
+
+  const pushHorizWall = (id: string, cStart: number, cEnd: number, row: number) => {
+    if (cEnd < cStart) return;
+    cityWalls.push({
+      id,
+      x: cStart * WORLD_TILE_SIZE,
+      y: row * WORLD_TILE_SIZE,
+      w: (cEnd - cStart + 1) * WORLD_TILE_SIZE,
+      h: WORLD_TILE_SIZE,
+      orientation: 'h'
+    });
+  };
+  const pushVertWall = (id: string, col: number, rStart: number, rEnd: number) => {
+    if (rEnd < rStart) return;
+    cityWalls.push({
+      id,
+      x: col * WORLD_TILE_SIZE,
+      y: rStart * WORLD_TILE_SIZE,
+      w: WORLD_TILE_SIZE,
+      h: (rEnd - rStart + 1) * WORLD_TILE_SIZE,
+      orientation: 'v'
+    });
+  };
+
+  // North Perimeter Wall
+  if (vGateSide === 'north') {
+    pushHorizWall('city_wall_north_w', wallLeftCol, vGateColStart - 1, wallTopRow);
+    pushHorizWall('city_wall_north_e', vGateColStart + vGateCols, wallRightCol, wallTopRow);
+  } else {
+    pushHorizWall('city_wall_north', wallLeftCol, wallRightCol, wallTopRow);
+  }
+
+  // South Perimeter Wall
+  if (vGateSide === 'south') {
+    pushHorizWall('city_wall_south_w', wallLeftCol, vGateColStart - 1, wallBotRow);
+    pushHorizWall('city_wall_south_e', vGateColStart + vGateCols, wallRightCol, wallBotRow);
+  } else {
+    pushHorizWall('city_wall_south', wallLeftCol, wallRightCol, wallBotRow);
+  }
+
+  // West Perimeter Wall (between North and South corner caps)
+  if (hGateSide === 'west') {
+    pushVertWall('city_wall_west_n', wallLeftCol, wallTopRow + 1, hGateRowStart - 1);
+    pushVertWall('city_wall_west_s', wallLeftCol, hGateRowStart + hGateRows, wallBotRow - 1);
+  } else {
+    pushVertWall('city_wall_west', wallLeftCol, wallTopRow + 1, wallBotRow - 1);
+  }
+
+  // East Perimeter Wall (between North and South corner caps)
+  if (hGateSide === 'east') {
+    pushVertWall('city_wall_east_n', wallRightCol, wallTopRow + 1, hGateRowStart - 1);
+    pushVertWall('city_wall_east_s', wallRightCol, hGateRowStart + hGateRows, wallBotRow - 1);
+  } else {
+    pushVertWall('city_wall_east', wallRightCol, wallTopRow + 1, wallBotRow - 1);
   }
 
   // Populate every city block between the dirt pathways with Sample1 buildings (12-16 dense buildings)
@@ -2541,6 +2934,9 @@ function generateSuperAnimalStyleMap(seed: number = Date.now()): GeneratedWorldD
       const wx = c * WORLD_TILE_SIZE + 16;
       const wy = r * WORLD_TILE_SIZE + 28;
       if (buildings.some(b => wx >= b.worldX - 36 && wx <= b.worldX + b.worldW + 36 && wy >= b.worldY - 36 && wy <= b.worldY + b.worldH + 36)) {
+        continue;
+      }
+      if (overlapsCityWallOrGate(wx, wy, 26)) {
         continue;
       }
 
@@ -2717,6 +3113,7 @@ function generateSuperAnimalStyleMap(seed: number = Date.now()): GeneratedWorldD
            ry >= b.worldY - 36 && ry <= b.worldY + b.worldH + 36
     );
     if (insideBuilding) continue;
+    if (overlapsCityWallOrGate(rx, ry, 26)) continue;
 
     // Avoid water bodies and dirt highways
     const tileCol = Math.floor(rx / WORLD_TILE_SIZE);
@@ -2813,6 +3210,7 @@ function generateSuperAnimalStyleMap(seed: number = Date.now()): GeneratedWorldD
     const tileCol = Math.floor(lx / WORLD_TILE_SIZE);
     const tileRow = Math.floor(ly / WORLD_TILE_SIZE);
     if (tiles[tileRow]?.[tileCol]?.isWater) continue;
+    if (overlapsCityWallOrGate(lx, ly, 18)) continue;
 
     const roll = l % 4;
     if (roll === 0) {
@@ -2868,6 +3266,8 @@ function generateSuperAnimalStyleMap(seed: number = Date.now()): GeneratedWorldD
     scenery,
     groundLoot,
     buildings,
+    cityWalls,
+    cityGates,
     mapMeta: {
       seed,
       forestSide,
@@ -2875,6 +3275,8 @@ function generateSuperAnimalStyleMap(seed: number = Date.now()): GeneratedWorldD
       lakes: lakesMeta,
       roads: roadsMeta,
       villages: villagesMeta,
+      cityWalls,
+      cityGates,
       hub: { x: hubWorldX, y: hubWorldY }
     }
   };
@@ -2892,20 +3294,38 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 }) => {
   const handleExit = onExit || onExitArena;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [confirmEndMatch, setConfirmEndMatch] = useState<boolean>(false);
+  const [isEndingMatch, setIsEndingMatch] = useState<boolean>(false);
+  const [endMatchError, setEndMatchError] = useState<string | null>(null);
 
   const handleInstructorEndMatch = async () => {
-    if (!window.confirm('Are you sure you want to terminate this battle match? The top active survivor will be crowned champion.')) {
-      return;
-    }
+    setConfirmEndMatch(false);
+    setIsEndingMatch(true);
+    setEndMatchError(null);
     try {
-      await endBattleRoyale();
+      const players = arenaPlayersRef.current || [];
+      const realPlayers = players.filter(p => !p.uid.startsWith('dummy_'));
+      const pool = realPlayers.length > 0 ? realPlayers : players;
+      const alive = pool.filter(p => p.isAlive && (p.hp === undefined || p.hp > 0));
+      const sorted = [...(alive.length > 0 ? alive : pool)].sort(
+        (a, b) => ((b.kills || 0) * 100 + (b.hp || 0)) - ((a.kills || 0) * 100 + (a.hp || 0))
+      );
+      const topWinner = sorted.length > 0
+        ? { uid: sorted[0].uid, name: sorted[0].name, avatar: sorted[0].avatar }
+        : undefined;
+      await endBattleRoyale(topWinner);
     } catch (e: any) {
       console.warn('Failed to end battle royale from arena HUD:', e);
+      setEndMatchError(e?.message || 'Could not end match. Please retry.');
+      setTimeout(() => setEndMatchError(null), 5000);
+    } finally {
+      setIsEndingMatch(false);
     }
   };
 
   // Asset Preloader Cache
   const imageAssets = useRef<Record<string, HTMLImageElement>>({});
+  const lastValid4x4SheetRef = useRef<Record<string, HTMLImageElement>>({});
   const [assetsPreloaded, setAssetsPreloaded] = useState<boolean>(false);
 
   // Preload Image Assets on Mount
@@ -2940,10 +3360,36 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     });
   }, []);
 
-  // Tracking animation transitions (damage, death)
+  // Tracking animation transitions (damage, death, elimination lock, remote motion smoothing)
   const localDeathTimeRef = useRef<number>(0);
+  const localEliminatedRef = useRef<boolean>(false);
   const lastDamageTimeRef = useRef<number>(0);
   const prevLocalHpRef = useRef<number>(100);
+  const hasProfileLoadedRef = useRef<boolean>(false);
+  const hasDeclaredWinnerRef = useRef<boolean>(false);
+  const lastGlobalRemoteStepAtRef = useRef<number>(0);
+  const remotePlayerMotionRef = useRef<Record<string, {
+    drawX: number;
+    drawY: number;
+    drawAngle: number;
+    lastMovedAt: number;
+    prevHp: number;
+    hurtUntil: number;
+    attackUntil: number;
+  }>>({});
+
+  // Low-Latency WebSocket + Spatial/Offscreen Render Caches (32-player 60fps readiness)
+  const wsClientRef = useRef<BattleRealtimeClient | null>(null);
+  const wsConnectedRef = useRef<boolean>(false);
+  const minimapCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const minimapStaticCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const terrainChunksRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
+  const buildingCacheRef = useRef<Map<string, { canvas: HTMLCanvasElement; minX: number; minY: number }>>(new Map());
+  const lastTerrainSheetReadyRef = useRef<boolean>(false);
+  const spatialIndexRef = useRef<SpatialWorldIndex | null>(null);
+  const cachedCanvasRectRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
+  const playerByUidRef = useRef<Map<string, ArenaPlayer>>(new Map());
+  const remoteShotCounterRef = useRef<number>(0);
 
   // Firestore Synced States
   const [arenaPlayers, setArenaPlayers] = useState<ArenaPlayer[]>([]);
@@ -2960,10 +3406,11 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const [localWood, setLocalWood] = useState<number>(30);
   const [localBrick, setLocalBrick] = useState<number>(20);
   const [localMetal, setLocalMetal] = useState<number>(15);
-  const [facingAngle, setFacingAngle] = useState<number>(0);
   const [isAlive, setIsAlive] = useState<boolean>(true);
   const [kills, setKills] = useState<number>(0);
-  const [walkCycle, setWalkCycle] = useState<number>(0);
+  const [showEliminationToast, setShowEliminationToast] = useState<boolean>(false);
+  const [spectateTargetName, setSpectateTargetName] = useState<string | null>(null);
+  const spectateCycleIndexRef = useRef<number>(0);
   const hasSpawnSynced = useRef<boolean>(false);
 
   // Fullscreen, Audio & Minimap UI state
@@ -2995,14 +3442,16 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const [lastShotTime, setLastShotTime] = useState<number>(0);
   const [altFireCooldownUntil, setAltFireCooldownUntil] = useState<number>(0);
   const [acousticShieldUntil, setAcousticShieldUntil] = useState<number>(0);
-  const [activeWeaponId, setActiveWeaponId] = useState<string>('bunsen_burner');
+  const [speedBoostUntil, setSpeedBoostUntil] = useState<number>(0);
+  const [frostSlowUntil, setFrostSlowUntil] = useState<number>(0);
+  const [activeWeaponId, setActiveWeaponId] = useState<string>('');
   const [musicTrackName, setMusicTrackName] = useState<string>('16-Bit Cyber Royale');
-  const [activeSkinId, setActiveSkinId] = useState<string>('quantum_physicist');
+  const [activeSkinId, setActiveSkinId] = useState<string>('');
   const [showInstructorSkinDrawer, setShowInstructorSkinDrawer] = useState<boolean>(false);
 
   // Supply Crate Modal & Storm-Eye Air-Drop Alerts
   const [activeCrateModal, setActiveCrateModal] = useState<SupplyCrate | null>(null);
-  const [crateQuestionTimer, setCrateQuestionTimer] = useState<number>(3);
+  const [crateQuestionTimer, setCrateQuestionTimer] = useState<number>(15);
   const [crateFeedback, setCrateFeedback] = useState<string | null>(null);
   const [crateDropBanner, setCrateDropBanner] = useState<string | null>(null);
 
@@ -3024,6 +3473,17 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       Date.now() + Math.floor(Math.random() * 1000000)
     );
   }
+  if (!spatialIndexRef.current && worldDataRef.current) {
+    spatialIndexRef.current = buildSpatialWorldIndex(worldDataRef.current);
+  }
+
+  // Rebuild O(1) spatial hash grid & invalidate cached terrain/building sprites whenever map changes
+  useEffect(() => {
+    spatialIndexRef.current = buildSpatialWorldIndex(worldDataRef.current);
+    terrainChunksRef.current.clear();
+    buildingCacheRef.current.clear();
+    minimapStaticCanvasRef.current = null;
+  }, [mapRevision]);
 
   // Instructor Test & Map Design States (corbanb@gisboyshigh.net only)
   const isOwnerTester = user?.email?.toLowerCase() === 'corbanb@gisboyshigh.net';
@@ -3034,9 +3494,11 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   // Camera State
   const cameraRef = useRef<{ x: number; y: number }>({ x: 2500 - 450, y: 2500 - 325 });
 
-  // Projectiles & Particles
+  // Projectiles, Weapon VFX & Particles
   const projectilesRef = useRef<Projectile[]>([]);
   const particlesRef = useRef<ParticleFX[]>([]);
+  const weaponVfxRef = useRef<WeaponVFX[]>([]);
+  const screenShakeRef = useRef<{ until: number; intensity: number }>({ until: 0, intensity: 0 });
   const floatingTextsRef = useRef<FloatingText[]>([]);
 
   // Input Keys & Mouse
@@ -3075,6 +3537,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const doubleDamageUntilRef = useRef<number>(0);
   const acousticShieldUntilRef = useRef<number>(0);
   const speedBoostUntilRef = useRef<number>(0);
+  const frostSlowUntilRef = useRef<number>(0);
+  const enemyFrostSlowUntilRef = useRef<Record<string, number>>({});
   const lastShotTimeRef = useRef<number>(0);
 
   // Skin Special Ability Refs (High-Frequency Loop Safe)
@@ -3092,6 +3556,10 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const royalAbsorptionCooldownUntilRef = useRef<number>(0);
   const crateIgniteCooldownRef = useRef<Record<string, number>>({});
   const lastCrateDropTriggerRef = useRef<number>(0);
+  const seenCrateQuestionIdsRef = useRef<Set<string>>(new Set());
+  const crateDismissCooldownRef = useRef<Record<string, number>>({});
+  const crateSubmittingRef = useRef<boolean>(false);
+  const lootFullNoticeAtRef = useRef<Record<string, number>>({});
 
   const flashSkinAbility = useCallback((label: string) => {
     setSkinAbilityFlash(label);
@@ -3113,6 +3581,11 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                pt.y >= b.hitbox.y - 24 && pt.y <= b.hitbox.y + b.hitbox.h + 24
         );
         if (insideBldg) continue;
+        const onCityWall = worldDataRef.current?.cityWalls?.some(
+          w => pt.x >= w.x - 24 && pt.x <= w.x + w.w + 24 &&
+               pt.y >= w.y - 24 && pt.y <= w.y + w.h + 24
+        );
+        if (onCityWall) continue;
         return pt;
       }
       return samplePointWithinStormEye(center, radius, MAP_SIZE);
@@ -3127,6 +3600,56 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     setLocalX(cx);
     setLocalY(cy);
   }, []);
+
+  // Pixel-accurate screen -> canvas -> world mouse conversion (uses cached rect to avoid per-frame layout reflow)
+  const getWorldMouseCoords = useCallback((clientX?: number, clientY?: number) => {
+    const canvas = canvasRef.current;
+    const vd = viewDimsRef.current;
+    if (!canvas) {
+      return {
+        canvasX: vd.width / 2,
+        canvasY: vd.height / 2,
+        worldX: playerPosRef.current.x + Math.cos(facingAngleRef.current) * 120,
+        worldY: playerPosRef.current.y + Math.sin(facingAngleRef.current) * 120
+      };
+    }
+    let rect = cachedCanvasRectRef.current;
+    if (!rect) {
+      const domRect = canvas.getBoundingClientRect();
+      rect = { left: domRect.left, top: domRect.top, width: domRect.width, height: domRect.height };
+      cachedCanvasRectRef.current = rect;
+    }
+    const sx = typeof clientX === 'number' ? clientX : mouseScreenPos.current.x;
+    const sy = typeof clientY === 'number' ? clientY : mouseScreenPos.current.y;
+    const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+    const canvasX = (sx - rect.left) * scaleX;
+    const canvasY = (sy - rect.top) * scaleY;
+    return {
+      canvasX,
+      canvasY,
+      worldX: Math.max(0, Math.min(MAP_SIZE, canvasX + cameraRef.current.x)),
+      worldY: Math.max(0, Math.min(MAP_SIZE, canvasY + cameraRef.current.y))
+    };
+  }, []);
+
+  const handleFollowNextAlivePlayer = useCallback(() => {
+    const alive = (arenaPlayersRef.current || []).filter(
+      p => p.uid !== user.id && p.isAlive && (p.hp === undefined || p.hp > 0)
+    );
+    if (alive.length === 0) {
+      setSpectateTargetName('No active fighters');
+      return;
+    }
+    const nextIdx = spectateCycleIndexRef.current % alive.length;
+    spectateCycleIndexRef.current = nextIdx + 1;
+    const target = alive[nextIdx];
+    const vd = viewDimsRef.current;
+    setPlayerCoords(target.x, target.y);
+    cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, target.x - vd.width / 2));
+    cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, target.y - vd.height / 2));
+    setSpectateTargetName(target.name);
+  }, [user.id, setPlayerCoords]);
 
   useEffect(() => { arenaPlayersRef.current = arenaPlayers; }, [arenaPlayers]);
   useEffect(() => { structuresRef.current = structures; }, [structures]);
@@ -3201,131 +3724,966 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     soundEngine.setMusicEnabled(!musicMuted);
   }, [musicMuted]);
 
-  // Reset player-built structures cleanly on initial mount when starting/testing
+  // Reset player-built structures cleanly on initial mount ONLY for instructor tester (avoids 32-client write storm)
   useEffect(() => {
     if (didInitResetRef.current) return;
     didInitResetRef.current = true;
-    if (!battleStateRef.current || battleStateRef.current.status !== 'IN_PROGRESS' || isOwnerTester) {
+    if (isOwnerTester && (!battleStateRef.current || battleStateRef.current.status !== 'IN_PROGRESS')) {
       structuresRef.current = [];
       setStructures([]);
       clearArenaStructures().catch(() => {});
     }
   }, [isOwnerTester]);
 
-  // 1. Subscribe to Firestore Real-Time collections
-  useEffect(() => {
-    const unsubPlayers = subscribeToArenaPlayers((players) => {
-      arenaPlayersRef.current = players;
-      setArenaPlayers(players);
-      const me = players.find(p => p.uid === user.id);
-      if (me) {
-        if (me.hp < prevLocalHpRef.current) {
-          lastDamageTimeRef.current = Date.now();
-        }
-        if (me.brittleGuardUsedAt && me.brittleGuardUsedAt + 25000 > brittleGuardCooldownUntilRef.current) {
-          brittleGuardCooldownUntilRef.current = me.brittleGuardUsedAt + 25000;
-          brittleInvulnUntilRef.current = Date.now() + 1500;
-          addFloatingText(playerPosRef.current.x, playerPosRef.current.y - 36, '💀 BRITTLE GUARD SAVED YOU!', '#f59e0b');
-          spawnParticles(playerPosRef.current.x, playerPosRef.current.y, '#e7e5e4', 'stone_chip', 18, 5);
-          flashSkinAbility('Brittle Guard Triggered!');
-        }
-        if (me.royalAbsorptionUsedAt && me.royalAbsorptionUsedAt + 10000 > royalAbsorptionCooldownUntilRef.current) {
-          royalAbsorptionCooldownUntilRef.current = me.royalAbsorptionUsedAt + 10000;
-          addFloatingText(playerPosRef.current.x, playerPosRef.current.y - 36, '👑 ROYAL ABSORPTION -> +BRICKS!', '#34d399');
-          spawnParticles(playerPosRef.current.x, playerPosRef.current.y, '#34d399', 'spark', 14, 4);
-          flashSkinAbility('Royal Absorption +Bricks!');
-        }
-        if (!me.isAlive && prevLocalHpRef.current > 0 && localDeathTimeRef.current === 0) {
-          localDeathTimeRef.current = Date.now();
-        }
-        prevLocalHpRef.current = me.hp;
-        const resolvedHp = isOwnerTester && localDeathTimeRef.current === 0 && !me.isAlive ? 100 : me.hp;
-        const resolvedAlive = isOwnerTester && localDeathTimeRef.current === 0 ? true : me.isAlive;
-        hpRef.current = resolvedHp;
-        shieldRef.current = me.shield;
-        isAliveRef.current = resolvedAlive;
-        setLocalHp(resolvedHp);
-        setLocalShield(me.shield);
-        setIsAlive(resolvedAlive);
-        setKills(me.kills || 0);
-        if (me.wood !== undefined) {
-          woodRef.current = me.wood;
-          setLocalWood(me.wood);
-        }
-        if (me.brick !== undefined) {
-          brickRef.current = me.brick;
-          setLocalBrick(me.brick);
-        }
-        if (me.metal !== undefined) {
-          metalRef.current = me.metal;
-          setLocalMetal(me.metal);
-        }
+  // Unified Low-Latency WS + Firestore Fallback Action Emitters
+  const emitDamagePlayer = useCallback(async (
+    targetUid: string,
+    damage: number,
+    attackerUid?: string,
+    isStorm: boolean = false,
+    chillMs: number = 0
+  ): Promise<{
+    newHp?: number;
+    newShield?: number;
+    killed: boolean;
+    brittleGuardTriggered?: boolean;
+    bricksGained?: number;
+  }> => {
+    if (wsConnectedRef.current && wsClientRef.current) {
+      wsClientRef.current.sendHit(targetUid, damage, attackerUid, isStorm, chillMs);
+      const target = playerByUidRef.current.get(targetUid);
+      if (target) {
+        const predictedHp = Math.max(0, (target.hp ?? 100) - damage);
+        return {
+          newHp: predictedHp,
+          newShield: target.shield ?? 0,
+          killed: predictedHp <= 0
+        };
+      }
+      return { newHp: 100, newShield: 0, killed: false };
+    }
+    return damageArenaPlayer(targetUid, damage, attackerUid, isStorm, chillMs);
+  }, []);
 
-        // Spawn position sync
-        if (!hasSpawnSynced.current && me.x !== undefined && me.y !== undefined) {
-          setPlayerCoords(me.x, me.y);
-          const vd = viewDimsRef.current;
-          cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, me.x - vd.width / 2));
-          cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, me.y - vd.height / 2));
-          hasSpawnSynced.current = true;
+  const emitStructureBuild = useCallback(async (
+    structure: ArenaStructure,
+    cost: { wood?: number; brick?: number; metal?: number },
+    metalShieldUntilVal?: number
+  ) => {
+    // Optimistically insert structure locally for 0ms build responsiveness
+    if (!structuresRef.current.some(s => s.id === structure.id)) {
+      const next = [...structuresRef.current, structure];
+      structuresRef.current = next;
+      setStructures(next);
+    }
+    if (wsConnectedRef.current && wsClientRef.current) {
+      wsClientRef.current.sendBuild(structure, {
+        wood: woodRef.current,
+        brick: brickRef.current,
+        metal: metalRef.current,
+        metalShieldActiveUntil: metalShieldUntilVal
+      });
+      return;
+    }
+    await placeArenaStructure(structure, cost, user.id);
+    if (metalShieldUntilVal) {
+      await updatePlayerPosition(user.id, { metalShieldActiveUntil: metalShieldUntilVal });
+    }
+  }, [user.id]);
+
+  const emitStructureDamage = useCallback(async (id: string, damage: number): Promise<{ destroyed: boolean }> => {
+    if (wsConnectedRef.current && wsClientRef.current) {
+      wsClientRef.current.sendStructHit(id, damage);
+      const st = structuresRef.current.find(s => s.id === id);
+      if (st) {
+        const nextHp = Math.max(0, st.hp - damage);
+        if (nextHp <= 0) {
+          structuresRef.current = structuresRef.current.filter(s => s.id !== id);
+          return { destroyed: true };
+        }
+        st.hp = nextHp;
+      }
+      return { destroyed: false };
+    }
+    return damageArenaStructure(id, damage);
+  }, []);
+
+  const emitSelfVitals = useCallback((vitals: { hp?: number; shield?: number; wood?: number; brick?: number; metal?: number }) => {
+    if (wsConnectedRef.current && wsClientRef.current) {
+      wsClientRef.current.sendSelfVitals(vitals);
+    } else {
+      updatePlayerPosition(user.id, vitals).catch(() => {});
+    }
+  }, [user.id]);
+
+  const drawMinimapToCanvas = useCallback(() => {
+    const canvas = minimapCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const MINI_SIZE = 256;
+    const S = MINI_SIZE / MAP_SIZE;
+
+    if (!minimapStaticCanvasRef.current) {
+      const staticCvs = document.createElement('canvas');
+      staticCvs.width = MINI_SIZE;
+      staticCvs.height = MINI_SIZE;
+      const sctx = staticCvs.getContext('2d');
+      if (sctx) {
+        sctx.fillStyle = '#0f172a';
+        sctx.fillRect(0, 0, MINI_SIZE, MINI_SIZE);
+
+        sctx.save();
+        sctx.globalAlpha = 0.45;
+        sctx.fillStyle = '#15803d';
+        sctx.fillRect(0, 0, MINI_SIZE, MINI_SIZE);
+        sctx.restore();
+
+        const meta = worldDataRef.current?.mapMeta;
+        if (!meta) {
+          sctx.save();
+          sctx.globalAlpha = 0.6;
+          sctx.fillStyle = '#064e3b';
+          sctx.fillRect(0, 0, 800 * S, MINI_SIZE);
+          sctx.restore();
+        } else {
+          sctx.save();
+          sctx.globalAlpha = 0.7;
+          sctx.fillStyle = '#064e3b';
+          sctx.fillRect(
+            meta.forestBox.x * S,
+            meta.forestBox.y * S,
+            meta.forestBox.w * S,
+            meta.forestBox.h * S
+          );
+          sctx.restore();
+
+          sctx.save();
+          sctx.globalAlpha = 0.78;
+          sctx.fillStyle = '#0284c7';
+          for (const lk of meta.lakes) {
+            sctx.beginPath();
+            sctx.roundRect(lk.x * S, lk.y * S, lk.w * S, lk.h * S, 80 * S);
+            sctx.fill();
+          }
+          sctx.restore();
+
+          sctx.save();
+          sctx.globalAlpha = 0.85;
+          sctx.strokeStyle = '#78350f';
+          for (const rd of meta.roads) {
+            sctx.lineWidth = Math.max(1, rd.width * S);
+            sctx.beginPath();
+            sctx.moveTo(rd.x1 * S, rd.y1 * S);
+            sctx.lineTo(rd.x2 * S, rd.y2 * S);
+            sctx.stroke();
+          }
+          sctx.restore();
+
+          sctx.save();
+          sctx.globalAlpha = 0.4;
+          sctx.fillStyle = '#334155';
+          for (const vil of meta.villages) {
+            sctx.beginPath();
+            sctx.roundRect(vil.x * S, vil.y * S, vil.w * S, vil.h * S, 40 * S);
+            sctx.fill();
+          }
+          sctx.restore();
+
+          sctx.save();
+          sctx.globalAlpha = 0.95;
+          sctx.fillStyle = '#cbd5e1';
+          sctx.strokeStyle = '#0f172a';
+          sctx.lineWidth = Math.max(0.6, 12 * S);
+          for (const wall of meta.cityWalls || []) {
+            sctx.fillRect(wall.x * S, wall.y * S, wall.w * S, wall.h * S);
+            sctx.strokeRect(wall.x * S, wall.y * S, wall.w * S, wall.h * S);
+          }
+          sctx.restore();
+
+          sctx.save();
+          sctx.globalAlpha = 0.85;
+          sctx.fillStyle = '#fbbf24';
+          for (const gate of meta.cityGates || []) {
+            sctx.fillRect(gate.x * S, gate.y * S, gate.w * S, gate.h * S);
+          }
+          sctx.restore();
+
+          sctx.save();
+          sctx.globalAlpha = 0.92;
+          sctx.fillStyle = '#d97706';
+          sctx.strokeStyle = '#fef3c7';
+          sctx.lineWidth = Math.max(0.6, 12 * S);
+          for (const bldg of worldDataRef.current?.buildings || []) {
+            sctx.fillRect(bldg.worldX * S, bldg.worldY * S, bldg.worldW * S, bldg.worldH * S);
+            sctx.strokeRect(bldg.worldX * S, bldg.worldY * S, bldg.worldW * S, bldg.worldH * S);
+          }
+          sctx.restore();
+
+          sctx.save();
+          sctx.globalAlpha = 0.65;
+          sctx.strokeStyle = '#d97706';
+          sctx.lineWidth = Math.max(1.5, 35 * S);
+          sctx.beginPath();
+          sctx.arc(meta.hub.x * S, meta.hub.y * S, 260 * S, 0, Math.PI * 2);
+          sctx.stroke();
+          sctx.restore();
         }
       }
-    });
+      minimapStaticCanvasRef.current = staticCvs;
+    }
 
-    const unsubStructs = subscribeToStructures((s) => {
-      structuresRef.current = s;
-      setStructures(s);
-    });
-    const unsubCrates = subscribeToSupplyCrates((c) => {
-      cratesRef.current = c;
-      setCrates(c);
-    });
+    ctx.clearRect(0, 0, MINI_SIZE, MINI_SIZE);
+    ctx.drawImage(minimapStaticCanvasRef.current, 0, 0);
 
-    const unsubState = subscribeToBattleState((st) => {
-      battleStateRef.current = st;
-      setBattleState(st);
-      if (st.status === 'IN_PROGRESS' && st.startedAt) {
-        if (lastMatchSeedKeyRef.current !== st.startedAt) {
-          lastMatchSeedKeyRef.current = st.startedAt;
-          worldDataRef.current = generateSuperAnimalStyleMap(hashSeedString(st.startedAt));
+    const scX = Number.isFinite(stormCenter.current?.x) ? stormCenter.current.x * S : 2560 * S;
+    const scY = Number.isFinite(stormCenter.current?.y) ? stormCenter.current.y * S : 2560 * S;
+    const sRad = Math.max(0, Number.isFinite(currentStormRadiusRef.current) ? currentStormRadiusRef.current * S : 3600 * S);
+    const bState = battleStateRef.current;
+    const isMatchActive = !bState || bState.status === 'IN_PROGRESS';
+    const surging = Boolean(wasSurgingRef.current && isMatchActive);
+
+    // Violet storm mask outside eye
+    ctx.save();
+    ctx.globalAlpha = surging ? 0.6 : 0.45;
+    ctx.fillStyle = '#8b5cf6';
+    ctx.beginPath();
+    ctx.rect(0, 0, MINI_SIZE, MINI_SIZE);
+    if (sRad > 0) {
+      ctx.moveTo(scX + sRad, scY);
+      ctx.arc(scX, scY, sRad, 0, Math.PI * 2, true);
+    }
+    ctx.fill('evenodd');
+    ctx.restore();
+
+    // Shrinking storm safe zone ring
+    if (sRad > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.95;
+      ctx.strokeStyle = surging ? '#f43f5e' : '#d946ef';
+      ctx.lineWidth = Math.max(2, 110 * S);
+      ctx.beginPath();
+      ctx.arc(scX, scY, sRad, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Target final center blip
+    const tfcX = (Number.isFinite(targetFinalCenterRef.current?.x) ? targetFinalCenterRef.current.x : 2560) * S;
+    const tfcY = (Number.isFinite(targetFinalCenterRef.current?.y) ? targetFinalCenterRef.current.y : 2560) * S;
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = '#fbbf24';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = Math.max(1, 20 * S);
+    ctx.beginPath();
+    ctx.arc(tfcX, tfcY, 75 * S, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    // Unclaimed supply crates
+    const isDiscoverer = effectiveSkinDefRef.current.id === 'discoverer';
+    const crateR = (isDiscoverer ? 125 : 85) * S;
+    ctx.save();
+    ctx.fillStyle = '#facc15';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = Math.max(1, 25 * S);
+    for (const c of cratesRef.current) {
+      if (c.isClaimed || !Number.isFinite(c.x) || !Number.isFinite(c.y)) continue;
+      ctx.beginPath();
+      ctx.arc(c.x * S, c.y * S, crateR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Placed structures
+    const stHalf = 35 * S;
+    const stSize = 70 * S;
+    for (const st of structuresRef.current) {
+      if (!Number.isFinite(st.x) || !Number.isFinite(st.y)) continue;
+      ctx.fillStyle = st.type === 'wood_wall' ? '#b45309' : st.type === 'brick_ramp' ? '#ea580c' : '#06b6d4';
+      ctx.fillRect(st.x * S - stHalf, st.y * S - stHalf, stSize, stSize);
+    }
+
+    // Discoverer Treasure Sense: highlight uncollected high-tier ground loot on minimap (never shows enemies)
+    const px = Number.isFinite(playerPosRef.current.x) ? playerPosRef.current.x : 2560;
+    const py = Number.isFinite(playerPosRef.current.y) ? playerPosRef.current.y : 2560;
+    if (isDiscoverer && worldDataRef.current?.groundLoot) {
+      ctx.save();
+      ctx.globalAlpha = 0.85;
+      for (const gl of worldDataRef.current.groundLoot) {
+        if (gl.isCollected || !Number.isFinite(gl.x) || !Number.isFinite(gl.y)) continue;
+        ctx.fillStyle = gl.type === 'shield_cell' ? '#38bdf8' : gl.type === 'speed_flask' ? '#c084fc' : gl.type === 'ammo_box' ? '#4ade80' : '#facc15';
+        ctx.beginPath();
+        ctx.arc(gl.x * S, gl.y * S, 42 * S, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Camera viewport bounding box
+    const camX = (Number.isFinite(cameraRef.current?.x) ? cameraRef.current.x : 0) * S;
+    const camY = (Number.isFinite(cameraRef.current?.y) ? cameraRef.current.y : 0) * S;
+    const camW = (Number.isFinite(viewDimsRef.current?.width) && viewDimsRef.current.width > 0 ? viewDimsRef.current.width : 1000) * S;
+    const camH = (Number.isFinite(viewDimsRef.current?.height) && viewDimsRef.current.height > 0 ? viewDimsRef.current.height : 650) * S;
+    ctx.save();
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = Math.max(1.5, 50 * S);
+    ctx.setLineDash([Math.max(3, 140 * S), Math.max(2, 80 * S)]);
+    ctx.strokeRect(camX, camY, camW, camH);
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // Local player blip
+    ctx.save();
+    ctx.fillStyle = isAliveRef.current ? '#10b981' : '#38bdf8';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = Math.max(1.2, 30 * S);
+    ctx.beginPath();
+    ctx.arc(px * S, py * S, 110 * S, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }, [user.id]);
+
+  useEffect(() => {
+    drawMinimapToCanvas();
+  }, [drawMinimapToCanvas, mapRevision, minimapExpanded]);
+
+  // 1. Real-Time Hybrid Sync: Primary 20Hz WebSocket (/ws/battle) + Firestore Fallback & Durability
+  useEffect(() => {
+    let lastPlayersReactSync = 0;
+    let lastAliveCountReact = -1;
+    let pendingPlayersTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastStructsReactSync = 0;
+    let pendingStructsTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastCratesReactSync = 0;
+    let pendingCratesTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const rebuildPlayerMap = (players: ArenaPlayer[]) => {
+      const m = new Map<string, ArenaPlayer>();
+      for (const p of players) {
+        if (p && p.uid) m.set(p.uid, p);
+      }
+      playerByUidRef.current = m;
+    };
+
+    const schedulePlayersReactSync = (force: boolean = false) => {
+      const nowMs = Date.now();
+      const aliveCountNow = arenaPlayersRef.current.filter(p => p.isAlive && (p.hp === undefined || p.hp > 0)).length;
+      if (force || aliveCountNow !== lastAliveCountReact || nowMs - lastPlayersReactSync >= 550) {
+        if (pendingPlayersTimer) {
+          clearTimeout(pendingPlayersTimer);
+          pendingPlayersTimer = null;
+        }
+        lastPlayersReactSync = nowMs;
+        lastAliveCountReact = aliveCountNow;
+        setArenaPlayers([...arenaPlayersRef.current]);
+      } else if (!pendingPlayersTimer) {
+        pendingPlayersTimer = setTimeout(() => {
+          pendingPlayersTimer = null;
+          lastPlayersReactSync = Date.now();
+          lastAliveCountReact = arenaPlayersRef.current.filter(p => p.isAlive && (p.hp === undefined || p.hp > 0)).length;
+          setArenaPlayers([...arenaPlayersRef.current]);
+        }, 550);
+      }
+    };
+
+    const scheduleStructsReactSync = (force: boolean = false) => {
+      const nowMs = Date.now();
+      if (force || nowMs - lastStructsReactSync >= 260) {
+        if (pendingStructsTimer) { clearTimeout(pendingStructsTimer); pendingStructsTimer = null; }
+        lastStructsReactSync = nowMs;
+        setStructures([...structuresRef.current]);
+      } else if (!pendingStructsTimer) {
+        pendingStructsTimer = setTimeout(() => {
+          pendingStructsTimer = null;
+          lastStructsReactSync = Date.now();
+          setStructures([...structuresRef.current]);
+        }, 260);
+      }
+    };
+
+    const scheduleCratesReactSync = (force: boolean = false) => {
+      const nowMs = Date.now();
+      if (force || nowMs - lastCratesReactSync >= 260) {
+        if (pendingCratesTimer) { clearTimeout(pendingCratesTimer); pendingCratesTimer = null; }
+        lastCratesReactSync = nowMs;
+        setCrates([...cratesRef.current]);
+      } else if (!pendingCratesTimer) {
+        pendingCratesTimer = setTimeout(() => {
+          pendingCratesTimer = null;
+          lastCratesReactSync = Date.now();
+          setCrates([...cratesRef.current]);
+        }, 260);
+      }
+    };
+
+    const applyMatchStateTransition = (st: Partial<BattleEventState>, forceResetSpawn: boolean = false) => {
+      const prevSt = battleStateRef.current;
+      const merged: BattleEventState = {
+        isLobbyOpen: st.isLobbyOpen ?? prevSt?.isLobbyOpen ?? false,
+        status: st.status ?? prevSt?.status ?? 'LOBBY',
+        startedAt: st.startedAt ?? null,
+        stormRadius: st.stormRadius ?? prevSt?.stormRadius ?? 3600,
+        stormCenter: st.stormCenter ?? prevSt?.stormCenter ?? { x: 2560, y: 2560 },
+        stormFinalCenter: st.stormFinalCenter ?? prevSt?.stormFinalCenter ?? undefined,
+        currentWinner: st.currentWinner ?? null
+      };
+      battleStateRef.current = merged;
+      setBattleState(merged);
+
+      if (merged.status === 'IN_PROGRESS' && merged.startedAt) {
+        if (lastMatchSeedKeyRef.current !== merged.startedAt || forceResetSpawn) {
+          lastMatchSeedKeyRef.current = merged.startedAt;
+          localEliminatedRef.current = false;
+          localDeathTimeRef.current = 0;
+          hasDeclaredWinnerRef.current = false;
+          hasSpawnSynced.current = false;
+          setShowEliminationToast(false);
+          setSpectateTargetName(null);
+          isAliveRef.current = true;
+          setIsAlive(true);
+          worldDataRef.current = generateSuperAnimalStyleMap(hashSeedString(merged.startedAt));
           structuresRef.current = [];
           setStructures([]);
-          if (isOwnerTester) {
+          if (isOwnerTester && !forceResetSpawn) {
             clearArenaStructures().catch(() => {});
           }
           setMapRevision(r => r + 1);
         }
-        const startMs = new Date(st.startedAt).getTime();
-        // If match was started within the last 10 minutes (600s), track elapsed time accurately;
-        // if older than 10 mins (lingering session from hours ago), start fresh so players aren't damaged instantly
+        const startMs = new Date(merged.startedAt).getTime();
         if (Date.now() - startMs < 600 * 1000) {
           matchStartTimeRef.current = startMs;
         } else {
           matchStartTimeRef.current = Date.now();
         }
-        if (st.stormFinalCenter) {
-          targetFinalCenterRef.current = st.stormFinalCenter;
-        } else {
-          targetFinalCenterRef.current = getMatchFinalCenter(st.startedAt);
-        }
-      } else if (st.status === 'LOBBY') {
+        targetFinalCenterRef.current = merged.stormFinalCenter || getMatchFinalCenter(merged.startedAt);
+      } else if (merged.status === 'LOBBY') {
         if (lastMatchSeedKeyRef.current !== null) {
           lastMatchSeedKeyRef.current = null;
+          localEliminatedRef.current = false;
+          localDeathTimeRef.current = 0;
+          hasDeclaredWinnerRef.current = false;
           structuresRef.current = [];
           setStructures([]);
         }
         matchStartTimeRef.current = Date.now();
       }
-      // Do not auto-show victory celebration from previous match sessions for instructor testing
-      if (st.status === 'ENDED' && st.currentWinner && !isOwnerTester) {
-        setWinnerCelebration(st.currentWinner);
+      if (merged.status === 'ENDED' && merged.currentWinner && !isOwnerTester) {
+        setWinnerCelebration(merged.currentWinner);
         soundEngine.playVictory();
-      } else if (isOwnerTester || st.status !== 'ENDED') {
+      } else if (isOwnerTester || merged.status !== 'ENDED') {
         setWinnerCelebration(null);
       }
+    };
+
+    const syncLocalVitalsFromMe = (me: ArenaPlayer) => {
+      if (me.hp < prevLocalHpRef.current) {
+        lastDamageTimeRef.current = Date.now();
+      }
+      if (me.brittleGuardUsedAt && me.brittleGuardUsedAt + 25000 > brittleGuardCooldownUntilRef.current) {
+        brittleGuardCooldownUntilRef.current = me.brittleGuardUsedAt + 25000;
+        brittleInvulnUntilRef.current = Date.now() + 1500;
+        addFloatingText(playerPosRef.current.x, playerPosRef.current.y - 36, '💀 BRITTLE GUARD SAVED YOU!', '#f59e0b');
+        spawnParticles(playerPosRef.current.x, playerPosRef.current.y, '#e7e5e4', 'stone_chip', 18, 5);
+        flashSkinAbility('Brittle Guard Triggered!');
+      }
+      if (me.royalAbsorptionUsedAt && me.royalAbsorptionUsedAt + 10000 > royalAbsorptionCooldownUntilRef.current) {
+        royalAbsorptionCooldownUntilRef.current = me.royalAbsorptionUsedAt + 10000;
+        addFloatingText(playerPosRef.current.x, playerPosRef.current.y - 36, '👑 ROYAL ABSORPTION -> +BRICKS!', '#34d399');
+        spawnParticles(playerPosRef.current.x, playerPosRef.current.y, '#34d399', 'spark', 14, 4);
+        flashSkinAbility('Royal Absorption +Bricks!');
+      }
+
+      const testerExempt = isOwnerTester && localDeathTimeRef.current === 0;
+      const snapshotEliminated = !testerExempt && (!me.isAlive || (me.hp !== undefined && me.hp <= 0));
+      if (snapshotEliminated && !localEliminatedRef.current) {
+        localEliminatedRef.current = true;
+        localDeathTimeRef.current = Date.now();
+        selectedBuildTypeRef.current = null;
+        setSelectedBuildType(null);
+        activeCrateModalRef.current = null;
+        setActiveCrateModal(null);
+        soulBurnsRef.current = [];
+        acousticShieldUntilRef.current = 0;
+        setAcousticShieldUntil(0);
+        frostSlowUntilRef.current = 0;
+        setFrostSlowUntil(0);
+        setShowEliminationToast(true);
+        setTimeout(() => setShowEliminationToast(false), 3800);
+      }
+
+      prevLocalHpRef.current = me.hp;
+      const resolvedAlive = testerExempt ? true : (localEliminatedRef.current ? false : me.isAlive);
+      const resolvedHp = testerExempt && !me.isAlive ? 100 : (resolvedAlive ? me.hp : 0);
+      const changedAlive = resolvedAlive !== isAliveRef.current;
+
+      if (hpRef.current !== resolvedHp) {
+        hpRef.current = resolvedHp;
+        setLocalHp(resolvedHp);
+      }
+      if (shieldRef.current !== me.shield) {
+        shieldRef.current = me.shield;
+        setLocalShield(me.shield);
+      }
+      if (isAliveRef.current !== resolvedAlive) {
+        isAliveRef.current = resolvedAlive;
+        setIsAlive(resolvedAlive);
+      }
+      setKills(prev => (prev === (me.kills || 0) ? prev : (me.kills || 0)));
+
+      if (me.wood !== undefined && woodRef.current !== me.wood) {
+        woodRef.current = me.wood;
+        setLocalWood(me.wood);
+      }
+      if (me.brick !== undefined && brickRef.current !== me.brick) {
+        brickRef.current = me.brick;
+        setLocalBrick(me.brick);
+      }
+      if (me.metal !== undefined && metalRef.current !== me.metal) {
+        metalRef.current = me.metal;
+        setLocalMetal(me.metal);
+      }
+
+      if (!hasSpawnSynced.current && me.x !== undefined && me.y !== undefined) {
+        setPlayerCoords(me.x, me.y);
+        const vd = viewDimsRef.current;
+        cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, me.x - vd.width / 2));
+        cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, me.y - vd.height / 2));
+        hasSpawnSynced.current = true;
+      }
+
+      return changedAlive;
+    };
+
+    // Connect 20Hz WebSocket client
+    const wsClient = new BattleRealtimeClient();
+    wsClientRef.current = wsClient;
+    wsClient.connect(
+      () => {
+        const initSkin = activeSkinId || gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist';
+        const initWeapon = activeWeaponId || gameProfile?.equippedWeapon || 'bunsen_burner';
+        const isKnight = getFantasySkin(initSkin).id === 'knight_hero';
+        return {
+          uid: user.id,
+          name: user.name || (user.role === 'instructor' ? 'Instructor (Admin)' : 'Hero'),
+          avatar: initSkin,
+          equippedWeapon: initWeapon,
+          x: Math.round(playerPosRef.current.x),
+          y: Math.round(playerPosRef.current.y),
+          angle: facingAngleRef.current,
+          hp: hpRef.current,
+          maxHp: 100,
+          shield: shieldRef.current ?? (isKnight ? 70 : 50),
+          maxShield: isKnight ? 120 : 100,
+          wood: woodRef.current,
+          brick: brickRef.current,
+          metal: metalRef.current,
+          isAlive: !localEliminatedRef.current,
+          state: battleStateRef.current || undefined,
+          seedPlayers: arenaPlayersRef.current.length > 0 ? arenaPlayersRef.current : undefined,
+          seedStructures: structuresRef.current.length > 0 ? structuresRef.current : undefined,
+          seedCrates: cratesRef.current.length > 0 ? cratesRef.current : undefined
+        };
+      },
+      {
+        onConnectionChange: (connected) => {
+          wsConnectedRef.current = connected;
+        },
+        onWelcome: ({ state, players, structures: srvStructs, crates: srvCrates }) => {
+          if (state && state.status) {
+            applyMatchStateTransition(state);
+          }
+          if (Array.isArray(players) && players.length > 0) {
+            // Preserve existing names if Firestore had them
+            const nameCache = new Map<string, string>();
+            for (const oldP of arenaPlayersRef.current) {
+              if (oldP.name) nameCache.set(oldP.uid, oldP.name);
+            }
+            const mergedPlayers = players.map(p => ({
+              ...p,
+              name: p.name || nameCache.get(p.uid) || 'Hero'
+            }));
+            arenaPlayersRef.current = mergedPlayers;
+            rebuildPlayerMap(mergedPlayers);
+            const me = mergedPlayers.find(p => p.uid === user.id);
+            if (me) syncLocalVitalsFromMe(me);
+            schedulePlayersReactSync(true);
+          }
+          if (Array.isArray(srvStructs) && srvStructs.length > 0) {
+            structuresRef.current = srvStructs;
+            scheduleStructsReactSync(true);
+          }
+          if (Array.isArray(srvCrates) && srvCrates.length > 0) {
+            cratesRef.current = srvCrates;
+            scheduleCratesReactSync(true);
+          }
+        },
+        onMatchStart: ({ state, players, crates: startCrates }) => {
+          seenCrateQuestionIdsRef.current.clear();
+          crateDismissCooldownRef.current = {};
+          speedBoostUntilRef.current = 0;
+          setSpeedBoostUntil(0);
+          frostSlowUntilRef.current = 0;
+          setFrostSlowUntil(0);
+          enemyFrostSlowUntilRef.current = {};
+          applyMatchStateTransition(state, true);
+          if (Array.isArray(players)) {
+            arenaPlayersRef.current = players;
+            rebuildPlayerMap(players);
+            const me = players.find(p => p.uid === user.id);
+            if (me) {
+              hpRef.current = me.hp;
+              shieldRef.current = me.shield;
+              woodRef.current = Math.max(10, me.wood ?? 20);
+              brickRef.current = Math.max(10, me.brick ?? 10);
+              metalRef.current = Math.max(5, me.metal ?? 5);
+              isAliveRef.current = me.isAlive;
+              setLocalHp(me.hp);
+              setLocalShield(me.shield);
+              setLocalWood(woodRef.current);
+              setLocalBrick(brickRef.current);
+              setLocalMetal(metalRef.current);
+              setIsAlive(me.isAlive);
+              setKills(0);
+              setPlayerCoords(me.x, me.y);
+              const vd = viewDimsRef.current;
+              cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, me.x - vd.width / 2));
+              cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, me.y - vd.height / 2));
+              hasSpawnSynced.current = true;
+            }
+            schedulePlayersReactSync(true);
+          }
+          if (Array.isArray(startCrates)) {
+            cratesRef.current = startCrates;
+            scheduleCratesReactSync(true);
+          }
+        },
+        onMatchState: (state) => {
+          applyMatchStateTransition(state);
+        },
+        onMatchReset: (state) => {
+          structuresRef.current = [];
+          cratesRef.current = [];
+          arenaPlayersRef.current = [];
+          playerByUidRef.current.clear();
+          frostSlowUntilRef.current = 0;
+          setFrostSlowUntil(0);
+          enemyFrostSlowUntilRef.current = {};
+          setStructures([]);
+          setCrates([]);
+          setArenaPlayers([]);
+          applyMatchStateTransition(state);
+        },
+        onTick: (tuples) => {
+          let aliveChanged = false;
+          let rosterChanged = false;
+          for (const t of tuples) {
+            const [uid, x, y, angle, hp, shield, aliveNum, killCnt, avatar, equippedWeapon, hgNum, metalShieldUntilVal, frostSlowUntilVal] = t;
+            const existing = playerByUidRef.current.get(uid);
+            const isAliveBool = aliveNum === 1;
+            if (existing) {
+              if (existing.isAlive !== isAliveBool) aliveChanged = true;
+              if (uid !== user.id) {
+                existing.x = x;
+                existing.y = y;
+                existing.angle = angle;
+              }
+              existing.hp = hp;
+              existing.shield = shield;
+              existing.isAlive = isAliveBool;
+              existing.kills = killCnt;
+              existing.avatar = avatar;
+              existing.equippedWeapon = equippedWeapon;
+              existing.highGroundActive = hgNum === 1;
+              existing.metalShieldActiveUntil = metalShieldUntilVal;
+              existing.frostSlowUntil = frostSlowUntilVal || 0;
+            } else {
+              const newEntry: ArenaPlayer = {
+                uid,
+                name: 'Player',
+                avatar,
+                equippedWeapon,
+                x,
+                y,
+                angle,
+                hp,
+                maxHp: 100,
+                shield,
+                maxShield: getFantasySkin(avatar).id === 'knight_hero' ? 120 : 100,
+                wood: 20,
+                brick: 10,
+                metal: 5,
+                isAlive: isAliveBool,
+                kills: killCnt,
+                highGroundActive: hgNum === 1,
+                metalShieldActiveUntil: metalShieldUntilVal,
+                frostSlowUntil: frostSlowUntilVal || 0
+              };
+              arenaPlayersRef.current.push(newEntry);
+              playerByUidRef.current.set(uid, newEntry);
+              rosterChanged = true;
+            }
+          }
+          if (aliveChanged || rosterChanged) {
+            schedulePlayersReactSync(true);
+          } else {
+            schedulePlayersReactSync(false);
+          }
+        },
+        onShot: (shot) => {
+          if (!shot || shot.ownerId === user.id) return;
+          const nowMs = Date.now();
+          let motion = remotePlayerMotionRef.current[shot.ownerId];
+          if (motion) {
+            motion.attackUntil = nowMs + 260;
+          }
+          soundEngine.playSpatialShoot(shot.weaponId, shot.x, shot.y, playerPosRef.current.x, playerPosRef.current.y);
+          if (Array.isArray(shot.vfx)) {
+            for (const v of shot.vfx) {
+              pushWeaponVfx({ ...v, startedAt: nowMs });
+            }
+          }
+          if (Array.isArray(shot.projectiles)) {
+            for (const p of shot.projectiles) {
+              const seq = ++remoteShotCounterRef.current;
+              if (projectilesRef.current.length > 190) break;
+              projectilesRef.current.push({
+                id: `rproj_${nowMs}_${seq}`,
+                x: p.x,
+                y: p.y,
+                startX: p.x,
+                startY: p.y,
+                vx: p.vx,
+                vy: p.vy,
+                rangeRemaining: p.range,
+                maxRange: p.range,
+                damage: p.damage,
+                ownerId: shot.ownerId,
+                weaponId: shot.weaponId,
+                color: p.color || shot.color,
+                isAlt: Boolean(p.isAlt),
+                altType: p.altType,
+                age: 0,
+                trail: [{ x: p.x, y: p.y }],
+                piercesEnemies: shot.weaponId === 'laser_pointer' || p.altType === 'spread_beam',
+                hitEnemyUids: (shot.weaponId === 'laser_pointer' || p.altType === 'spread_beam') ? new Set<string>() : undefined
+              });
+            }
+          }
+        },
+        onDamage: (dmg) => {
+          if (!dmg) return;
+          const target = playerByUidRef.current.get(dmg.targetUid);
+          if (target) {
+            target.hp = dmg.hp;
+            target.shield = dmg.shield;
+            target.isAlive = dmg.isAlive;
+            if (typeof dmg.frostSlowUntil === 'number') {
+              target.frostSlowUntil = dmg.frostSlowUntil;
+            }
+          }
+          if (dmg.chillMs && dmg.chillMs > 0 && dmg.isAlive) {
+            const chillEnd = Date.now() + dmg.chillMs;
+            if (dmg.targetUid === user.id) {
+              frostSlowUntilRef.current = Math.max(frostSlowUntilRef.current, chillEnd);
+              setFrostSlowUntil(frostSlowUntilRef.current);
+              addFloatingText(playerPosRef.current.x, playerPosRef.current.y - 34, '❄️ CHILLED! -35% SPD', '#22d3ee');
+              spawnParticles(playerPosRef.current.x, playerPosRef.current.y, '#67e8f9', 'spark', 10, 4);
+            } else if (target) {
+              enemyFrostSlowUntilRef.current[dmg.targetUid] = Math.max(enemyFrostSlowUntilRef.current[dmg.targetUid] || 0, chillEnd);
+              spawnParticles(target.x, target.y, '#67e8f9', 'spark', 8, 3.5);
+            }
+          }
+          if (dmg.attackerUid) {
+            const killer = playerByUidRef.current.get(dmg.attackerUid);
+            if (killer && typeof dmg.killerKills === 'number') {
+              killer.kills = dmg.killerKills;
+            }
+          }
+
+          if (dmg.attackerUid === user.id) {
+            if (dmg.brittleGuardTriggered && target) {
+              addFloatingText(target.x, target.y - 44, '💀 BRITTLE GUARD!', '#f59e0b');
+            }
+            if (dmg.bricksGained && dmg.bricksGained > 0 && target) {
+              addFloatingText(target.x, target.y - 44, `👑 ABSORBED (+${dmg.bricksGained}🧱)`, '#34d399');
+            }
+            if (dmg.killed) {
+              setKills(prev => Math.max(prev + 1, dmg.killerKills || 0));
+              if (target) {
+                addFloatingText(target.x, target.y - 48, 'ELIMINATED! 💀', '#fbbf24');
+              }
+              if (effectiveSkinDefRef.current.id === 'cultist') {
+                const nextHp = Math.min(100, hpRef.current + 25);
+                const nextSh = Math.min(100, shieldRef.current + 15);
+                hpRef.current = nextHp;
+                shieldRef.current = nextSh;
+                setLocalHp(nextHp);
+                setLocalShield(nextSh);
+                addFloatingText(playerPosRef.current.x, playerPosRef.current.y - 38, '🧛 BLOOD RITUAL: +25HP +15🛡️', '#f472b6');
+                flashSkinAbility('Blood Ritual (+25HP +15🛡️)');
+                wsClient.sendSelfVitals({ hp: nextHp, shield: nextSh });
+              }
+            }
+          }
+
+          if (dmg.targetUid === user.id) {
+            lastDamageTimeRef.current = Date.now();
+            if (dmg.brittleGuardTriggered) {
+              brittleGuardCooldownUntilRef.current = Date.now() + 25000;
+              brittleInvulnUntilRef.current = Date.now() + 1500;
+              addFloatingText(playerPosRef.current.x, playerPosRef.current.y - 36, '💀 BRITTLE GUARD SAVED YOU!', '#f59e0b');
+              spawnParticles(playerPosRef.current.x, playerPosRef.current.y, '#e7e5e4', 'stone_chip', 18, 5);
+              flashSkinAbility('Brittle Guard Triggered!');
+            }
+            if (dmg.bricksGained && dmg.bricksGained > 0 && typeof dmg.newBrick === 'number') {
+              royalAbsorptionCooldownUntilRef.current = Date.now() + 10000;
+              brickRef.current = dmg.newBrick;
+              setLocalBrick(dmg.newBrick);
+              addFloatingText(playerPosRef.current.x, playerPosRef.current.y - 36, '👑 ROYAL ABSORPTION -> +BRICKS!', '#34d399');
+              spawnParticles(playerPosRef.current.x, playerPosRef.current.y, '#34d399', 'spark', 14, 4);
+              flashSkinAbility('Royal Absorption +Bricks!');
+            }
+
+            const testerExempt = isOwnerTester && localDeathTimeRef.current === 0;
+            const resolvedAlive = testerExempt ? true : dmg.isAlive;
+            const resolvedHp = testerExempt && !dmg.isAlive ? 100 : (resolvedAlive ? dmg.hp : 0);
+
+            if (!testerExempt && !dmg.isAlive && !localEliminatedRef.current) {
+              localEliminatedRef.current = true;
+              localDeathTimeRef.current = Date.now();
+              selectedBuildTypeRef.current = null;
+              setSelectedBuildType(null);
+              activeCrateModalRef.current = null;
+              setActiveCrateModal(null);
+              soulBurnsRef.current = [];
+              acousticShieldUntilRef.current = 0;
+              setAcousticShieldUntil(0);
+              frostSlowUntilRef.current = 0;
+              setFrostSlowUntil(0);
+              setShowEliminationToast(true);
+              setTimeout(() => setShowEliminationToast(false), 3800);
+              updatePlayerPosition(user.id, { hp: 0, isAlive: false }).catch(() => {});
+            }
+
+            if (hpRef.current !== resolvedHp) {
+              hpRef.current = resolvedHp;
+              setLocalHp(resolvedHp);
+            }
+            if (shieldRef.current !== dmg.shield) {
+              shieldRef.current = dmg.shield;
+              setLocalShield(dmg.shield);
+            }
+            if (isAliveRef.current !== resolvedAlive) {
+              isAliveRef.current = resolvedAlive;
+              setIsAlive(resolvedAlive);
+            }
+          }
+
+          if (dmg.killed) {
+            schedulePlayersReactSync(true);
+          }
+        },
+        onStructAdd: (st) => {
+          if (!structuresRef.current.some(s => s.id === st.id)) {
+            structuresRef.current.push(st);
+            scheduleStructsReactSync(false);
+          }
+          soundEngine.playSpatialBuild(st.type, st.x, st.y, playerPosRef.current.x, playerPosRef.current.y);
+        },
+        onStructUpdate: (upd) => {
+          if (upd.destroyed) {
+            const idx = structuresRef.current.findIndex(s => s.id === upd.id);
+            if (idx !== -1) {
+              const removed = structuresRef.current[idx];
+              structuresRef.current.splice(idx, 1);
+              if (upd.attackerUid === user.id && effectiveSkinDefRef.current.id === 'goblin') {
+                woodRef.current += 8;
+                brickRef.current += 4;
+                metalRef.current += 2;
+                setLocalWood(woodRef.current);
+                setLocalBrick(brickRef.current);
+                setLocalMetal(metalRef.current);
+                addFloatingText(removed.x, removed.y - 26, '👺 +8🪵 +4🧱 +2⚙️ SNATCHED!', '#4ade80');
+                flashSkinAbility('Gold Snatcher (Structure Loot!)');
+              }
+              scheduleStructsReactSync(false);
+            }
+          } else {
+            const existing = structuresRef.current.find(s => s.id === upd.id);
+            if (existing) existing.hp = upd.hp;
+          }
+        },
+        onCrateAdd: (cr) => {
+          if (!cratesRef.current.some(c => c.id === cr.id)) {
+            cratesRef.current.push(cr);
+            scheduleCratesReactSync(true);
+          }
+        },
+        onCrateClaimed: ({ crateId }) => {
+          const idx = cratesRef.current.findIndex(c => c.id === crateId);
+          if (idx !== -1) {
+            cratesRef.current.splice(idx, 1);
+            scheduleCratesReactSync(true);
+          }
+        }
+      }
+    );
+
+    const unsubPlayers = subscribeToArenaPlayers((players) => {
+      if (wsConnectedRef.current && playerByUidRef.current.size > 0) {
+        // WS is active & authoritative for live movement/combat; only merge missing UIDs & names
+        let addedAny = false;
+        for (const p of players) {
+          const existing = playerByUidRef.current.get(p.uid);
+          if (!existing) {
+            arenaPlayersRef.current.push(p);
+            playerByUidRef.current.set(p.uid, p);
+            addedAny = true;
+          } else if (p.name && existing.name === 'Player') {
+            existing.name = p.name;
+          }
+        }
+        if (addedAny) schedulePlayersReactSync(true);
+        return;
+      }
+
+      arenaPlayersRef.current = players;
+      rebuildPlayerMap(players);
+
+      const me = players.find(p => p.uid === user.id);
+      const criticalLocalChange = me ? syncLocalVitalsFromMe(me) : false;
+      schedulePlayersReactSync(criticalLocalChange);
+    });
+
+    const unsubStructs = subscribeToStructures((s) => {
+      if (wsConnectedRef.current && structuresRef.current.length > 0) return;
+      structuresRef.current = s;
+      scheduleStructsReactSync(false);
+    });
+
+    const unsubCrates = subscribeToSupplyCrates((c) => {
+      if (wsConnectedRef.current && cratesRef.current.length > 0) return;
+      cratesRef.current = c;
+      scheduleCratesReactSync(false);
+    });
+
+    const unsubState = subscribeToBattleState((st) => {
+      applyMatchStateTransition(st);
     });
 
     return () => {
+      wsConnectedRef.current = false;
+      wsClient.disconnect();
+      wsClientRef.current = null;
+      if (pendingPlayersTimer) clearTimeout(pendingPlayersTimer);
+      if (pendingStructsTimer) clearTimeout(pendingStructsTimer);
+      if (pendingCratesTimer) clearTimeout(pendingCratesTimer);
       unsubPlayers();
       unsubStructs();
       unsubCrates();
@@ -3333,49 +4691,63 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     };
   }, [user.id, isOwnerTester, setPlayerCoords]);
 
-  // Subscribe to own profile for loadout
+  // Subscribe to own profile for loadout (seed mats once so mid-match pickups/crates aren't overwritten)
   useEffect(() => {
     if (!user.id) return;
     const unsub = subscribeToGameProfile(user.id, (p) => {
+      const isInitialLoad = !hasProfileLoadedRef.current;
+      hasProfileLoadedRef.current = true;
       setGameProfile(p);
-      woodRef.current = p.wood;
-      brickRef.current = p.brick;
-      metalRef.current = p.metal;
-      setLocalWood(p.wood);
-      setLocalBrick(p.brick);
-      setLocalMetal(p.metal);
+      if (isInitialLoad) {
+        woodRef.current = p.wood;
+        brickRef.current = p.brick;
+        metalRef.current = p.metal;
+        setLocalWood(p.wood);
+        setLocalBrick(p.brick);
+        setLocalMetal(p.metal);
+      }
     });
     return () => unsub();
   }, [user.id]);
 
-  // Ensure local player or spectator is registered in battleEvent/players/items/{user.id}
+  // Ensure local player exists in battleEvent/players/items/{user.id} ONLY if missing (avoids mount write storm)
   useEffect(() => {
     if (!user?.id) return;
-    const isTeacher = user.role === 'instructor' || gameProfile?.role === 'instructor';
-    const initialAvatar = activeSkinId || gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist';
-    const initialWeapon = gameProfile?.equippedWeapon || 'bunsen_burner';
-    const resolvedSkin = getFantasySkin(initialAvatar);
-    const isKnightHero = resolvedSkin.id === 'knight_hero';
+    const timer = setTimeout(() => {
+      const alreadyListed = arenaPlayersRef.current.some(p => p.uid === user.id);
+      if (alreadyListed) return;
+      const isTeacher = user.role === 'instructor' || gameProfile?.role === 'instructor';
+      if (!isTeacher && !hasProfileLoadedRef.current) return;
+      const initialAvatar = activeSkinId || gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist';
+      const initialWeapon = activeWeaponId || gameProfile?.equippedWeapon || 'bunsen_burner';
+      const resolvedSkin = getFantasySkin(initialAvatar);
+      const isKnightHero = resolvedSkin.id === 'knight_hero';
 
-    ensureArenaPlayer({
-      uid: user.id,
-      name: user.name || (isTeacher ? 'Instructor (Admin)' : 'Hero'),
-      avatar: initialAvatar,
-      equippedWeapon: initialWeapon,
-      x: localX,
-      y: localY,
-      angle: 0,
-      hp: 100,
-      maxHp: 100,
-      shield: isKnightHero ? 70 : 50,
-      maxShield: isKnightHero ? 120 : 100,
-      wood: Math.max(10, gameProfile?.wood ?? 20),
-      brick: Math.max(10, gameProfile?.brick ?? 10),
-      metal: Math.max(5, gameProfile?.metal ?? 5),
-      isAlive: true,
-      kills: 0
-    });
-  }, [user?.id, user?.name, user?.role, activeSkinId, gameProfile?.equippedSkin, gameProfile?.avatar, gameProfile?.equippedWeapon]);
+      const initPlayer: ArenaPlayer = {
+        uid: user.id,
+        name: user.name || (isTeacher ? 'Instructor (Admin)' : 'Hero'),
+        avatar: initialAvatar,
+        equippedWeapon: initialWeapon,
+        x: Math.round(playerPosRef.current.x),
+        y: Math.round(playerPosRef.current.y),
+        angle: 0,
+        hp: 100,
+        maxHp: 100,
+        shield: isKnightHero ? 70 : 50,
+        maxShield: isKnightHero ? 120 : 100,
+        wood: Math.max(10, gameProfile?.wood ?? 20),
+        brick: Math.max(10, gameProfile?.brick ?? 10),
+        metal: Math.max(5, gameProfile?.metal ?? 5),
+        isAlive: !localEliminatedRef.current,
+        kills: 0
+      };
+      ensureArenaPlayer(initPlayer);
+      if (wsConnectedRef.current && wsClientRef.current) {
+        wsClientRef.current.sendRaw({ type: 'hello', ...initPlayer });
+      }
+    }, 1100);
+    return () => clearTimeout(timer);
+  }, [user?.id, user?.name, user?.role, activeSkinId, activeWeaponId, gameProfile?.equippedSkin, gameProfile?.avatar, gameProfile?.equippedWeapon, gameProfile?.role, gameProfile?.wood, gameProfile?.brick, gameProfile?.metal]);
 
   // Periodic Random Supply Crate Drop strictly within the Eye of the Storm
   const triggerStormEyeCrateDrop = useCallback(async (forceDrop: boolean = false) => {
@@ -3402,6 +4774,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         const nextCrates = [...cratesRef.current, created];
         cratesRef.current = nextCrates;
         setCrates(nextCrates);
+      }
+      if (wsConnectedRef.current && wsClientRef.current) {
+        wsClientRef.current.sendCrateDrop(created);
       }
       soundEngine.playSupplyDrop();
       spawnParticles(pt.x, pt.y, '#facc15', 'spark', 18, 5);
@@ -3455,8 +4830,20 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     };
   }, [user.id, user?.role, gameProfile?.role, isOwnerTester, showMapEditor, triggerStormEyeCrateDrop]);
 
-  // Auto-resize canvas viewport (supports Fullscreen mode and responsive display)
+  // Auto-resize canvas viewport & update cached rect (avoids per-frame layout reflow)
   useEffect(() => {
+    const refreshCanvasRect = () => {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const domRect = canvas.getBoundingClientRect();
+        cachedCanvasRectRef.current = {
+          left: domRect.left,
+          top: domRect.top,
+          width: domRect.width,
+          height: domRect.height
+        };
+      }
+    };
     const handleResize = () => {
       if (document.fullscreenElement) {
         setViewDims({
@@ -3467,17 +4854,26 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         const canvas = canvasRef.current;
         if (canvas && canvas.parentElement) {
           const parentW = canvas.parentElement.clientWidth;
-          const w = Math.min(1200, Math.max(340, parentW));
-          const h = Math.min(750, Math.max(480, Math.round(w * 0.62)));
+          const w = Math.min(1600, Math.max(340, parentW));
+          const h = Math.min(780, Math.max(480, Math.round(w * 0.58)));
           setViewDims({ width: w, height: h });
         }
       }
+      requestAnimationFrame(refreshCanvasRect);
     };
     handleResize();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && canvasRef.current?.parentElement) {
+      ro = new ResizeObserver(handleResize);
+      ro.observe(canvasRef.current.parentElement);
+    }
     window.addEventListener('resize', handleResize);
+    window.addEventListener('scroll', refreshCanvasRect, { passive: true });
     document.addEventListener('fullscreenchange', handleResize);
     return () => {
+      ro?.disconnect();
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('scroll', refreshCanvasRect);
       document.removeEventListener('fullscreenchange', handleResize);
     };
   }, [isFullscreen]);
@@ -3499,7 +4895,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const isInstructor = user?.role === 'instructor' || gameProfile?.role === 'instructor';
 
   // Resolve equipped items & fantasy skin stats (speed + defense)
-  const effectiveWeaponId = activeWeaponId || gameProfile?.equippedWeapon || 'bunsen_burner';
+  const effectiveWeaponId = resolveArenaWeaponId(activeWeaponId || gameProfile?.equippedWeapon || 'bunsen_burner');
   const equippedWeapon: ShopItem = SHOP_ITEMS.find(i => i.id === effectiveWeaponId) || SHOP_ITEMS.find(i => i.category === 'weapon') || SHOP_ITEMS[0];
   const equippedPowerId = gameProfile?.equippedPower || 'element_shield';
   const equippedPower: ShopItem = SHOP_ITEMS.find(i => i.id === equippedPowerId) || SHOP_ITEMS[11];
@@ -3526,6 +4922,14 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const handleSelectWeapon = async (wId: string) => {
     setActiveWeaponId(wId);
     soundEngine.playRotate();
+    if (wsConnectedRef.current && wsClientRef.current) {
+      wsClientRef.current.sendPosition({
+        x: Math.round(playerPosRef.current.x),
+        y: Math.round(playerPosRef.current.y),
+        angle: Number(facingAngleRef.current.toFixed(2)),
+        equippedWeapon: wId
+      });
+    }
     await equipItem(user.id, 'weapon', wId);
   };
 
@@ -3553,6 +4957,15 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     shieldRef.current = nextShield;
     setLocalShield(nextShield);
 
+    if (wsConnectedRef.current && wsClientRef.current) {
+      wsClientRef.current.sendPosition({
+        x: Math.round(playerPosRef.current.x),
+        y: Math.round(playerPosRef.current.y),
+        angle: Number(facingAngleRef.current.toFixed(2)),
+        avatar: skinId
+      });
+      wsClientRef.current.sendSelfVitals({ shield: nextShield });
+    }
     await equipItem(user.id, 'skin', skinId);
     ensureArenaPlayer({
       uid: user.id,
@@ -3582,7 +4995,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     const dummyId = `dummy_${Date.now()}`;
     const dummyX = Math.round(px + 110 * Math.cos(ang));
     const dummyY = Math.round(py + 110 * Math.sin(ang));
-    ensureArenaPlayer({
+    const dummyPlayer: ArenaPlayer = {
       uid: dummyId,
       name: '🎯 Training Dummy',
       avatar: 'cultist',
@@ -3599,7 +5012,16 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       metal: 20,
       isAlive: true,
       kills: 0
-    });
+    };
+    ensureArenaPlayer(dummyPlayer);
+    if (!playerByUidRef.current.has(dummyId)) {
+      arenaPlayersRef.current.push(dummyPlayer);
+      playerByUidRef.current.set(dummyId, dummyPlayer);
+      setArenaPlayers([...arenaPlayersRef.current]);
+    }
+    if (wsConnectedRef.current && wsClientRef.current) {
+      wsClientRef.current.sendRaw({ type: 'hello', uid: user.id, seedPlayers: [dummyPlayer] });
+    }
     addFloatingText(dummyX, dummyY - 30, 'Dummy Spawned! 🎯', '#38bdf8');
   };
 
@@ -3619,7 +5041,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     addFloatingText(playerPosRef.current.x, playerPosRef.current.y - 30, 'Max HP & +500 Mats! ✨', '#34d399');
   };
 
-  // Helper: Particle Spawner
+  // Helper: Particle Spawner (capped cleanly to prevent FPS drops)
   const spawnParticles = (
     x: number, 
     y: number, 
@@ -3628,6 +5050,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     count = 5, 
     speed = 3
   ) => {
+    if (particlesRef.current.length > 260) {
+      particlesRef.current = particlesRef.current.slice(-180);
+    }
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * 2 * Math.PI;
       const spd = (0.5 + Math.random()) * speed;
@@ -3637,13 +5062,74 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         vx: Math.cos(angle) * spd,
         vy: Math.sin(angle) * spd,
         life: 0,
-        maxLife: 15 + Math.random() * 20,
+        maxLife: 16 + Math.random() * 20,
         color,
-        size: 2 + Math.random() * 3,
+        size: 2.2 + Math.random() * 3.4,
         alpha: 1,
         type
       });
     }
+  };
+
+  // Helper: Weapon VFX Spawner (rings, beams, muzzle cones, vortices, hazards)
+  const pushWeaponVfx = (vfx: WeaponVFX) => {
+    if (weaponVfxRef.current.length > 50) {
+      weaponVfxRef.current = weaponVfxRef.current.slice(-36);
+    }
+    weaponVfxRef.current.push(vfx);
+  };
+
+  const triggerScreenShake = (intensity: number, durationMs = 180) => {
+    const now = Date.now();
+    screenShakeRef.current = {
+      until: Math.max(screenShakeRef.current.until, now + durationMs),
+      intensity: Math.max(screenShakeRef.current.intensity, intensity)
+    };
+  };
+
+  // Helper: Raymarch laser tracer distance against solid cover/walls (passes straight through enemies)
+  const computeBeamWallClipDistance = (startX: number, startY: number, angleRad: number, maxDist: number): number => {
+    const step = 16;
+    const dx = Math.cos(angleRad);
+    const dy = Math.sin(angleRad);
+    const sIdx = spatialIndexRef.current;
+    for (let d = step; d <= maxDist; d += step) {
+      const tx = startX + dx * d;
+      const ty = startY + dy * d;
+      if (tx <= 0 || tx >= MAP_SIZE || ty <= 0 || ty >= MAP_SIZE) return d;
+      if (sIdx) {
+        const cellC = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor(tx / SPATIAL_CELL_SIZE)));
+        const cellR = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor(ty / SPATIAL_CELL_SIZE)));
+        const cellIdx = cellR * SPATIAL_GRID_DIM + cellC;
+        const cellBldgs = sIdx.buildings[cellIdx];
+        for (let i = 0; i < cellBldgs.length; i++) {
+          if (getBuildingHitboxes(cellBldgs[i]).some(hb => tx >= hb.x && tx <= hb.x + hb.w && ty >= hb.y && ty <= hb.y + hb.h)) {
+            return d;
+          }
+        }
+        const cellWalls = sIdx.cityWalls[cellIdx];
+        for (let i = 0; i < cellWalls.length; i++) {
+          const w = cellWalls[i];
+          if (tx >= w.x && tx <= w.x + w.w && ty >= w.y && ty <= w.y + w.h) {
+            return d;
+          }
+        }
+        const cellScenery = sIdx.scenery[cellIdx];
+        for (let i = 0; i < cellScenery.length; i++) {
+          const sc = cellScenery[i];
+          if (sc.hp > 0 && sc.footprintRadius > 0 && Math.hypot(tx - sc.x, ty - sc.y) < sc.footprintRadius) {
+            return d;
+          }
+        }
+      }
+      for (let i = 0; i < structuresRef.current.length; i++) {
+        const st = structuresRef.current[i];
+        if (Math.hypot(tx - st.x, ty - st.y) < 26) {
+          return d;
+        }
+      }
+    }
+    return maxDist;
   };
 
   // Helper: Floating Text
@@ -3663,6 +5149,20 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       keysPressed.current[key] = true;
+
+      if (key === 'm') {
+        e.preventDefault();
+        setMinimapExpanded(prev => !prev);
+        return;
+      }
+      if (key === 'escape') {
+        e.preventDefault();
+        setSelectedBuildType(null);
+        return;
+      }
+
+      // Eliminated spectators can move (WASD/Arrows + Shift) and toggle radar, but cannot interact/build/shoot
+      if (!isAliveRef.current) return;
 
       if (e.key === '1') {
         e.preventDefault();
@@ -3690,18 +5190,12 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         e.preventDefault();
         setBuildRotation(prev => ((prev + 90) % 360));
         soundEngine.playRotate();
-      } else if (key === 'escape') {
-        e.preventDefault();
-        setSelectedBuildType(null);
       } else if (key === 'e' || key === 'q') {
         e.preventDefault();
         triggerSpecialPowerRef.current();
       } else if (key === 'g') {
         e.preventDefault();
         triggerSlimeBounceRef.current();
-      } else if (key === 'm') {
-        e.preventDefault();
-        setMinimapExpanded(prev => !prev);
       }
     };
 
@@ -3760,7 +5254,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       );
       if (isPaladin) flashSkinAbility('Holy Bulwark (+25% Structure HP)');
 
-      await placeArenaStructure({
+      await emitStructureBuild({
         id,
         x: wx,
         y: wy,
@@ -3770,7 +5264,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         ownerId: user.id,
         createdAt: new Date().toISOString(),
         rotation: rot
-      }, { wood: 10 }, user.id);
+      }, { wood: 10 });
 
     } else if (type === 'brick_ramp') {
       if (brickRef.current < 15) return;
@@ -3790,7 +5284,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       );
       if (isPaladin) flashSkinAbility('Holy Bulwark (+25% Structure HP)');
 
-      await placeArenaStructure({
+      await emitStructureBuild({
         id,
         x: wx,
         y: wy,
@@ -3800,7 +5294,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         ownerId: user.id,
         createdAt: new Date().toISOString(),
         rotation: rot
-      }, { brick: 15 }, user.id);
+      }, { brick: 15 });
 
     } else if (type === 'metal_bunker') {
       if (metalRef.current < 15) return;
@@ -3820,7 +5314,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       );
       if (isPaladin) flashSkinAbility('Holy Bulwark (+25% Metal Fortification)');
 
-      await placeArenaStructure({
+      await emitStructureBuild({
         id,
         x: wx,
         y: wy,
@@ -3830,11 +5324,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         ownerId: user.id,
         createdAt: new Date().toISOString(),
         rotation: rot
-      }, { metal: 15 }, user.id);
-
-      await updatePlayerPosition(user.id, {
-        metalShieldActiveUntil: msUntil
-      });
+      }, { metal: 15 }, msUntil);
     }
   };
 
@@ -3860,7 +5350,10 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         hb => targetX > hb.x && targetX < hb.x + hb.w && targetY > hb.y && targetY < hb.y + hb.h
       )
     );
-    if (hitBldg || targetX < 60 || targetX > MAP_SIZE - 60 || targetY < 60 || targetY > MAP_SIZE - 60) {
+    const hitCityWall = worldDataRef.current?.cityWalls?.some(
+      w => targetX + 18 > w.x && targetX - 18 < w.x + w.w && targetY + 18 > w.y && targetY - 18 < w.y + w.h
+    );
+    if (hitBldg || hitCityWall || targetX < 60 || targetX > MAP_SIZE - 60 || targetY < 60 || targetY > MAP_SIZE - 60) {
       bounceAngle = ang + Math.PI * 0.75;
       targetX = Math.max(60, Math.min(MAP_SIZE - 60, px + Math.cos(bounceAngle) * 130));
       targetY = Math.max(60, Math.min(MAP_SIZE - 60, py + Math.sin(bounceAngle) * 130));
@@ -3875,14 +5368,22 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
     arenaPlayersRef.current.forEach(p => {
       if (p.uid !== user.id && p.isAlive && Math.hypot(p.x - targetX, p.y - targetY) < 110) {
-        damageArenaPlayer(p.uid, 18, user.id).then(res => {
-          if (res.killed) setKills(k => k + 1);
+        emitDamagePlayer(p.uid, 18, user.id).then(res => {
+          if (!wsConnectedRef.current && res.killed) setKills(k => k + 1);
         });
         addFloatingText(p.x, p.y - 28, '-18 SLIME SLAM', '#10b981');
       }
     });
 
-    await updatePlayerPosition(user.id, { x: Math.round(targetX), y: Math.round(targetY) });
+    if (wsConnectedRef.current && wsClientRef.current) {
+      wsClientRef.current.sendPosition({
+        x: Math.round(targetX),
+        y: Math.round(targetY),
+        angle: Number(facingAngleRef.current.toFixed(2))
+      });
+    } else {
+      await updatePlayerPosition(user.id, { x: Math.round(targetX), y: Math.round(targetY) });
+    }
   };
   triggerSlimeBounceRef.current = triggerSlimeBounce;
 
@@ -3912,7 +5413,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       setLocalShield(nextShield);
       spawnParticles(px, py, '#38bdf8', 'electric', 15, 4);
       addFloatingText(px, py - 25, `+40 SHIELD!`, '#38bdf8');
-      await updatePlayerPosition(user.id, { shield: nextShield });
+      emitSelfVitals({ shield: nextShield });
     } else if (equippedPower.id === 'damage_boost') {
       const ddUntil = Date.now() + 5000;
       doubleDamageUntilRef.current = ddUntil;
@@ -3930,14 +5431,22 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       if (isWarlock) {
         arenaPlayersRef.current.forEach(p => {
           if (p.uid !== user.id && p.isAlive && Math.hypot(p.x - newX, p.y - newY) < 120) {
-            damageArenaPlayer(p.uid, 20, user.id).then(res => {
-              if (res.killed) setKills(k => k + 1);
+            emitDamagePlayer(p.uid, 20, user.id).then(res => {
+              if (!wsConnectedRef.current && res.killed) setKills(k => k + 1);
             });
             addFloatingText(p.x, p.y - 30, '-20 VOID SHIFT', '#d946ef');
           }
         });
       }
-      await updatePlayerPosition(user.id, { x: Math.round(newX), y: Math.round(newY) });
+      if (wsConnectedRef.current && wsClientRef.current) {
+        wsClientRef.current.sendPosition({
+          x: Math.round(newX),
+          y: Math.round(newY),
+          angle: Number(ang.toFixed(2))
+        });
+      } else {
+        await updatePlayerPosition(user.id, { x: Math.round(newX), y: Math.round(newY) });
+      }
     } else if (equippedPower.id === 'matter_synthesizer') {
       woodRef.current += 15;
       brickRef.current += 10;
@@ -3947,7 +5456,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       setLocalMetal(metalRef.current);
       spawnParticles(px, py, '#10b981', 'spark', 16, 4);
       addFloatingText(px, py - 25, '+15🪵 +10🧱 +5⚙️', '#34d399');
-      await updatePlayerPosition(user.id, {
+      emitSelfVitals({
         wood: woodRef.current,
         brick: brickRef.current,
         metal: metalRef.current
@@ -3957,26 +5466,31 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   triggerSpecialPowerRef.current = triggerSpecialPower;
 
   // Ref to always access latest handleFireWeapon inside event listeners
-  const handleFireWeaponRef = useRef<(isAlt?: boolean) => void>(() => {});
+  const handleFireWeaponRef = useRef<(isAlt?: boolean, clientX?: number, clientY?: number) => void>(() => {});
 
-  // 5. Fire Weapon (Primary & Alternate Fire)
-  const handleFireWeapon = async (isAlt = false) => {
+  // 5. Fire Weapon (Primary & Alternate Fire — computes exact cursor world coordinates on click)
+  const handleFireWeapon = async (isAlt = false, clickClientX?: number, clickClientY?: number) => {
     if (!isAliveRef.current) return;
+    if (typeof clickClientX === 'number' && typeof clickClientY === 'number') {
+      mouseScreenPos.current = { x: clickClientX, y: clickClientY };
+    }
     const now = Date.now();
     const px = playerPosRef.current.x;
     const py = playerPosRef.current.y;
-    const aimRad = facingAngleRef.current;
     const vd = viewDimsRef.current;
     const curWeapon = equippedWeaponRef.current;
     const isDoubleDamage = now < doubleDamageUntilRef.current;
     const isHighGround = now < highGroundUntilRef.current;
 
-    const canvas = canvasRef.current;
-    const rect = canvas?.getBoundingClientRect();
-    const mouseCanvasX = rect ? mouseScreenPos.current.x - rect.left : vd.width / 2;
-    const mouseCanvasY = rect ? mouseScreenPos.current.y - rect.top : vd.height / 2;
-    const worldMouseX = Math.max(60, Math.min(MAP_SIZE - 60, mouseCanvasX + cameraRef.current.x));
-    const worldMouseY = Math.max(60, Math.min(MAP_SIZE - 60, mouseCanvasY + cameraRef.current.y));
+    const { worldX: rawWorldMouseX, worldY: rawWorldMouseY } = getWorldMouseCoords(clickClientX, clickClientY);
+    const worldMouseX = Math.max(60, Math.min(MAP_SIZE - 60, rawWorldMouseX));
+    const worldMouseY = Math.max(60, Math.min(MAP_SIZE - 60, rawWorldMouseY));
+    const dxAim = rawWorldMouseX - px;
+    const dyAim = rawWorldMouseY - py;
+    const distToMouse = Math.hypot(dxAim, dyAim);
+    const aimRad = distToMouse > 0.5 ? Math.atan2(dyAim, dxAim) : facingAngleRef.current;
+    facingAngleRef.current = aimRad;
+    const muzzleOffset = Math.min(24, Math.max(2, distToMouse * 0.4));
 
     const skinId = effectiveSkinDefRef.current.id;
 
@@ -3998,8 +5512,6 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         return;
       }
 
-      // Overlord — Cataclysmic Might: Alternate fire recharge rate doubled (50% cooldown)
-      // Warlock — Cosmic Shift: Teleport alt-fire cooldown reduced by 25%
       let altCooldownMs = (alt.altCooldownSeconds || 3) * 1000;
       if (skinId === 'overlord') {
         altCooldownMs = Math.round(altCooldownMs * 0.5);
@@ -4021,55 +5533,169 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           const toX = worldMouseX;
           const toY = worldMouseY;
 
-          spawnParticles(fromX, fromY, '#06b6d4', 'electric', 20, 6);
-          spawnParticles(fromX, fromY, '#a855f7', 'spark', 15, 5);
+          const departGlow = {
+            id: `vfx_warp_depart_${now}`,
+            kind: 'shockwave' as const,
+            x: fromX,
+            y: fromY,
+            maxRadius: 72,
+            color: '#a855f7',
+            secondaryColor: '#22d3ee',
+            ringCount: 2,
+            lineWidth: 3.5,
+            startedAt: now,
+            durationMs: 360
+          };
+          const tetherVfx = {
+            id: `vfx_warp_tether_${now}`,
+            kind: 'warp_tether' as const,
+            x1: fromX,
+            y1: fromY,
+            x2: toX,
+            y2: toY,
+            startedAt: now,
+            durationMs: 460
+          };
+          const arriveVfx = {
+            id: `vfx_warp_arrive_${now}`,
+            kind: 'shockwave' as const,
+            x: toX,
+            y: toY,
+            maxRadius: 128,
+            color: '#22d3ee',
+            secondaryColor: '#e879f9',
+            ringCount: 3,
+            lineWidth: 5,
+            startedAt: now,
+            durationMs: 440
+          };
+
+          pushWeaponVfx(tetherVfx);
+          pushWeaponVfx(departGlow);
+
+          spawnParticles(fromX, fromY, '#06b6d4', 'electric', 22, 6.5);
+          spawnParticles(fromX, fromY, '#a855f7', 'spark', 16, 5.5);
 
           setPlayerCoords(toX, toY);
           cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, toX - vd.width / 2));
           cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, toY - vd.height / 2));
 
-          spawnParticles(toX, toY, '#06b6d4', 'electric', 25, 6);
-          spawnParticles(toX, toY, '#38bdf8', 'flame', 15, 5);
+          pushWeaponVfx(arriveVfx);
+          triggerScreenShake(5, 190);
+          spawnParticles(toX, toY, '#22d3ee', 'electric', 26, 7);
+          spawnParticles(toX, toY, '#c084fc', 'flame', 16, 5.5);
           addFloatingText(toX, toY - 28, '⚡ QUANTUM WARP!', '#22d3ee');
           soundEngine.playSpatialBuild('metal_bunker', toX, toY, toX, toY);
 
+          if (wsConnectedRef.current && wsClientRef.current) {
+            wsClientRef.current.sendShot({
+              ownerId: user.id,
+              weaponId: curWeapon.id,
+              isAlt: true,
+              altType: 'teleport',
+              x: toX,
+              y: toY,
+              angle: aimRad,
+              color: '#22d3ee',
+              vfx: [tetherVfx, departGlow, arriveVfx]
+            });
+            wsClientRef.current.sendPosition({
+              x: Math.round(toX),
+              y: Math.round(toY),
+              angle: Number(aimRad.toFixed(2))
+            });
+          } else {
+            await updatePlayerPosition(user.id, { x: Math.round(toX), y: Math.round(toY) });
+          }
+
           arenaPlayersRef.current.forEach(p => {
-            if (p.uid !== user.id && p.isAlive) {
+            if (p.uid !== user.id && p.isAlive && (p.hp === undefined || p.hp > 0)) {
               const d = Math.hypot(p.x - toX, p.y - toY);
               if (d < 120) {
-                damageArenaPlayer(p.uid, altDmg, user.id).then(res => {
-                  if (res.killed) setKills(k => k + 1);
+                emitDamagePlayer(p.uid, altDmg, user.id).then(res => {
+                  if (!wsConnectedRef.current && res.killed) setKills(k => k + 1);
                 });
-                spawnParticles(p.x, p.y, '#06b6d4', 'spark', 10, 4);
+                spawnParticles(p.x, p.y, '#06b6d4', 'spark', 12, 5);
                 addFloatingText(p.x, p.y - 30, `-${altDmg} WARP SHOCK`, '#06b6d4');
               }
             }
           });
-
-          await updatePlayerPosition(user.id, { x: Math.round(toX), y: Math.round(toY) });
           break;
         }
 
         case 'ring_wave': {
           soundEngine.playSpatialShoot('bunsen_burner', px, py, px, py);
           addFloatingText(px, py - 25, '🔥 360° HEATWAVE!', '#f97316');
-          spawnParticles(px, py, '#f97316', 'flame', 24, 6);
+          spawnParticles(px, py, '#f97316', 'flame', 28, 7);
+          spawnParticles(px, py, '#fde047', 'spark', 14, 5.5);
+          const waveVfx = {
+            id: `vfx_heatwave_${now}`,
+            kind: 'shockwave' as const,
+            x: px,
+            y: py,
+            maxRadius: 265,
+            color: '#f97316',
+            secondaryColor: '#fde047',
+            ringCount: 3,
+            lineWidth: 6,
+            startedAt: now,
+            durationMs: 460
+          };
+          pushWeaponVfx(waveVfx);
+          triggerScreenShake(4.5, 170);
 
+          const netProjectiles: NonNullable<BattleShotEvent['projectiles']> = [];
           const ringCount = 12;
           for (let i = 0; i < ringCount; i++) {
             const rad = (i / ringCount) * Math.PI * 2;
+            const sx = px + Math.cos(rad) * 20;
+            const sy = py + Math.sin(rad) * 20;
+            const vx = Math.cos(rad) * 12.5;
+            const vy = Math.sin(rad) * 12.5;
             projectilesRef.current.push({
               id: `alt_ring_${now}_${i}`,
-              x: px + Math.cos(rad) * 20,
-              y: py + Math.sin(rad) * 20,
-              vx: Math.cos(rad) * 12,
-              vy: Math.sin(rad) * 12,
-              rangeRemaining: 260,
+              x: sx,
+              y: sy,
+              startX: sx,
+              startY: sy,
+              vx,
+              vy,
+              rangeRemaining: 270,
+              maxRange: 270,
               damage: altDmg,
               ownerId: user.id,
               weaponId: curWeapon.id,
               color: '#f97316',
+              isAlt: true,
+              altType: 'ring_wave',
+              age: 0,
+              trail: [{ x: sx, y: sy }],
               isHighGround
+            });
+            netProjectiles.push({
+              x: sx,
+              y: sy,
+              vx,
+              vy,
+              range: 270,
+              damage: altDmg,
+              color: '#f97316',
+              isAlt: true,
+              altType: 'ring_wave'
+            });
+          }
+          if (wsConnectedRef.current && wsClientRef.current) {
+            wsClientRef.current.sendShot({
+              ownerId: user.id,
+              weaponId: curWeapon.id,
+              isAlt: true,
+              altType: 'ring_wave',
+              x: px,
+              y: py,
+              angle: aimRad,
+              color: '#f97316',
+              projectiles: netProjectiles,
+              vfx: [waveVfx]
             });
           }
           break;
@@ -4078,22 +5704,72 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         case 'acid_pool': {
           soundEngine.playSpatialShoot('acid_pipette', px, py, px, py);
           addFloatingText(px, py - 25, '🧪 ACID SPLASH!', '#10b981');
-          spawnParticles(px, py, '#10b981', 'spark', 15, 4);
+          spawnParticles(px, py, '#34d399', 'spark', 18, 5);
+          const acidMuzzle = {
+            id: `vfx_acid_muzzle_${now}`,
+            kind: 'muzzle' as const,
+            x: px + Math.cos(aimRad) * 18,
+            y: py + Math.sin(aimRad) * 18,
+            angle: aimRad,
+            weaponId: curWeapon.id,
+            color: '#10b981',
+            isAlt: true,
+            startedAt: now,
+            durationMs: 210
+          };
+          pushWeaponVfx(acidMuzzle);
 
+          const netProjectiles: NonNullable<BattleShotEvent['projectiles']> = [];
           for (let i = -1; i <= 1; i++) {
-            const rad = aimRad + i * 0.15;
+            const rad = aimRad + i * 0.2;
+            const sx = px + Math.cos(rad) * muzzleOffset;
+            const sy = py + Math.sin(rad) * muzzleOffset;
+            const vx = Math.cos(rad) * 13.5;
+            const vy = Math.sin(rad) * 13.5;
             projectilesRef.current.push({
               id: `alt_acid_${now}_${i}`,
-              x: px + Math.cos(rad) * 25,
-              y: py + Math.sin(rad) * 25,
-              vx: Math.cos(rad) * 14,
-              vy: Math.sin(rad) * 14,
-              rangeRemaining: 400,
+              x: sx,
+              y: sy,
+              startX: sx,
+              startY: sy,
+              vx,
+              vy,
+              rangeRemaining: 350,
+              maxRange: 350,
               damage: altDmg,
               ownerId: user.id,
               weaponId: curWeapon.id,
               color: '#10b981',
+              isAlt: true,
+              altType: 'acid_pool',
+              age: 0,
+              trail: [{ x: sx, y: sy }],
               isHighGround
+            });
+            netProjectiles.push({
+              x: sx,
+              y: sy,
+              vx,
+              vy,
+              range: 350,
+              damage: altDmg,
+              color: '#10b981',
+              isAlt: true,
+              altType: 'acid_pool'
+            });
+          }
+          if (wsConnectedRef.current && wsClientRef.current) {
+            wsClientRef.current.sendShot({
+              ownerId: user.id,
+              weaponId: curWeapon.id,
+              isAlt: true,
+              altType: 'acid_pool',
+              x: px,
+              y: py,
+              angle: aimRad,
+              color: '#10b981',
+              projectiles: netProjectiles,
+              vfx: [acidMuzzle]
             });
           }
           break;
@@ -4102,22 +5778,88 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         case 'freeze_blast': {
           soundEngine.playSpatialShoot('cryo_freeze_ray', px, py, px, py);
           addFloatingText(px, py - 25, '❄️ GLACIAL BLAST!', '#06b6d4');
-          spawnParticles(px, py, '#06b6d4', 'spark', 18, 5);
+          spawnParticles(px, py, '#67e8f9', 'spark', 22, 6);
+          const frostMuzzle = {
+            id: `vfx_frost_muzzle_${now}`,
+            kind: 'muzzle' as const,
+            x: px + Math.cos(aimRad) * 18,
+            y: py + Math.sin(aimRad) * 18,
+            angle: aimRad,
+            weaponId: curWeapon.id,
+            color: '#22d3ee',
+            isAlt: true,
+            startedAt: now,
+            durationMs: 220
+          };
+          const frostHalo = {
+            id: `vfx_frost_halo_${now}`,
+            kind: 'shockwave' as const,
+            x: px,
+            y: py,
+            maxRadius: 115,
+            color: '#67e8f9',
+            secondaryColor: '#e0f2fe',
+            ringCount: 2,
+            lineWidth: 4,
+            startedAt: now,
+            durationMs: 360
+          };
+          pushWeaponVfx(frostMuzzle);
+          pushWeaponVfx(frostHalo);
 
+          const netProjectiles: NonNullable<BattleShotEvent['projectiles']> = [];
           for (let i = -2; i <= 2; i++) {
-            const rad = aimRad + i * 0.12;
+            const rad = aimRad + i * 0.14;
+            const sx = px + Math.cos(rad) * muzzleOffset;
+            const sy = py + Math.sin(rad) * muzzleOffset;
+            const spd = i === 0 ? 18 : 15;
+            const vx = Math.cos(rad) * spd;
+            const vy = Math.sin(rad) * spd;
+            const dmgVal = i === 0 ? altDmg : Math.round(altDmg * 0.65);
             projectilesRef.current.push({
               id: `alt_freeze_${now}_${i}`,
-              x: px + Math.cos(rad) * 25,
-              y: py + Math.sin(rad) * 25,
-              vx: Math.cos(rad) * (i === 0 ? 17 : 14),
-              vy: Math.sin(rad) * (i === 0 ? 17 : 14),
+              x: sx,
+              y: sy,
+              startX: sx,
+              startY: sy,
+              vx,
+              vy,
               rangeRemaining: 480,
-              damage: i === 0 ? altDmg : Math.round(altDmg * 0.65),
+              maxRange: 480,
+              damage: dmgVal,
               ownerId: user.id,
               weaponId: curWeapon.id,
               color: '#38bdf8',
+              isAlt: true,
+              altType: 'freeze_blast',
+              age: 0,
+              trail: [{ x: sx, y: sy }],
               isHighGround
+            });
+            netProjectiles.push({
+              x: sx,
+              y: sy,
+              vx,
+              vy,
+              range: 480,
+              damage: dmgVal,
+              color: '#38bdf8',
+              isAlt: true,
+              altType: 'freeze_blast'
+            });
+          }
+          if (wsConnectedRef.current && wsClientRef.current) {
+            wsClientRef.current.sendShot({
+              ownerId: user.id,
+              weaponId: curWeapon.id,
+              isAlt: true,
+              altType: 'freeze_blast',
+              x: px,
+              y: py,
+              angle: aimRad,
+              color: '#38bdf8',
+              projectiles: netProjectiles,
+              vfx: [frostMuzzle, frostHalo]
             });
           }
           break;
@@ -4125,45 +5867,159 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
         case 'spread_beam': {
           soundEngine.playSpatialShoot('laser_pointer', px, py, px, py);
-          addFloatingText(px, py - 25, '🔦 TRI-LASER!', '#ef4444');
-          spawnParticles(px, py, '#ef4444', 'spark', 12, 5);
+          addFloatingText(px, py - 25, '🔦 PRISMATIC TRI-LASER!', '#ef4444');
+          spawnParticles(px, py, '#ef4444', 'spark', 16, 6);
+          const prismMuzzle = {
+            id: `vfx_prism_muzzle_${now}`,
+            kind: 'muzzle' as const,
+            x: px + Math.cos(aimRad) * 18,
+            y: py + Math.sin(aimRad) * 18,
+            angle: aimRad,
+            weaponId: curWeapon.id,
+            color: '#f43f5e',
+            isAlt: true,
+            startedAt: now,
+            durationMs: 240
+          };
+          pushWeaponVfx(prismMuzzle);
 
+          const netVfx: any[] = [prismMuzzle];
+          const netProjectiles: NonNullable<BattleShotEvent['projectiles']> = [];
+          const prismColors = ['#ef4444', '#facc15', '#ec4899'];
           [-0.26, 0, 0.26].forEach((offset, idx) => {
             const rad = aimRad + offset;
+            const sx = px + Math.cos(rad) * muzzleOffset;
+            const sy = py + Math.sin(rad) * muzzleOffset;
+            const beamEndDist = computeBeamWallClipDistance(sx, sy, rad, 660);
+            const beamVfx = {
+              id: `vfx_prism_beam_${now}_${idx}`,
+              kind: 'beam' as const,
+              x1: sx,
+              y1: sy,
+              x2: sx + Math.cos(rad) * beamEndDist,
+              y2: sy + Math.sin(rad) * beamEndDist,
+              color: prismColors[idx] || '#ef4444',
+              coreColor: '#ffffff',
+              width: idx === 1 ? 8 : 6,
+              startedAt: now,
+              durationMs: 360
+            };
+            pushWeaponVfx(beamVfx);
+            netVfx.push(beamVfx);
+            const vx = Math.cos(rad) * 25;
+            const vy = Math.sin(rad) * 25;
             projectilesRef.current.push({
               id: `alt_laser_${now}_${idx}`,
-              x: px + Math.cos(rad) * 26,
-              y: py + Math.sin(rad) * 26,
-              vx: Math.cos(rad) * 24,
-              vy: Math.sin(rad) * 24,
+              x: sx,
+              y: sy,
+              startX: sx,
+              startY: sy,
+              vx,
+              vy,
               rangeRemaining: 680,
+              maxRange: 680,
               damage: altDmg,
               ownerId: user.id,
               weaponId: curWeapon.id,
-              color: '#ef4444',
-              isHighGround
+              color: prismColors[idx] || '#ef4444',
+              isAlt: true,
+              altType: 'spread_beam',
+              age: 0,
+              trail: [{ x: sx, y: sy }],
+              isHighGround,
+              piercesEnemies: true,
+              hitEnemyUids: new Set<string>()
+            });
+            netProjectiles.push({
+              x: sx,
+              y: sy,
+              vx,
+              vy,
+              range: 680,
+              damage: altDmg,
+              color: prismColors[idx] || '#ef4444',
+              isAlt: true,
+              altType: 'spread_beam'
             });
           });
+          if (wsConnectedRef.current && wsClientRef.current) {
+            wsClientRef.current.sendShot({
+              ownerId: user.id,
+              weaponId: curWeapon.id,
+              isAlt: true,
+              altType: 'spread_beam',
+              x: px,
+              y: py,
+              angle: aimRad,
+              color: '#ef4444',
+              projectiles: netProjectiles,
+              vfx: netVfx
+            });
+          }
           break;
         }
 
         case 'emp_burst': {
           soundEngine.playSpatialShoot('tesla_coil', px, py, px, py);
           addFloatingText(px, py - 25, '⚡ EMP PULSE NOVA!', '#38bdf8');
-          spawnParticles(px, py, '#38bdf8', 'electric', 30, 7);
+          spawnParticles(px, py, '#38bdf8', 'electric', 32, 7.5);
+          triggerScreenShake(5.5, 200);
 
+          const stunnedTargets: Array<{ x: number; y: number }> = [];
           arenaPlayersRef.current.forEach(p => {
-            if (p.uid !== user.id && p.isAlive) {
+            if (p.uid !== user.id && p.isAlive && (p.hp === undefined || p.hp > 0)) {
               const d = Math.hypot(p.x - px, p.y - py);
               if (d < 220) {
-                damageArenaPlayer(p.uid, altDmg, user.id).then(res => {
-                  if (res.killed) setKills(k => k + 1);
+                stunnedTargets.push({ x: p.x, y: p.y });
+                emitDamagePlayer(p.uid, altDmg, user.id).then(res => {
+                  if (!wsConnectedRef.current && res.killed) setKills(k => k + 1);
                 });
-                spawnParticles(p.x, p.y, '#38bdf8', 'electric', 12, 5);
+                spawnParticles(p.x, p.y, '#38bdf8', 'electric', 16, 6);
                 addFloatingText(p.x, p.y - 30, `-${altDmg} EMP STUN`, '#38bdf8');
               }
             }
           });
+
+          const empDome = {
+            id: `vfx_emp_dome_${now}`,
+            kind: 'shockwave' as const,
+            x: px,
+            y: py,
+            maxRadius: 230,
+            color: '#38bdf8',
+            secondaryColor: '#e0f2fe',
+            ringCount: 3,
+            lineWidth: 5,
+            startedAt: now,
+            durationMs: 420
+          };
+          const empBolts = {
+            id: `vfx_emp_bolts_${now}`,
+            kind: 'lightning_nova' as const,
+            x: px,
+            y: py,
+            maxRadius: 220,
+            targets: stunnedTargets,
+            color: '#38bdf8',
+            seed: now % 10000,
+            startedAt: now,
+            durationMs: 440
+          };
+          pushWeaponVfx(empDome);
+          pushWeaponVfx(empBolts);
+          if (wsConnectedRef.current && wsClientRef.current) {
+            wsClientRef.current.sendShot({
+              ownerId: user.id,
+              weaponId: curWeapon.id,
+              isAlt: true,
+              altType: 'emp_burst',
+              x: px,
+              y: py,
+              angle: aimRad,
+              color: '#38bdf8',
+              vfx: [empDome, empBolts]
+            });
+          }
           break;
         }
 
@@ -4173,16 +6029,45 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           acousticShieldUntilRef.current = asUntil;
           setAcousticShieldUntil(asUntil);
           addFloatingText(px, py - 25, '🔊 ACOUSTIC DEFLECTOR (2.8s)', '#eab308');
-          spawnParticles(px, py, '#eab308', 'spark', 25, 6);
+          spawnParticles(px, py, '#eab308', 'spark', 28, 6.5);
+          const sonicNova = {
+            id: `vfx_sonic_nova_${now}`,
+            kind: 'shockwave' as const,
+            x: px,
+            y: py,
+            maxRadius: 190,
+            color: '#eab308',
+            secondaryColor: '#fef08a',
+            ringCount: 4,
+            lineWidth: 4.5,
+            startedAt: now,
+            durationMs: 440
+          };
+          pushWeaponVfx(sonicNova);
+          triggerScreenShake(3.5, 150);
+
+          if (wsConnectedRef.current && wsClientRef.current) {
+            wsClientRef.current.sendShot({
+              ownerId: user.id,
+              weaponId: curWeapon.id,
+              isAlt: true,
+              altType: 'sonic_barrier',
+              x: px,
+              y: py,
+              angle: aimRad,
+              color: '#eab308',
+              vfx: [sonicNova]
+            });
+          }
 
           arenaPlayersRef.current.forEach(p => {
-            if (p.uid !== user.id && p.isAlive) {
+            if (p.uid !== user.id && p.isAlive && (p.hp === undefined || p.hp > 0)) {
               const d = Math.hypot(p.x - px, p.y - py);
               if (d < 180) {
-                damageArenaPlayer(p.uid, altDmg, user.id).then(res => {
-                  if (res.killed) setKills(k => k + 1);
+                emitDamagePlayer(p.uid, altDmg, user.id).then(res => {
+                  if (!wsConnectedRef.current && res.killed) setKills(k => k + 1);
                 });
-                spawnParticles(p.x, p.y, '#eab308', 'spark', 10, 4);
+                spawnParticles(p.x, p.y, '#eab308', 'spark', 12, 5);
                 addFloatingText(p.x, p.y - 30, `-${altDmg} ACOUSTIC SHOCK`, '#eab308');
               }
             }
@@ -4194,30 +6079,79 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           soundEngine.playSpatialShoot('particle_accelerator', px, py, px, py);
           addFloatingText(px, py - 25, '🌀 GRAVITATIONAL VORTEX!', '#a855f7');
           spawnParticles(px, py, '#a855f7', 'electric', 20, 6);
+          const vortexRange = Math.max(90, Math.min(620, distToMouse));
+          const sx = px + Math.cos(aimRad) * muzzleOffset;
+          const sy = py + Math.sin(aimRad) * muzzleOffset;
 
-          const targetDist = Math.hypot(worldMouseX - px, worldMouseY - py);
-          const aimAngle = Math.atan2(worldMouseY - py, worldMouseX - px);
+          const vortexMuzzle = {
+            id: `vfx_vortex_muzzle_${now}`,
+            kind: 'muzzle' as const,
+            x: sx,
+            y: sy,
+            angle: aimRad,
+            weaponId: curWeapon.id,
+            color: '#c084fc',
+            isAlt: true,
+            startedAt: now,
+            durationMs: 220
+          };
+          pushWeaponVfx(vortexMuzzle);
+
+          const vx = Math.cos(aimRad) * 16.5;
+          const vy = Math.sin(aimRad) * 16.5;
           projectilesRef.current.push({
             id: `alt_vortex_${now}`,
-            x: px + Math.cos(aimAngle) * 25,
-            y: py + Math.sin(aimAngle) * 25,
-            vx: Math.cos(aimAngle) * 16,
-            vy: Math.sin(aimAngle) * 16,
-            rangeRemaining: Math.min(650, targetDist),
+            x: sx,
+            y: sy,
+            startX: sx,
+            startY: sy,
+            vx,
+            vy,
+            rangeRemaining: vortexRange,
+            maxRange: vortexRange,
             damage: altDmg,
             ownerId: user.id,
             weaponId: curWeapon.id,
             color: '#a855f7',
+            isAlt: true,
+            altType: 'vortex',
+            age: 0,
+            trail: [{ x: sx, y: sy }],
             isHighGround
           });
 
+          if (wsConnectedRef.current && wsClientRef.current) {
+            wsClientRef.current.sendShot({
+              ownerId: user.id,
+              weaponId: curWeapon.id,
+              isAlt: true,
+              altType: 'vortex',
+              x: sx,
+              y: sy,
+              angle: aimRad,
+              color: '#a855f7',
+              projectiles: [{
+                x: sx,
+                y: sy,
+                vx,
+                vy,
+                range: vortexRange,
+                damage: altDmg,
+                color: '#a855f7',
+                isAlt: true,
+                altType: 'vortex'
+              }],
+              vfx: [vortexMuzzle]
+            });
+          }
+
           arenaPlayersRef.current.forEach(p => {
-            if (p.uid !== user.id && p.isAlive) {
+            if (p.uid !== user.id && p.isAlive && (p.hp === undefined || p.hp > 0)) {
               const d = Math.hypot(p.x - worldMouseX, p.y - worldMouseY);
               if (d < 180) {
-                spawnParticles(p.x, p.y, '#a855f7', 'spark', 8, 4);
-                damageArenaPlayer(p.uid, altDmg, user.id).then(res => {
-                  if (res.killed) setKills(k => k + 1);
+                spawnParticles(p.x, p.y, '#a855f7', 'spark', 10, 5);
+                emitDamagePlayer(p.uid, altDmg, user.id).then(res => {
+                  if (!wsConnectedRef.current && res.killed) setKills(k => k + 1);
                 });
                 addFloatingText(p.x, p.y - 30, `-${altDmg} VORTEX CRUSH`, '#c084fc');
               }
@@ -4228,47 +6162,162 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
         case 'cluster_bomb': {
           soundEngine.playSpatialShoot('biohazard_railgun', px, py, px, py);
-          addFloatingText(px, py - 25, '☣️ CLUSTER CANISTERS!', '#84cc16');
-          spawnParticles(px, py, '#84cc16', 'smoke', 20, 5);
+          addFloatingText(px, py - 25, '☣️ MUTAGEN CLUSTER CANISTERS!', '#84cc16');
+          spawnParticles(px, py, '#84cc16', 'smoke', 20, 5.5);
+          const clusterMuzzle = {
+            id: `vfx_cluster_muzzle_${now}`,
+            kind: 'muzzle' as const,
+            x: px + Math.cos(aimRad) * 18,
+            y: py + Math.sin(aimRad) * 18,
+            angle: aimRad,
+            weaponId: curWeapon.id,
+            color: '#a3e635',
+            isAlt: true,
+            startedAt: now,
+            durationMs: 220
+          };
+          pushWeaponVfx(clusterMuzzle);
+          triggerScreenShake(3.5, 140);
 
-          [-0.2, 0, 0.2].forEach((offset, idx) => {
+          const netProjectiles: NonNullable<BattleShotEvent['projectiles']> = [];
+          [-0.22, 0, 0.22].forEach((offset, idx) => {
             const rad = aimRad + offset;
+            const sx = px + Math.cos(rad) * muzzleOffset;
+            const sy = py + Math.sin(rad) * muzzleOffset;
+            const clusterDist = Math.max(160, Math.min(480, distToMouse > 40 ? distToMouse : 380));
+            const vx = Math.cos(rad) * 16.5;
+            const vy = Math.sin(rad) * 16.5;
             projectilesRef.current.push({
               id: `alt_cluster_${now}_${idx}`,
-              x: px + Math.cos(rad) * 26,
-              y: py + Math.sin(rad) * 26,
-              vx: Math.cos(rad) * 18,
-              vy: Math.sin(rad) * 18,
-              rangeRemaining: 600,
+              x: sx,
+              y: sy,
+              startX: sx,
+              startY: sy,
+              vx,
+              vy,
+              rangeRemaining: clusterDist,
+              maxRange: clusterDist,
               damage: altDmg,
               ownerId: user.id,
               weaponId: curWeapon.id,
               color: '#84cc16',
+              isAlt: true,
+              altType: 'cluster_bomb',
+              age: 0,
+              trail: [{ x: sx, y: sy }],
               isHighGround
             });
+            netProjectiles.push({
+              x: sx,
+              y: sy,
+              vx,
+              vy,
+              range: clusterDist,
+              damage: altDmg,
+              color: '#84cc16',
+              isAlt: true,
+              altType: 'cluster_bomb'
+            });
           });
+          if (wsConnectedRef.current && wsClientRef.current) {
+            wsClientRef.current.sendShot({
+              ownerId: user.id,
+              weaponId: curWeapon.id,
+              isAlt: true,
+              altType: 'cluster_bomb',
+              x: px,
+              y: py,
+              angle: aimRad,
+              color: '#84cc16',
+              projectiles: netProjectiles,
+              vfx: [clusterMuzzle]
+            });
+          }
           break;
         }
 
         case 'orbital_strike': {
           soundEngine.playSpatialShoot('antimatter_annihilator', px, py, px, py);
-          addFloatingText(worldMouseX, worldMouseY - 35, '⚠️ ORBITAL LOCK!', '#f43f5e');
-          spawnParticles(worldMouseX, worldMouseY, '#f43f5e', 'spark', 15, 4);
+          addFloatingText(worldMouseX, worldMouseY - 35, '⚠️ ORBITAL POSITRON LOCK!', '#f43f5e');
+          spawnParticles(worldMouseX, worldMouseY, '#f43f5e', 'spark', 18, 4.5);
+          const lockVfx = {
+            id: `vfx_orbital_lock_${now}`,
+            kind: 'orbital_lock' as const,
+            x: worldMouseX,
+            y: worldMouseY,
+            radius: 160,
+            startedAt: now,
+            durationMs: 260
+          };
+          pushWeaponVfx(lockVfx);
+          if (wsConnectedRef.current && wsClientRef.current) {
+            wsClientRef.current.sendShot({
+              ownerId: user.id,
+              weaponId: curWeapon.id,
+              isAlt: true,
+              altType: 'orbital_strike',
+              x: worldMouseX,
+              y: worldMouseY,
+              angle: aimRad,
+              color: '#f43f5e',
+              vfx: [lockVfx]
+            });
+          }
 
           setTimeout(() => {
-            spawnParticles(worldMouseX, worldMouseY, '#f43f5e', 'flame', 35, 8);
-            spawnParticles(worldMouseX, worldMouseY, '#fb7185', 'electric', 25, 7);
-            addFloatingText(worldMouseX, worldMouseY - 30, '💥 130 ANNIHILATION!', '#fda4af');
+            const strikeNow = Date.now();
+            const beamVfx = {
+              id: `vfx_orbital_beam_${strikeNow}`,
+              kind: 'orbital_beam' as const,
+              x: worldMouseX,
+              y: worldMouseY,
+              radius: 160,
+              startedAt: strikeNow,
+              durationMs: 650
+            };
+            const waveVfx = {
+              id: `vfx_orbital_wave_${strikeNow}`,
+              kind: 'shockwave' as const,
+              x: worldMouseX,
+              y: worldMouseY,
+              maxRadius: 175,
+              color: '#f43f5e',
+              secondaryColor: '#fecdd3',
+              ringCount: 3,
+              lineWidth: 7,
+              startedAt: strikeNow,
+              durationMs: 520
+            };
+            pushWeaponVfx(beamVfx);
+            pushWeaponVfx(waveVfx);
+            triggerScreenShake(8, 280);
+            spawnParticles(worldMouseX, worldMouseY, '#f43f5e', 'flame', 36, 8.5);
+            spawnParticles(worldMouseX, worldMouseY, '#fda4af', 'electric', 26, 7.5);
+            addFloatingText(worldMouseX, worldMouseY - 30, '💥 POSITRON ANNIHILATION!', '#fda4af');
             soundEngine.playSpatialBuild('metal_bunker', worldMouseX, worldMouseY, playerPosRef.current.x, playerPosRef.current.y);
 
+            if (wsConnectedRef.current && wsClientRef.current) {
+              wsClientRef.current.sendShot({
+                ownerId: user.id,
+                weaponId: curWeapon.id,
+                isAlt: true,
+                altType: 'orbital_strike',
+                x: worldMouseX,
+                y: worldMouseY,
+                angle: aimRad,
+                color: '#f43f5e',
+                vfx: [beamVfx, waveVfx]
+              });
+            }
+
             arenaPlayersRef.current.forEach(p => {
-              if (p.uid !== user.id && p.isAlive) {
+              if (p.uid !== user.id && p.isAlive && (p.hp === undefined || p.hp > 0)) {
                 const d = Math.hypot(p.x - worldMouseX, p.y - worldMouseY);
                 if (d < 160) {
-                  damageArenaPlayer(p.uid, altDmg, user.id).then(res => {
-                    if (res.killed) setKills(k => k + 1);
+                  emitDamagePlayer(p.uid, altDmg, user.id).then(res => {
+                    if (!wsConnectedRef.current && res.killed) setKills(k => k + 1);
                   });
-                  spawnParticles(p.x, p.y, '#f43f5e', 'flame', 15, 6);
+                  spawnParticles(p.x, p.y, '#f43f5e', 'flame', 18, 6.5);
                   addFloatingText(p.x, p.y - 30, `-${altDmg} POSITRON BLAST`, '#f43f5e');
                 }
               }
@@ -4291,7 +6340,6 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     if (isHighGround) finalDamage = Math.round(finalDamage * 1.2);
     if (isDoubleDamage) finalDamage = finalDamage * 2;
 
-    // Elite Archer — Wind Walker: Firing while sprinting/moving boosts precision, speed (+20%), and damage (+20%)
     const isWindWalkerActive = skinId === 'elitearcher' && isLocallyMovingRef.current;
     if (isWindWalkerActive) {
       finalDamage = Math.round(finalDamage * 1.2);
@@ -4299,7 +6347,6 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     }
 
     const baseSpeed = curWeapon.id === 'laser_pointer' ? 24 : (curWeapon.id === 'biohazard_railgun' ? 22 : 18);
-    // Archer — Eagle Eye: +35% projectile velocity & +30% range
     const isEagleEye = skinId === 'archer_hero';
     const speed = isEagleEye
       ? baseSpeed * 1.35
@@ -4315,34 +6362,112 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         ? '#2dd4bf'
         : (curWeapon.stats?.beamColor || '#f97316');
 
+    const startProjX = px + Math.cos(aimRad) * muzzleOffset;
+    const startProjY = py + Math.sin(aimRad) * muzzleOffset;
+
     const proj: Projectile = {
       id: `proj_${now}_${Math.random()}`,
-      x: px + Math.cos(aimRad) * 26,
-      y: py + Math.sin(aimRad) * 26,
+      x: startProjX,
+      y: startProjY,
+      startX: startProjX,
+      startY: startProjY,
       vx: Math.cos(aimRad) * speed,
       vy: Math.sin(aimRad) * speed,
       rangeRemaining: projRange,
+      maxRange: projRange,
       damage: finalDamage,
       ownerId: user.id,
       weaponId: curWeapon.id,
       color: beamColor,
+      isAlt: false,
+      age: 0,
+      trail: [{ x: startProjX, y: startProjY }],
       isHighGround,
       isDragonBlood: skinId === 'dragon_slayer',
-      isWindWalker: isWindWalkerActive
+      isWindWalker: isWindWalkerActive,
+      piercesEnemies: curWeapon.id === 'laser_pointer',
+      hitEnemyUids: curWeapon.id === 'laser_pointer' ? new Set<string>() : undefined
     };
 
     projectilesRef.current.push(proj);
     soundEngine.playSpatialShoot(curWeapon.id, px, py, px, py);
 
-    // Muzzle flash
-    spawnParticles(
-      px + Math.cos(aimRad) * 28,
-      py + Math.sin(aimRad) * 28,
-      beamColor,
-      skinId === 'dragon_slayer' ? 'flame' : 'spark',
-      4,
-      3
-    );
+    // Distinct Muzzle Cone & Optical Flash per weapon
+    const muzzleX = px + Math.cos(aimRad) * (muzzleOffset + 3);
+    const muzzleY = py + Math.sin(aimRad) * (muzzleOffset + 3);
+    const primaryMuzzleVfx = {
+      id: `vfx_muzzle_${now}_${Math.random()}`,
+      kind: 'muzzle' as const,
+      x: muzzleX,
+      y: muzzleY,
+      angle: aimRad,
+      weaponId: curWeapon.id,
+      color: beamColor,
+      isAlt: false,
+      startedAt: now,
+      durationMs: curWeapon.id === 'antimatter_annihilator' || curWeapon.id === 'particle_accelerator' ? 185 : 145
+    };
+    pushWeaponVfx(primaryMuzzleVfx);
+    const primaryVfxList: any[] = [primaryMuzzleVfx];
+
+    // Instant tracer flash line for Laser (enemy-piercing up to walls/range) & Railgun primary fire
+    if (curWeapon.id === 'laser_pointer' || curWeapon.id === 'biohazard_railgun') {
+      const flashDist = curWeapon.id === 'laser_pointer'
+        ? computeBeamWallClipDistance(muzzleX, muzzleY, aimRad, projRange)
+        : Math.min(340, projRange);
+      const beamVfx = {
+        id: `vfx_primary_beam_${now}_${Math.random()}`,
+        kind: 'beam' as const,
+        x1: muzzleX,
+        y1: muzzleY,
+        x2: muzzleX + Math.cos(aimRad) * flashDist,
+        y2: muzzleY + Math.sin(aimRad) * flashDist,
+        color: beamColor,
+        coreColor: '#ffffff',
+        width: curWeapon.id === 'biohazard_railgun' ? 5.5 : 4.5,
+        startedAt: now,
+        durationMs: curWeapon.id === 'laser_pointer' ? 160 : 120
+      };
+      pushWeaponVfx(beamVfx);
+      primaryVfxList.push(beamVfx);
+    }
+    if (curWeapon.id === 'antimatter_annihilator') {
+      triggerScreenShake(2.8, 110);
+    }
+
+    if (wsConnectedRef.current && wsClientRef.current) {
+      wsClientRef.current.sendShot({
+        ownerId: user.id,
+        weaponId: curWeapon.id,
+        isAlt: false,
+        x: startProjX,
+        y: startProjY,
+        angle: aimRad,
+        color: beamColor,
+        projectiles: [{
+          x: startProjX,
+          y: startProjY,
+          vx: proj.vx,
+          vy: proj.vy,
+          range: projRange,
+          damage: finalDamage,
+          color: beamColor,
+          isAlt: false
+        }],
+        vfx: primaryVfxList
+      });
+    }
+
+    // Weapon-matched muzzle particles
+    const muzzlePType: ParticleFX['type'] =
+      skinId === 'dragon_slayer' || curWeapon.id === 'bunsen_burner'
+        ? 'flame'
+        : curWeapon.id === 'tesla_coil' || curWeapon.id === 'quantum_displacer'
+          ? 'electric'
+          : curWeapon.id === 'biohazard_railgun' || curWeapon.id === 'acid_pipette'
+            ? 'smoke'
+            : 'spark';
+    spawnParticles(muzzleX, muzzleY, beamColor, muzzlePType, 7, 3.8);
   };
 
   handleFireWeaponRef.current = handleFireWeapon;
@@ -4359,40 +6484,63 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
     const isPositionBlocked = (testX: number, testY: number, moveDx: number, moveDy: number): boolean => {
       const collRadius = 18;
+      const sIndex = spatialIndexRef.current;
 
-      // Prop base collision
-      if (worldDataRef.current) {
-        for (const sc of worldDataRef.current.scenery) {
-          if (sc.hp > 0 && sc.footprintRadius > 0) {
-            const dist = Math.hypot(testX - sc.x, testY - sc.y);
-            if (dist < collRadius + sc.footprintRadius * 0.7) {
-              return true;
-            }
-          }
-        }
-      }
+      if (sIndex) {
+        const c0 = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor((testX - 64) / SPATIAL_CELL_SIZE)));
+        const c1 = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor((testX + 64) / SPATIAL_CELL_SIZE)));
+        const r0 = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor((testY - 64) / SPATIAL_CELL_SIZE)));
+        const r1 = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor((testY + 64) / SPATIAL_CELL_SIZE)));
 
-      // Building solid hitbox collision (Roof and walls block player movement; compound wings supported)
-      if (worldDataRef.current?.buildings) {
-        for (const bldg of worldDataRef.current.buildings) {
-          for (const hb of getBuildingHitboxes(bldg)) {
-            if (
-              testX + collRadius > hb.x &&
-              testX - collRadius < hb.x + hb.w &&
-              testY + collRadius > hb.y &&
-              testY - collRadius < hb.y + hb.h
-            ) {
-              const dw = bldg.doorway;
-              const isAtDoorX = testX >= dw.x && testX <= dw.x + dw.w;
-              const isAtDoorY = testY >= dw.y - 12 && testY <= dw.y + dw.h + 12;
-              if (isAtDoorX && isAtDoorY) {
-                const roofLimitY = bldg.hitbox.y + WORLD_TILE_SIZE * (bldg.height >= 4 ? 2 : 1);
-                if (testY < roofLimitY) {
+        for (let r = r0; r <= r1; r++) {
+          for (let c = c0; c <= c1; c++) {
+            const cellIdx = r * SPATIAL_GRID_DIM + c;
+            const scList = sIndex.scenery[cellIdx];
+            for (let i = 0; i < scList.length; i++) {
+              const sc = scList[i];
+              if (sc.hp > 0 && sc.footprintRadius > 0) {
+                if (Math.hypot(testX - sc.x, testY - sc.y) < collRadius + sc.footprintRadius * 0.7) {
                   return true;
                 }
-                continue;
               }
-              return true;
+            }
+
+            const wallList = sIndex.cityWalls[cellIdx];
+            for (let i = 0; i < wallList.length; i++) {
+              const wall = wallList[i];
+              if (
+                testX + collRadius > wall.x &&
+                testX - collRadius < wall.x + wall.w &&
+                testY + collRadius > wall.y &&
+                testY - collRadius < wall.y + wall.h
+              ) {
+                return true;
+              }
+            }
+
+            const bldgList = sIndex.buildings[cellIdx];
+            for (let i = 0; i < bldgList.length; i++) {
+              const bldg = bldgList[i];
+              for (const hb of getBuildingHitboxes(bldg)) {
+                if (
+                  testX + collRadius > hb.x &&
+                  testX - collRadius < hb.x + hb.w &&
+                  testY + collRadius > hb.y &&
+                  testY - collRadius < hb.y + hb.h
+                ) {
+                  const dw = bldg.doorway;
+                  const isAtDoorX = testX >= dw.x && testX <= dw.x + dw.w;
+                  const isAtDoorY = testY >= dw.y - 12 && testY <= dw.y + dw.h + 12;
+                  if (isAtDoorX && isAtDoorY) {
+                    const roofLimitY = bldg.hitbox.y + WORLD_TILE_SIZE * (bldg.height >= 4 ? 2 : 1);
+                    if (testY < roofLimitY) {
+                      return true;
+                    }
+                    continue;
+                  }
+                  return true;
+                }
+              }
             }
           }
         }
@@ -4461,9 +6609,13 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         now - lastShotTimeRef.current > 1500 &&
         now - lastDamageTimeRef.current > 1500;
       const isShadowBlinking = activeSkinIdLoop === 'shadow_assassin' && now < shadowBlinkUntilRef.current;
+      const isFrostChilledLoop = now < frostSlowUntilRef.current;
       const isSlime = activeSkinIdLoop === 'slime';
       const maxShieldCapLoop = activeSkinIdLoop === 'knight_hero' ? 120 : 100;
-      const loopSpeedMult = (isRogueStealth ? 1.15 : 1) * (isShadowBlinking ? 1.18 : 1);
+      const loopSpeedMult =
+        (isRogueStealth ? 1.15 : 1) *
+        (isShadowBlinking ? 1.18 : 1) *
+        (isFrostChilledLoop ? 0.65 : 1);
 
       const speedPxPerSec = getSkinMovementSpeedPxPerSec(
         effectiveSkinDefRef.current,
@@ -4471,7 +6623,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         loopSpeedMult
       );
 
-      // --- 1. LOCAL PLAYER SMOOTH DELTA-TIME MOVEMENT & AXIS-SLIDING COLLISION ---
+      // --- 1. LOCAL PLAYER SMOOTH MOVEMENT & SPECTATOR FREE-ROAM ---
       if (playerAlive) {
         let dirX = 0;
         let dirY = 0;
@@ -4509,7 +6661,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             }
           }
 
-          // Slime — Viscous Form: smooth perpendicular obstacle slip when pressing straight into an edge
+          // Slime — Viscous Form: smooth perpendicular obstacle slip
           if (!moved && isSlime) {
             const slipStep = speedPxPerSec * dt * 0.85;
             if (Math.abs(dirX) >= Math.abs(dirY)) {
@@ -4559,9 +6711,14 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           isLocallyMovingRef.current = false;
         }
 
-        // Unstuck safeguard: ensure player is never trapped inside building walls/roofs
-        if (worldDataRef.current?.buildings) {
-          for (const bldg of worldDataRef.current.buildings) {
+        // Unstuck safeguard: building walls/roofs & city walls (via SpatialWorldIndex)
+        const sIndexUnstuck = spatialIndexRef.current;
+        if (sIndexUnstuck) {
+          const uc = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor(px / SPATIAL_CELL_SIZE)));
+          const ur = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor(py / SPATIAL_CELL_SIZE)));
+          const uCellIdx = ur * SPATIAL_GRID_DIM + uc;
+
+          for (const bldg of sIndexUnstuck.buildings[uCellIdx]) {
             const insideAnyWing = getBuildingHitboxes(bldg).some(
               hb => px > hb.x + 10 && px < hb.x + hb.w - 10 && py > hb.y + 10 && py < hb.y + hb.h - 10
             );
@@ -4577,9 +6734,32 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               }
             }
           }
+
+          const wallSafePad = 20;
+          for (const wall of sIndexUnstuck.cityWalls[uCellIdx]) {
+            if (
+              px + 14 > wall.x &&
+              px - 14 < wall.x + wall.w &&
+              py + 14 > wall.y &&
+              py - 14 < wall.y + wall.h
+            ) {
+              if (wall.orientation === 'h') {
+                const midY = wall.y + wall.h / 2;
+                py = py < midY ? wall.y - wallSafePad : wall.y + wall.h + wallSafePad;
+              } else {
+                const midX = wall.x + wall.w / 2;
+                px = px < midX ? wall.x - wallSafePad : wall.x + wall.w + wallSafePad;
+              }
+              px = Math.max(35, Math.min(MAP_SIZE - 35, px));
+              py = Math.max(35, Math.min(MAP_SIZE - 35, py));
+              playerPosRef.current.x = px;
+              playerPosRef.current.y = py;
+              break;
+            }
+          }
         }
 
-        // Unstuck safeguard: ensure player is never trapped inside walls or bunkers (exclude ramps!)
+        // Unstuck safeguard: placed structures (exclude ramps)
         for (const st of structuresRef.current) {
           if (st.type === 'brick_ramp') continue;
           const dist = Math.hypot(px - st.x, py - st.y);
@@ -4602,87 +6782,140 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           spawnParticles(px, py, '#38bdf8', 'spark', 2, 1.2);
         }
 
-        // Aim angle towards mouse in world space
-        const rect = canvas.getBoundingClientRect();
-        const mouseCanvasX = mouseScreenPos.current.x - rect.left;
-        const mouseCanvasY = mouseScreenPos.current.y - rect.top;
-        const worldMouseX = mouseCanvasX + cameraRef.current.x;
-        const worldMouseY = mouseCanvasY + cameraRef.current.y;
+        // Speed Boost particle trail while Speed Catalyst is active
+        if (now < speedBoostUntilRef.current && Math.random() < 0.35 * frameScale) {
+          spawnParticles(px, py + 8, '#c084fc', 'electric', 1, 1.5);
+        }
+        // Cryogenic Frost Chill icy crystal particles while slowed
+        if (isFrostChilledLoop && Math.random() < 0.35 * frameScale) {
+          spawnParticles(px, py + 6, '#67e8f9', 'spark', 1, 1.3);
+        }
 
-        const angle = Math.atan2(worldMouseY - py, worldMouseX - px);
-        facingAngleRef.current = angle;
-
-        // Ground Loot Pickup Detection
-        if (worldDataRef.current) {
-          worldDataRef.current.groundLoot.forEach(loot => {
-            if (!loot.isCollected) {
-              const dist = Math.hypot(px - loot.x, py - loot.y);
-              if (dist < 28) {
-                loot.isCollected = true;
-                soundEngine.playEatBanana();
-
-                if (loot.type === 'banana') {
-                  const nextHp = Math.min(100, hpRef.current + (loot.healHp || 25));
-                  hpRef.current = nextHp;
-                  setLocalHp(nextHp);
-                  addFloatingText(px, py - 25, '+25 HP Banana Snack! 🍌', '#facc15');
-                  spawnParticles(px, py, '#facc15', 'banana_peel', 6, 2);
-                } else if (loot.type === 'shield_cell') {
-                  const nextSh = Math.min(maxShieldCapLoop, shieldRef.current + (loot.grantShield || 30));
-                  shieldRef.current = nextSh;
-                  setLocalShield(nextSh);
-                  addFloatingText(px, py - 25, '+30 Shield Battery! ⚡', '#22d3ee');
-                  spawnParticles(px, py, '#22d3ee', 'electric', 6, 2);
-                } else if (loot.type === 'ammo_box') {
-                  woodRef.current += 15;
-                  brickRef.current += 10;
-                  metalRef.current += 5;
-                  setLocalWood(woodRef.current);
-                  setLocalBrick(brickRef.current);
-                  setLocalMetal(metalRef.current);
-                  addFloatingText(px, py - 25, '+15🪵 +10🧱 +5⚙️ Crate', '#4ade80');
-                } else {
-                  const nextHp = Math.min(100, hpRef.current + 15);
-                  const nextSh = Math.min(maxShieldCapLoop, shieldRef.current + 15);
-                  hpRef.current = nextHp;
-                  shieldRef.current = nextSh;
-                  speedBoostUntilRef.current = now + 6000;
-                  setLocalHp(nextHp);
-                  setLocalShield(nextSh);
-                  addFloatingText(px, py - 25, '+15 HP, Shield & +25% Speed (6s)! ⚡', '#c084fc');
-                  spawnParticles(px, py, '#c084fc', 'electric', 8, 2.5);
+        // Ground Loot Pickup Detection (O(1) spatial grid lookup)
+        if (sIndexUnstuck) {
+          const lc0 = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor((px - 40) / SPATIAL_CELL_SIZE)));
+          const lc1 = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor((px + 40) / SPATIAL_CELL_SIZE)));
+          const lr0 = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor((py - 40) / SPATIAL_CELL_SIZE)));
+          const lr1 = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor((py + 40) / SPATIAL_CELL_SIZE)));
+          for (let r = lr0; r <= lr1; r++) {
+            for (let c = lc0; c <= lc1; c++) {
+              const cellLoot = sIndexUnstuck.loot[r * SPATIAL_GRID_DIM + c];
+              for (let i = 0; i < cellLoot.length; i++) {
+                const loot = cellLoot[i];
+                if (!loot.isCollected && Math.hypot(px - loot.x, py - loot.y) < 30) {
+                  if (loot.type === 'banana') {
+                    if (hpRef.current >= 100) {
+                      const lastNotice = lootFullNoticeAtRef.current[loot.id] || 0;
+                      if (now - lastNotice > 2400) {
+                        lootFullNoticeAtRef.current[loot.id] = now;
+                        addFloatingText(px, py - 26, 'HP Full (100/100)', '#fde047');
+                      }
+                      continue;
+                    }
+                    loot.isCollected = true;
+                    soundEngine.playEatBanana();
+                    const prevHp = hpRef.current;
+                    const nextHp = Math.min(100, prevHp + (loot.healHp || 25));
+                    const gainedHp = nextHp - prevHp;
+                    hpRef.current = nextHp;
+                    setLocalHp(nextHp);
+                    addFloatingText(px, py - 25, `+${gainedHp} HP Banana! 🍌`, '#facc15');
+                    spawnParticles(px, py, '#facc15', 'banana_peel', 6, 2);
+                    emitSelfVitals({ hp: nextHp });
+                  } else if (loot.type === 'shield_cell') {
+                    if (shieldRef.current >= maxShieldCapLoop) {
+                      const lastNotice = lootFullNoticeAtRef.current[loot.id] || 0;
+                      if (now - lastNotice > 2400) {
+                        lootFullNoticeAtRef.current[loot.id] = now;
+                        addFloatingText(px, py - 26, `Shield Full (${maxShieldCapLoop}/${maxShieldCapLoop})`, '#38bdf8');
+                      }
+                      continue;
+                    }
+                    loot.isCollected = true;
+                    soundEngine.playEatBanana();
+                    const prevSh = shieldRef.current;
+                    const nextSh = Math.min(maxShieldCapLoop, prevSh + (loot.grantShield || 30));
+                    const gainedSh = nextSh - prevSh;
+                    shieldRef.current = nextSh;
+                    setLocalShield(nextSh);
+                    addFloatingText(px, py - 25, `+${gainedSh} Shield Battery! 🛡️`, '#22d3ee');
+                    spawnParticles(px, py, '#22d3ee', 'electric', 6, 2);
+                    emitSelfVitals({ shield: nextSh });
+                  } else if (loot.type === 'ammo_box') {
+                    loot.isCollected = true;
+                    soundEngine.playEatBanana();
+                    const addWood = loot.grantMats?.wood ?? 15;
+                    const addBrick = loot.grantMats?.brick ?? 10;
+                    const addMetal = loot.grantMats?.metal ?? 5;
+                    woodRef.current += addWood;
+                    brickRef.current += addBrick;
+                    metalRef.current += addMetal;
+                    setLocalWood(woodRef.current);
+                    setLocalBrick(brickRef.current);
+                    setLocalMetal(metalRef.current);
+                    addFloatingText(px, py - 25, `+${addWood}🪵 +${addBrick}🧱 +${addMetal}⚙️ Mats!`, '#4ade80');
+                    spawnParticles(px, py, '#4ade80', 'spark', 6, 2);
+                    emitSelfVitals({ wood: woodRef.current, brick: brickRef.current, metal: metalRef.current });
+                  } else {
+                    loot.isCollected = true;
+                    soundEngine.playEatBanana();
+                    const addHp = loot.healHp ?? 15;
+                    const addSh = loot.grantShield ?? 15;
+                    const nextHp = Math.min(100, hpRef.current + addHp);
+                    const nextSh = Math.min(maxShieldCapLoop, shieldRef.current + addSh);
+                    hpRef.current = nextHp;
+                    shieldRef.current = nextSh;
+                    const boostEnd = now + 6000;
+                    speedBoostUntilRef.current = boostEnd;
+                    setSpeedBoostUntil(boostEnd);
+                    setLocalHp(nextHp);
+                    setLocalShield(nextSh);
+                    addFloatingText(px, py - 25, `+${addHp}HP +${addSh}🛡️ & +25% Speed (6s)! ⚡`, '#c084fc');
+                    spawnParticles(px, py, '#c084fc', 'electric', 8, 2.5);
+                    emitSelfVitals({ hp: nextHp, shield: nextSh });
+                  }
                 }
               }
             }
-          });
-        }
-
-        // Sync position to Firestore throttled to preserve Firestore quota (750ms + distance threshold)
-        const distMoved = Math.hypot(px - lastSyncedX, py - lastSyncedY);
-        const angleDiff = Math.abs(angle - lastSyncedAngle);
-        if (now - lastPositionSync > 750 && (distMoved > 16 || angleDiff > 0.35 || now - lastPositionSync > 3000)) {
-          lastPositionSync = now;
-          lastSyncedX = px;
-          lastSyncedY = py;
-          lastSyncedAngle = angle;
-          updatePlayerPosition(user.id, {
-            x: Math.round(px),
-            y: Math.round(py),
-            angle: Number(angle.toFixed(2))
-          }).catch(() => {});
+          }
         }
       } else {
+        // Spectator Mode: free-roam observation camera across the entire map (no collision, no loot, no Firestore writes)
         isLocallyMovingRef.current = false;
+        let sDirX = 0;
+        let sDirY = 0;
+        if (keysPressed.current['w'] || keysPressed.current['arrowup']) sDirY -= 1;
+        if (keysPressed.current['s'] || keysPressed.current['arrowdown']) sDirY += 1;
+        if (keysPressed.current['a'] || keysPressed.current['arrowleft']) sDirX -= 1;
+        if (keysPressed.current['d'] || keysPressed.current['arrowright']) sDirX += 1;
+        if (sDirX !== 0 && sDirY !== 0) {
+          sDirX *= 0.7071;
+          sDirY *= 0.7071;
+        }
+        if (sDirX !== 0 || sDirY !== 0) {
+          const spectateSpeed = keysPressed.current['shift'] ? 700 : 440;
+          px = Math.max(35, Math.min(MAP_SIZE - 35, px + sDirX * spectateSpeed * dt));
+          py = Math.max(35, Math.min(MAP_SIZE - 35, py + sDirY * spectateSpeed * dt));
+          playerPosRef.current.x = px;
+          playerPosRef.current.y = py;
+        }
       }
 
-      // --- 2. REMOTE PLAYERS SPATIAL FOOTSTEPS ---
+      // --- 2. REMOTE PLAYERS SPATIAL FOOTSTEPS (RATE-LIMITED FOR 30+ STUDENTS) ---
       arenaPlayersRef.current.forEach(p => {
-        if (p.uid !== user.id && p.isAlive) {
+        if (p.uid !== user.id && p.isAlive && (p.hp === undefined || p.hp > 0)) {
           const prevPos = prevEnemyPositions.current[p.uid];
           if (prevPos) {
             const movedDist = Math.hypot(p.x - prevPos.x, p.y - prevPos.y);
-            if (movedDist > 3.5 && now - prevPos.lastStepTime > 320) {
+            const listenerDist = Math.hypot(p.x - px, p.y - py);
+            if (
+              listenerDist < 750 &&
+              movedDist > 4 &&
+              now - prevPos.lastStepTime > 360 &&
+              now - lastGlobalRemoteStepAtRef.current >= 140
+            ) {
               prevPos.lastStepTime = now;
+              lastGlobalRemoteStepAtRef.current = now;
               const enemyTileCol = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(p.x / WORLD_TILE_SIZE)));
               const enemyTileRow = Math.min(TILES_COUNT - 1, Math.max(0, Math.floor(p.y / WORLD_TILE_SIZE)));
               const enemySurface = worldDataRef.current?.tiles[enemyTileRow]?.[enemyTileCol]?.surface || 'grass';
@@ -4696,7 +6929,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         }
       });
 
-      // --- 3. SMOOTH FRAME-RATE-INDEPENDENT CAMERA TRACKING ---
+      // --- 3. SMOOTH FRAME-RATE-INDEPENDENT CAMERA TRACKING (COMPUTED BEFORE AIMING) ---
       const targetCamX = px - viewW / 2;
       const targetCamY = py - viewH / 2;
       const camLerp = 1 - Math.exp(-14 * dt);
@@ -4708,6 +6941,43 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
       const camX = cameraRef.current.x;
       const camY = cameraRef.current.y;
+
+      // Exact scaled world-space aim & high-frequency 18Hz WS position sync (Firestore fallback only when offline)
+      const { worldX: worldAimX, worldY: worldAimY } = getWorldMouseCoords();
+      if (playerAlive) {
+        const angle = Math.atan2(worldAimY - py, worldAimX - px);
+        facingAngleRef.current = angle;
+
+        const distMoved = Math.hypot(px - lastSyncedX, py - lastSyncedY);
+        const angleDiff = Math.abs(angle - lastSyncedAngle);
+        if (wsConnectedRef.current && wsClientRef.current) {
+          if (now - lastPositionSync >= 55 && (distMoved > 3 || angleDiff > 0.12)) {
+            lastPositionSync = now;
+            lastSyncedX = px;
+            lastSyncedY = py;
+            lastSyncedAngle = angle;
+            wsClientRef.current.sendPosition({
+              x: Math.round(px),
+              y: Math.round(py),
+              angle: Number(angle.toFixed(2)),
+              avatar: effectiveSkinIdRef.current,
+              equippedWeapon: equippedWeaponRef.current.id,
+              highGroundActive: now < highGroundUntilRef.current,
+              metalShieldActiveUntil: metalShieldUntilRef.current
+            });
+          }
+        } else if ((distMoved > 24 && now - lastPositionSync >= 1000) || (angleDiff > 0.5 && now - lastPositionSync >= 2200)) {
+          lastPositionSync = now;
+          lastSyncedX = px;
+          lastSyncedY = py;
+          lastSyncedAngle = angle;
+          updatePlayerPosition(user.id, {
+            x: Math.round(px),
+            y: Math.round(py),
+            angle: Number(angle.toFixed(2))
+          }).catch(() => {});
+        }
+      }
 
       // --- 4. 10-MINUTE SHRINKING STORM CIRCLE WITH 10S-PER-MINUTE SURGE & RANDOM CENTER ---
       const bState = battleStateRef.current;
@@ -4723,16 +6993,15 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       wasSurgingRef.current = storm.isSurging;
       soundEngine.updateMusicTension(storm.progress, storm.isSurging && isMatchActive);
 
-      // Throttled HUD & Minimap React State Sync (~120ms so canvas loop stays 60fps butter-smooth)
-      if (now - lastHudSync >= 120) {
+      // Throttled HUD & Minimap Canvas Sync (~280ms so canvas loop stays 60fps butter-smooth)
+      if (now - lastHudSync >= 280) {
         lastHudSync = now;
         setLocalX(Math.round(px));
         setLocalY(Math.round(py));
-        setFacingAngle(facingAngleRef.current);
-        setWalkCycle(walkCycleRef.current);
         setMatchElapsedSeconds(elapsedSec);
         setStormRadius(storm.radius);
         setIsSurgeActive(storm.isSurging && isMatchActive);
+        drawMinimapToCanvas();
       }
 
       // Storm Damage Outside Eye (Dark Knight reduces storm damage by 50%; Skeleton Warrior Brittle Guard saves fatal hit)
@@ -4752,26 +7021,38 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           );
           if (isDarkKnight) flashSkinAbility('Heavy Armor (-50% Storm DMG)');
 
-          let nextHp = Math.max(0, hpRef.current - stormHit);
-          if (nextHp <= 0 && activeSkinIdLoop === 'skeleton_warrior' && now >= brittleGuardCooldownUntilRef.current) {
-            nextHp = 20;
-            brittleGuardCooldownUntilRef.current = now + 25000;
-            brittleInvulnUntilRef.current = now + 1500;
-            addFloatingText(px, py - 42, '💀 BRITTLE GUARD SAVED YOU!', '#f59e0b');
-            spawnParticles(px, py, '#e7e5e4', 'stone_chip', 18, 5);
-            flashSkinAbility('Brittle Guard (20 HP Save)');
-          }
+          if (!wsConnectedRef.current) {
+            let nextHp = Math.max(0, hpRef.current - stormHit);
+            if (nextHp <= 0 && activeSkinIdLoop === 'skeleton_warrior' && now >= brittleGuardCooldownUntilRef.current) {
+              nextHp = 20;
+              brittleGuardCooldownUntilRef.current = now + 25000;
+              brittleInvulnUntilRef.current = now + 1500;
+              addFloatingText(px, py - 42, '💀 BRITTLE GUARD SAVED YOU!', '#f59e0b');
+              spawnParticles(px, py, '#e7e5e4', 'stone_chip', 18, 5);
+              flashSkinAbility('Brittle Guard (20 HP Save)');
+            }
 
-          hpRef.current = nextHp;
-          setLocalHp(nextHp);
-          if (nextHp <= 0) {
-            isAliveRef.current = false;
-            setIsAlive(false);
-          }
-          damageArenaPlayer(user.id, 8, undefined, true).then(res => {
-            if (res.killed && !(activeSkinIdLoop === 'skeleton_warrior' && res.brittleGuardTriggered)) {
+            hpRef.current = nextHp;
+            setLocalHp(nextHp);
+            if (nextHp <= 0) {
+              localEliminatedRef.current = true;
+              localDeathTimeRef.current = now;
               isAliveRef.current = false;
               setIsAlive(false);
+              setSelectedBuildType(null);
+              setActiveCrateModal(null);
+              setShowEliminationToast(true);
+              setTimeout(() => setShowEliminationToast(false), 3800);
+            }
+          }
+          emitDamagePlayer(user.id, 8, undefined, true).then(res => {
+            if (!wsConnectedRef.current && res.killed && !(activeSkinIdLoop === 'skeleton_warrior' && res.brittleGuardTriggered)) {
+              localEliminatedRef.current = true;
+              if (!localDeathTimeRef.current) localDeathTimeRef.current = Date.now();
+              isAliveRef.current = false;
+              setIsAlive(false);
+              setSelectedBuildType(null);
+              setActiveCrateModal(null);
             }
           });
         }
@@ -4805,7 +7086,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               spawnParticles(px, py, '#fbbf24', 'spark', 7, 2.5);
               addFloatingText(px, py - 32, '✨ +3HP +5🛡️ Restoration', '#fde047');
               flashSkinAbility('Aura of Restoration (Near Water)');
-              updatePlayerPosition(user.id, { hp: nextHp, shield: nextSh }).catch(() => {});
+              emitSelfVitals({ hp: nextHp, shield: nextSh });
             }
           }
         }
@@ -4835,8 +7116,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             nearbyTargets.forEach(target => {
               addFloatingText(target.x, target.y - 30, '-6🔥 Cataclysm', '#fb7185');
               spawnParticles(target.x, target.y, '#dc2626', 'spark', 6, 3);
-              damageArenaPlayer(target.uid, 6, user.id).then(res => {
-                if (res.killed) {
+              emitDamagePlayer(target.uid, 6, user.id).then(res => {
+                if (!wsConnectedRef.current && res.killed) {
                   setKills(prev => prev + 1);
                   addFloatingText(target.x, target.y - 46, 'ELIMINATED! 💀', '#fbbf24');
                 }
@@ -4846,17 +7127,17 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         }
       }
 
-      // Necromancer — Soul Harvester DoT burn ticks
-      if (soulBurnsRef.current.length > 0) {
+      // Necromancer — Soul Harvester DoT burn ticks (stopped immediately if local player eliminated)
+      if (playerAlive && soulBurnsRef.current.length > 0) {
         const remainingBurns: typeof soulBurnsRef.current = [];
         for (const burn of soulBurnsRef.current) {
           if (now >= burn.nextTickAt) {
-            const target = arenaPlayersRef.current.find(p => p.uid === burn.targetUid && p.isAlive);
-            if (target) {
+            const target = playerByUidRef.current.get(burn.targetUid);
+            if (target && target.isAlive && (target.hp === undefined || target.hp > 0)) {
               spawnParticles(target.x, target.y, '#06b6d4', 'flame', 6, 2.5);
               addFloatingText(target.x, target.y - 28, `-${burn.damagePerTick}🔥 SOUL BURN`, '#22d3ee');
-              damageArenaPlayer(target.uid, burn.damagePerTick, user.id).then(res => {
-                if (res.killed) {
+              emitDamagePlayer(target.uid, burn.damagePerTick, user.id).then(res => {
+                if (!wsConnectedRef.current && res.killed) {
                   setKills(prev => prev + 1);
                   addFloatingText(target.x, target.y - 46, 'SOUL HARVESTED! 💀', '#22d3ee');
                 }
@@ -4880,10 +7161,20 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       cratesRef.current.forEach(crate => {
         if (!crate.isClaimed && playerAlive) {
           const distToCrate = Math.hypot(px - crate.x, py - crate.y);
-          if (distToCrate < 34 && !activeCrateModalRef.current) {
-            activeCrateModalRef.current = crate;
-            setActiveCrateModal(crate);
-            setCrateQuestionTimer(3);
+          const cooldownUntil = crateDismissCooldownRef.current[crate.id] || 0;
+          if (distToCrate < 34 && !activeCrateModalRef.current && now >= cooldownUntil) {
+            if (seenCrateQuestionIdsRef.current.size > 150) {
+              seenCrateQuestionIdsRef.current.clear();
+            }
+            const [freshVaultQ] = getRandomizedPracticeVaultQuestions(1, seenCrateQuestionIdsRef.current);
+            if (freshVaultQ) {
+              seenCrateQuestionIdsRef.current.add(freshVaultQ.id);
+            }
+            const modalCrate: SupplyCrate = freshVaultQ ? { ...crate, question: freshVaultQ } : crate;
+            crateSubmittingRef.current = false;
+            activeCrateModalRef.current = modalCrate;
+            setActiveCrateModal(modalCrate);
+            setCrateQuestionTimer(15);
             setCrateFeedback(null);
           }
         }
@@ -4893,9 +7184,15 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       const activeProjectiles: Projectile[] = [];
 
       projectilesRef.current.forEach(p => {
+        const prevProjX = p.x;
+        const prevProjY = p.y;
         p.x += p.vx * frameScale;
         p.y += p.vy * frameScale;
         p.rangeRemaining -= Math.hypot(p.vx, p.vy) * frameScale;
+        p.age = (p.age || 0) + frameScale;
+        if (!p.trail) p.trail = [];
+        p.trail.push({ x: p.x, y: p.y });
+        if (p.trail.length > 7) p.trail.shift();
 
         // Acoustic Deflector Shield active on local player: deflect incoming enemy projectiles!
         if (now < acousticShieldUntilRef.current && p.ownerId !== user.id) {
@@ -4905,6 +7202,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             p.vy = -p.vy * 1.25;
             p.ownerId = user.id;
             p.color = '#eab308';
+            p.hitEnemyUids?.clear();
             spawnParticles(p.x, p.y, '#eab308', 'electric', 10, 4);
             soundEngine.playSpatialHit(p.x, p.y, px, py);
             addFloatingText(px, py - 26, 'DEFLECTED! 🛡️', '#eab308');
@@ -4912,10 +7210,18 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         }
 
         let hit = false;
+        const isMyShot = p.ownerId === user.id;
+        const sIdxProj = spatialIndexRef.current;
 
-        // Collision with building walls and roofs
-        if (worldDataRef.current?.buildings) {
-          for (const bldg of worldDataRef.current.buildings) {
+        if (sIdxProj) {
+          const pCellC = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor(p.x / SPATIAL_CELL_SIZE)));
+          const pCellR = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor(p.y / SPATIAL_CELL_SIZE)));
+          const pCellIdx = pCellR * SPATIAL_GRID_DIM + pCellC;
+
+          // Collision with building walls and roofs (O(1) spatial grid lookup)
+          const cellBldgs = sIdxProj.buildings[pCellIdx];
+          for (let i = 0; i < cellBldgs.length; i++) {
+            const bldg = cellBldgs[i];
             const hitWing = getBuildingHitboxes(bldg).some(
               hb => p.x >= hb.x && p.x <= hb.x + hb.w && p.y >= hb.y && p.y <= hb.y + hb.h
             );
@@ -4926,43 +7232,56 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               break;
             }
           }
-        }
 
-        // Dragon's Blood — Dragon Slayer projectiles passing within 30px of an unclaimed Supply Crate trigger a fiery ignition blast
-        if (p.isDragonBlood && p.ownerId === user.id) {
-          for (const cr of cratesRef.current) {
-            if (!cr.isClaimed && Math.hypot(p.x - cr.x, p.y - cr.y) < 30) {
-              const lastIgnite = crateIgniteCooldownRef.current[cr.id] || 0;
-              if (now - lastIgnite > 1200) {
-                crateIgniteCooldownRef.current[cr.id] = now;
+          // Collision with fortified city perimeter stone walls
+          if (!hit) {
+            const cellWalls = sIdxProj.cityWalls[pCellIdx];
+            for (let i = 0; i < cellWalls.length; i++) {
+              const wall = cellWalls[i];
+              if (p.x >= wall.x && p.x <= wall.x + wall.w && p.y >= wall.y && p.y <= wall.y + wall.h) {
                 hit = true;
-                spawnParticles(cr.x, cr.y, '#f97316', 'flame', 22, 6);
-                addFloatingText(cr.x, cr.y - 30, '🐉🔥 CRATE IGNITION!', '#fb923c');
-                soundEngine.playSpatialHit(cr.x, cr.y, px, py);
-                flashSkinAbility("Dragon's Blood (Crate Blast)");
-                arenaPlayersRef.current.forEach(en => {
-                  if (en.uid !== user.id && en.isAlive && Math.hypot(en.x - cr.x, en.y - cr.y) < 120) {
-                    damageArenaPlayer(en.uid, 28, user.id).then(res => {
-                      if (res.killed) {
-                        setKills(prev => prev + 1);
-                        addFloatingText(en.x, en.y - 48, 'ELIMINATED! 💀', '#fbbf24');
-                      }
-                    });
-                    addFloatingText(en.x, en.y - 28, '-28 🔥 BLAST', '#f97316');
-                  }
-                });
+                soundEngine.playSpatialHit(p.x, p.y, px, py);
+                spawnParticles(p.x, p.y, '#cbd5e1', 'stone_chip', 6, 2.8);
                 break;
               }
             }
           }
-        }
 
-        // Collision with props
-        if (!hit && worldDataRef.current) {
-          for (const sc of worldDataRef.current.scenery) {
-            if (sc.hp > 0) {
-              const dist = Math.hypot(p.x - sc.x, p.y - sc.y);
-              if (dist < sc.footprintRadius) {
+          // Dragon's Blood — Dragon Slayer projectiles passing within 30px of an unclaimed Supply Crate trigger a fiery ignition blast
+          if (p.isDragonBlood && isMyShot) {
+            for (const cr of cratesRef.current) {
+              if (!cr.isClaimed && Math.hypot(p.x - cr.x, p.y - cr.y) < 30) {
+                const lastIgnite = crateIgniteCooldownRef.current[cr.id] || 0;
+                if (now - lastIgnite > 1200) {
+                  crateIgniteCooldownRef.current[cr.id] = now;
+                  hit = true;
+                  spawnParticles(cr.x, cr.y, '#f97316', 'flame', 22, 6);
+                  addFloatingText(cr.x, cr.y - 30, '🐉🔥 CRATE IGNITION!', '#fb923c');
+                  soundEngine.playSpatialHit(cr.x, cr.y, px, py);
+                  flashSkinAbility("Dragon's Blood (Crate Blast)");
+                  arenaPlayersRef.current.forEach(en => {
+                    if (en.uid !== user.id && en.isAlive && Math.hypot(en.x - cr.x, en.y - cr.y) < 120) {
+                      emitDamagePlayer(en.uid, 28, user.id).then(res => {
+                        if (!wsConnectedRef.current && res.killed) {
+                          setKills(prev => prev + 1);
+                          addFloatingText(en.x, en.y - 48, 'ELIMINATED! 💀', '#fbbf24');
+                        }
+                      });
+                      addFloatingText(en.x, en.y - 28, '-28 🔥 BLAST', '#f97316');
+                    }
+                  });
+                  break;
+                }
+              }
+            }
+          }
+
+          // Collision with props (O(1) spatial grid lookup)
+          if (!hit) {
+            const cellScenery = sIdxProj.scenery[pCellIdx];
+            for (let i = 0; i < cellScenery.length; i++) {
+              const sc = cellScenery[i];
+              if (sc.hp > 0 && Math.hypot(p.x - sc.x, p.y - sc.y) < sc.footprintRadius) {
                 hit = true;
                 const propDmg = p.isDragonBlood ? p.damage * 2 : p.damage;
                 sc.hp -= propDmg;
@@ -4976,16 +7295,10 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                   spawnParticles(p.x, p.y, '#38bdf8', 'spark', 6, 4);
                 }
 
-                if (sc.hp <= 0 && p.ownerId === user.id) {
-                  if (sc.materialDrop === 'wood') {
-                    woodRef.current += sc.dropAmount;
-                  }
-                  if (sc.materialDrop === 'brick') {
-                    brickRef.current += sc.dropAmount;
-                  }
-                  if (sc.materialDrop === 'metal') {
-                    metalRef.current += sc.dropAmount;
-                  }
+                if (sc.hp <= 0 && isMyShot) {
+                  if (sc.materialDrop === 'wood') woodRef.current += sc.dropAmount;
+                  if (sc.materialDrop === 'brick') brickRef.current += sc.dropAmount;
+                  if (sc.materialDrop === 'metal') metalRef.current += sc.dropAmount;
                   if (activeSkinIdLoop === 'goblin') {
                     woodRef.current += 3;
                     brickRef.current += 1;
@@ -4995,6 +7308,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                   setLocalWood(woodRef.current);
                   setLocalBrick(brickRef.current);
                   setLocalMetal(metalRef.current);
+                  emitSelfVitals({ wood: woodRef.current, brick: brickRef.current, metal: metalRef.current });
                   addFloatingText(sc.x, sc.y - 20, `+${sc.dropAmount} ${sc.materialDrop.toUpperCase()}`, '#4ade80');
                 }
                 break;
@@ -5003,26 +7317,28 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           }
         }
 
-        // Collision with structures
+        // Collision with structures (only shooter reports authoritative damage)
         if (!hit) {
           for (const st of structuresRef.current) {
             const distToStruct = Math.hypot(p.x - st.x, p.y - st.y);
             if (distToStruct < 28) {
               if (p.isHighGround && st.type === 'wood_wall') continue;
               hit = true;
-              const structDmg = p.isDragonBlood ? p.damage * 2 : p.damage;
-              damageArenaStructure(st.id, structDmg).then(res => {
-                if (res.destroyed && p.ownerId === user.id && activeSkinIdLoop === 'goblin') {
-                  woodRef.current += 8;
-                  brickRef.current += 4;
-                  metalRef.current += 2;
-                  setLocalWood(woodRef.current);
-                  setLocalBrick(brickRef.current);
-                  setLocalMetal(metalRef.current);
-                  addFloatingText(st.x, st.y - 26, '👺 +8🪵 +4🧱 +2⚙️ SNATCHED!', '#4ade80');
-                  flashSkinAbility('Gold Snatcher (Structure Loot!)');
-                }
-              });
+              if (isMyShot || !wsConnectedRef.current) {
+                const structDmg = p.isDragonBlood ? p.damage * 2 : p.damage;
+                emitStructureDamage(st.id, structDmg).then(res => {
+                  if (!wsConnectedRef.current && res.destroyed && isMyShot && activeSkinIdLoop === 'goblin') {
+                    woodRef.current += 8;
+                    brickRef.current += 4;
+                    metalRef.current += 2;
+                    setLocalWood(woodRef.current);
+                    setLocalBrick(brickRef.current);
+                    setLocalMetal(metalRef.current);
+                    addFloatingText(st.x, st.y - 26, '👺 +8🪵 +4🧱 +2⚙️ SNATCHED!', '#4ade80');
+                    flashSkinAbility('Gold Snatcher (Structure Loot!)');
+                  }
+                });
+              }
               soundEngine.playSpatialHit(p.x, p.y, px, py);
               spawnParticles(p.x, p.y, p.isDragonBlood ? '#f97316' : '#94a3b8', p.isDragonBlood ? 'flame' : 'stone_chip', 6, 3);
               break;
@@ -5030,98 +7346,341 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           }
         }
 
-        // Collision with other players
+        // Collision with other players (shooter's client reports hit when WS connected)
         if (!hit) {
-          for (const enemy of arenaPlayersRef.current) {
-            if (enemy.uid !== p.ownerId && enemy.isAlive) {
-              const distToEnemy = Math.hypot(p.x - enemy.x, p.y - enemy.y);
-              if (distToEnemy < 24) {
-                hit = true;
-                soundEngine.playSpatialHit(enemy.x, enemy.y, px, py);
-                spawnParticles(enemy.x, enemy.y, p.isDragonBlood ? '#f97316' : '#ef4444', p.isDragonBlood ? 'flame' : 'spark', 8, 4);
-                addFloatingText(enemy.x, enemy.y - 32, `-${p.damage}`, '#ef4444');
+          const canPierceEnemies = Boolean(
+            p.piercesEnemies || p.weaponId === 'laser_pointer' || p.altType === 'spread_beam'
+          );
+          const chillMs = p.weaponId === 'cryo_freeze_ray' || p.altType === 'freeze_blast' ? 3500 : 0;
+          const segDx = p.x - prevProjX;
+          const segDy = p.y - prevProjY;
+          const segLenSq = segDx * segDx + segDy * segDy;
 
-                // Dragon's Blood — Flame splash 12 dmg to other nearby enemies within 95px
-                if (p.isDragonBlood && p.ownerId === user.id) {
-                  spawnParticles(enemy.x, enemy.y, '#f97316', 'flame', 14, 5);
-                  arenaPlayersRef.current.forEach(other => {
-                    if (other.uid !== enemy.uid && other.uid !== user.id && other.isAlive && Math.hypot(other.x - enemy.x, other.y - enemy.y) < 95) {
-                      damageArenaPlayer(other.uid, 12, user.id).then(r => {
-                        if (r.killed) setKills(prev => prev + 1);
-                      });
-                      addFloatingText(other.x, other.y - 28, '-12🔥 SPLASH', '#fb923c');
+          for (const enemy of arenaPlayersRef.current) {
+            if (enemy.uid !== p.ownerId && enemy.isAlive && (enemy.hp === undefined || enemy.hp > 0)) {
+              if (p.hitEnemyUids?.has(enemy.uid)) continue;
+              const tSeg = segLenSq > 0
+                ? Math.max(0, Math.min(1, ((enemy.x - prevProjX) * segDx + (enemy.y - prevProjY) * segDy) / segLenSq))
+                : 0;
+              const closestX = prevProjX + segDx * tSeg;
+              const closestY = prevProjY + segDy * tSeg;
+              const distToEnemy = Math.hypot(closestX - enemy.x, closestY - enemy.y);
+
+              if (distToEnemy < 24) {
+                if (canPierceEnemies) {
+                  if (!p.hitEnemyUids) p.hitEnemyUids = new Set<string>();
+                  p.hitEnemyUids.add(enemy.uid);
+                } else {
+                  hit = true;
+                }
+
+                soundEngine.playSpatialHit(enemy.x, enemy.y, px, py);
+                if (chillMs > 0) {
+                  enemyFrostSlowUntilRef.current[enemy.uid] = Math.max(
+                    enemyFrostSlowUntilRef.current[enemy.uid] || 0,
+                    now + chillMs
+                  );
+                  spawnParticles(enemy.x, enemy.y, '#67e8f9', 'spark', 12, 4.5);
+                  addFloatingText(enemy.x, enemy.y - 32, `-${p.damage} ❄️ CHILL`, '#22d3ee');
+                } else {
+                  spawnParticles(enemy.x, enemy.y, p.isDragonBlood ? '#f97316' : p.color, p.isDragonBlood ? 'flame' : 'spark', 10, 4.5);
+                  if (canPierceEnemies && (p.hitEnemyUids?.size || 0) >= 2) {
+                    addFloatingText(enemy.x, enemy.y - 32, `-${p.damage} ⚡ PIERCE!`, '#facc15');
+                  } else {
+                    addFloatingText(enemy.x, enemy.y - 32, `-${p.damage}`, '#ef4444');
+                  }
+                }
+
+                if (isMyShot || !wsConnectedRef.current) {
+                  // Dragon's Blood — Flame splash 12 dmg to other nearby enemies within 95px
+                  if (p.isDragonBlood && isMyShot) {
+                    spawnParticles(enemy.x, enemy.y, '#f97316', 'flame', 14, 5);
+                    arenaPlayersRef.current.forEach(other => {
+                      if (other.uid !== enemy.uid && other.uid !== user.id && other.isAlive && Math.hypot(other.x - enemy.x, other.y - enemy.y) < 95) {
+                        emitDamagePlayer(other.uid, 12, user.id).then(r => {
+                          if (!wsConnectedRef.current && r.killed) setKills(prev => prev + 1);
+                        });
+                        addFloatingText(other.x, other.y - 28, '-12🔥 SPLASH', '#fb923c');
+                      }
+                    });
+                  }
+
+                  // Cultist — Dark Siphon (+5 HP on hit, 1.5s CD)
+                  if (isMyShot && activeSkinIdLoop === 'cultist' && now - lastSiphonAtRef.current >= 1500) {
+                    lastSiphonAtRef.current = now;
+                    const nextHp = Math.min(100, hpRef.current + 5);
+                    hpRef.current = nextHp;
+                    setLocalHp(nextHp);
+                    addFloatingText(px, py - 28, '🧛 +5 HP Siphon', '#f472b6');
+                    flashSkinAbility('Dark Siphon (+5 HP)');
+                    emitSelfVitals({ hp: nextHp });
+                  }
+
+                  // Necromancer — Soul Harvester (3-tick 4 dmg Soul Burn)
+                  if (isMyShot && activeSkinIdLoop === 'necromancer') {
+                    soulBurnsRef.current = [
+                      ...soulBurnsRef.current.filter(b => b.targetUid !== enemy.uid),
+                      { targetUid: enemy.uid, ticksRemaining: 3, nextTickAt: now + 600, damagePerTick: 4 }
+                    ];
+                    flashSkinAbility('Soul Harvester (Burn Applied)');
+                  }
+
+                  emitDamagePlayer(enemy.uid, p.damage, p.ownerId, false, chillMs).then(res => {
+                    if (!wsConnectedRef.current) {
+                      if (res.brittleGuardTriggered) {
+                        addFloatingText(enemy.x, enemy.y - 44, '💀 BRITTLE GUARD!', '#f59e0b');
+                      }
+                      if (res.bricksGained && res.bricksGained > 0) {
+                        addFloatingText(enemy.x, enemy.y - 44, `👑 ABSORBED (+${res.bricksGained}🧱)`, '#34d399');
+                      }
+                      if (res.killed && isMyShot) {
+                        setKills(prev => prev + 1);
+                        addFloatingText(enemy.x, enemy.y - 48, 'ELIMINATED! 💀', '#fbbf24');
+                        if (activeSkinIdLoop === 'cultist') {
+                          const nextHp = Math.min(100, hpRef.current + 25);
+                          const nextSh = Math.min(100, shieldRef.current + 15);
+                          hpRef.current = nextHp;
+                          shieldRef.current = nextSh;
+                          setLocalHp(nextHp);
+                          setLocalShield(nextSh);
+                          addFloatingText(px, py - 38, '🧛 BLOOD RITUAL: +25HP +15🛡️', '#f472b6');
+                          flashSkinAbility('Blood Ritual (+25HP +15🛡️)');
+                        }
+                      }
                     }
                   });
                 }
-
-                // Cultist — Dark Siphon (+5 HP on hit, 1.5s CD)
-                if (p.ownerId === user.id && activeSkinIdLoop === 'cultist' && now - lastSiphonAtRef.current >= 1500) {
-                  lastSiphonAtRef.current = now;
-                  const nextHp = Math.min(100, hpRef.current + 5);
-                  hpRef.current = nextHp;
-                  setLocalHp(nextHp);
-                  addFloatingText(px, py - 28, '🧛 +5 HP Siphon', '#f472b6');
-                  flashSkinAbility('Dark Siphon (+5 HP)');
-                }
-
-                // Necromancer — Soul Harvester (3-tick 4 dmg Soul Burn)
-                if (p.ownerId === user.id && activeSkinIdLoop === 'necromancer') {
-                  soulBurnsRef.current = [
-                    ...soulBurnsRef.current.filter(b => b.targetUid !== enemy.uid),
-                    { targetUid: enemy.uid, ticksRemaining: 3, nextTickAt: now + 600, damagePerTick: 4 }
-                  ];
-                  flashSkinAbility('Soul Harvester (Burn Applied)');
-                }
-
-                damageArenaPlayer(enemy.uid, p.damage, p.ownerId).then(res => {
-                  if (res.brittleGuardTriggered) {
-                    addFloatingText(enemy.x, enemy.y - 44, '💀 BRITTLE GUARD!', '#f59e0b');
-                  }
-                  if (res.bricksGained && res.bricksGained > 0) {
-                    addFloatingText(enemy.x, enemy.y - 44, `👑 ABSORBED (+${res.bricksGained}🧱)`, '#34d399');
-                  }
-                  if (res.killed && p.ownerId === user.id) {
-                    setKills(prev => prev + 1);
-                    addFloatingText(enemy.x, enemy.y - 48, 'ELIMINATED! 💀', '#fbbf24');
-                    if (activeSkinIdLoop === 'cultist') {
-                      const nextHp = Math.min(100, hpRef.current + 25);
-                      const nextSh = Math.min(100, shieldRef.current + 15);
-                      hpRef.current = nextHp;
-                      shieldRef.current = nextSh;
-                      setLocalHp(nextHp);
-                      setLocalShield(nextSh);
-                      addFloatingText(px, py - 38, '🧛 BLOOD RITUAL: +25HP +15🛡️', '#f472b6');
-                      flashSkinAbility('Blood Ritual (+25HP +15🛡️)');
-                    }
-                  }
-                });
-                break;
+                if (!canPierceEnemies) break;
               }
             }
           }
         }
 
-        if (!hit && p.rangeRemaining > 0 && p.x > 0 && p.x < MAP_SIZE && p.y > 0 && p.y < MAP_SIZE) {
+        const expired = p.rangeRemaining <= 0 || p.x <= 0 || p.x >= MAP_SIZE || p.y <= 0 || p.y >= MAP_SIZE;
+
+        // Pronounced Secondary-Fire & Weapon Impact Explosions on hit or arrival
+        if (hit || expired) {
+          if (p.isAlt) {
+            if (p.altType === 'acid_pool') {
+              pushWeaponVfx({
+                id: `vfx_acid_pool_${now}_${Math.random()}`,
+                kind: 'hazard_pool',
+                x: p.x,
+                y: p.y,
+                radius: 72,
+                zoneKind: 'acid',
+                ownerId: p.ownerId,
+                damagePerTick: Math.max(6, Math.round(p.damage * 0.35)),
+                lastTickAt: now,
+                startedAt: now,
+                durationMs: 3500
+              });
+              pushWeaponVfx({
+                id: `vfx_acid_ring_${now}_${Math.random()}`,
+                kind: 'shockwave',
+                x: p.x,
+                y: p.y,
+                maxRadius: 78,
+                color: '#10b981',
+                secondaryColor: '#a7f3d0',
+                ringCount: 2,
+                lineWidth: 3.5,
+                startedAt: now,
+                durationMs: 320
+              });
+              spawnParticles(p.x, p.y, '#34d399', 'smoke', 12, 4);
+            } else if (p.altType === 'cluster_bomb') {
+              pushWeaponVfx({
+                id: `vfx_mutagen_pool_${now}_${Math.random()}`,
+                kind: 'hazard_pool',
+                x: p.x,
+                y: p.y,
+                radius: 100,
+                zoneKind: 'mutagen',
+                ownerId: p.ownerId,
+                damagePerTick: Math.max(8, Math.round(p.damage * 0.32)),
+                lastTickAt: now,
+                startedAt: now,
+                durationMs: 3000
+              });
+              pushWeaponVfx({
+                id: `vfx_cluster_ring_${now}_${Math.random()}`,
+                kind: 'shockwave',
+                x: p.x,
+                y: p.y,
+                maxRadius: 110,
+                color: '#84cc16',
+                secondaryColor: '#ecfccb',
+                ringCount: 3,
+                lineWidth: 4.5,
+                startedAt: now,
+                durationMs: 380
+              });
+              spawnParticles(p.x, p.y, '#a3e635', 'smoke', 16, 5);
+            } else if (p.altType === 'freeze_blast') {
+              pushWeaponVfx({
+                id: `vfx_freeze_shatter_${now}_${Math.random()}`,
+                kind: 'shockwave',
+                x: p.x,
+                y: p.y,
+                maxRadius: 72,
+                color: '#22d3ee',
+                secondaryColor: '#ffffff',
+                ringCount: 2,
+                lineWidth: 3.5,
+                startedAt: now,
+                durationMs: 320
+              });
+              spawnParticles(p.x, p.y, '#67e8f9', 'spark', 12, 5);
+            } else if (p.altType === 'vortex') {
+              pushWeaponVfx({
+                id: `vfx_vortex_hole_${now}_${Math.random()}`,
+                kind: 'vortex',
+                x: p.x,
+                y: p.y,
+                radius: 175,
+                startedAt: now,
+                durationMs: 1850
+              });
+              pushWeaponVfx({
+                id: `vfx_vortex_burst_${now}_${Math.random()}`,
+                kind: 'shockwave',
+                x: p.x,
+                y: p.y,
+                maxRadius: 180,
+                color: '#a855f7',
+                secondaryColor: '#f0abfc',
+                ringCount: 3,
+                lineWidth: 4.5,
+                startedAt: now,
+                durationMs: 420
+              });
+              spawnParticles(p.x, p.y, '#c084fc', 'electric', 20, 6);
+            }
+          } else if (hit) {
+            // Signature Primary Impact Bursts per weapon
+            if (p.weaponId === 'antimatter_annihilator') {
+              pushWeaponVfx({
+                id: `vfx_anti_pop_${now}_${Math.random()}`,
+                kind: 'shockwave',
+                x: p.x,
+                y: p.y,
+                maxRadius: 56,
+                color: '#f43f5e',
+                secondaryColor: '#ffffff',
+                ringCount: 2,
+                lineWidth: 3.5,
+                startedAt: now,
+                durationMs: 240
+              });
+            } else if (p.weaponId === 'particle_accelerator') {
+              pushWeaponVfx({
+                id: `vfx_pa_pop_${now}_${Math.random()}`,
+                kind: 'shockwave',
+                x: p.x,
+                y: p.y,
+                maxRadius: 42,
+                color: '#a855f7',
+                secondaryColor: '#e9d5ff',
+                ringCount: 2,
+                lineWidth: 3,
+                startedAt: now,
+                durationMs: 210
+              });
+            } else if (p.weaponId === 'tesla_coil') {
+              spawnParticles(p.x, p.y, '#38bdf8', 'electric', 8, 4.5);
+            } else if (p.weaponId === 'bunsen_burner') {
+              spawnParticles(p.x, p.y, '#f97316', 'flame', 7, 3.5);
+            }
+          }
+        }
+
+        if (!hit && !expired) {
           activeProjectiles.push(p);
 
-          if (Math.random() < 0.6) {
+          if (Math.random() < 0.72) {
+            const pType: ParticleFX['type'] =
+              p.weaponId === 'bunsen_burner'
+                ? 'flame'
+                : p.weaponId === 'tesla_coil' || p.weaponId === 'quantum_displacer'
+                  ? 'electric'
+                  : p.weaponId === 'acid_pipette' || p.weaponId === 'biohazard_railgun'
+                    ? 'smoke'
+                    : 'spark';
             particlesRef.current.push({
               x: p.x,
               y: p.y,
-              vx: (Math.random() - 0.5) * 0.8,
-              vy: (Math.random() - 0.5) * 0.8,
+              vx: (Math.random() - 0.5) * 1.1,
+              vy: (Math.random() - 0.5) * 1.1,
               life: 0,
-              maxLife: 10,
+              maxLife: p.isAlt ? 14 : 10,
               color: p.color,
-              size: 2,
-              alpha: 0.8,
-              type: p.weaponId === 'bunsen_burner' ? 'flame' : 'spark'
+              size: p.isAlt ? 3.2 : 2.3,
+              alpha: 0.85,
+              type: pType
             });
           }
         }
       });
 
       projectilesRef.current = activeProjectiles;
+
+      // Update active WeaponVFX (process persistent hazard pool ticks & vortex wisps, prune expired)
+      const activeWeaponVfx: WeaponVFX[] = [];
+      for (const vfx of weaponVfxRef.current) {
+        if (now - vfx.startedAt >= vfx.durationMs) continue;
+        if (vfx.kind === 'hazard_pool') {
+          if (Math.random() < 0.32) {
+            const ang = Math.random() * Math.PI * 2;
+            const r = Math.random() * vfx.radius * 0.85;
+            spawnParticles(
+              vfx.x + Math.cos(ang) * r,
+              vfx.y + Math.sin(ang) * r,
+              vfx.zoneKind === 'acid' ? '#34d399' : '#a3e635',
+              'smoke',
+              1,
+              0.9
+            );
+          }
+          if (vfx.ownerId === user.id && now - vfx.lastTickAt >= 680) {
+            vfx.lastTickAt = now;
+            arenaPlayersRef.current.forEach(en => {
+              if (en.uid !== user.id && en.isAlive && (en.hp === undefined || en.hp > 0)) {
+                if (Math.hypot(en.x - vfx.x, en.y - vfx.y) <= vfx.radius + 14) {
+                  emitDamagePlayer(en.uid, vfx.damagePerTick, user.id).then(res => {
+                    if (!wsConnectedRef.current && res.killed) setKills(prev => prev + 1);
+                  });
+                  addFloatingText(
+                    en.x,
+                    en.y - 28,
+                    `-${vfx.damagePerTick} ${vfx.zoneKind === 'acid' ? '🧪 ACID' : '☣️ TOXIN'}`,
+                    vfx.zoneKind === 'acid' ? '#34d399' : '#a3e635'
+                  );
+                }
+              }
+            });
+          }
+        } else if (vfx.kind === 'vortex' && Math.random() < 0.45) {
+          const ang = Math.random() * Math.PI * 2;
+          const r = vfx.radius * 0.85;
+          const sx = vfx.x + Math.cos(ang) * r;
+          const sy = vfx.y + Math.sin(ang) * r;
+          particlesRef.current.push({
+            x: sx,
+            y: sy,
+            vx: -Math.cos(ang) * 4.5,
+            vy: -Math.sin(ang) * 4.5,
+            life: 0,
+            maxLife: 18,
+            color: '#c084fc',
+            size: 2.5,
+            alpha: 0.9,
+            type: 'electric'
+          });
+        }
+        activeWeaponVfx.push(vfx);
+      }
+      weaponVfxRef.current = activeWeaponVfx;
 
       // Update particles
       particlesRef.current.forEach(pt => {
@@ -5145,122 +7704,147 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       ctx.save();
       ctx.clearRect(0, 0, viewW, viewH);
 
-      // Translate world by Camera position
-      ctx.translate(-camX, -camY);
-
-      // =======================================================================
-      // LAYER 0 (SOLID GROUND BASE): 100% SOLID GRASS (col: 5, row: 0)
-      // Iterates through every visible viewport cell to eliminate all black gaps!
-      // =======================================================================
-      const startCol = Math.max(0, Math.floor((camX - 32) / WORLD_TILE_SIZE));
-      const endCol = Math.min(TILES_COUNT - 1, Math.ceil((camX + viewW + 32) / WORLD_TILE_SIZE));
-      const startRow = Math.max(0, Math.floor((camY - 32) / WORLD_TILE_SIZE));
-      const endRow = Math.min(TILES_COUNT - 1, Math.ceil((camY + viewH + 32) / WORLD_TILE_SIZE));
-
-      const sheetImg = imageAssets.current['landscape_sheet'];
-      const hasSheet = sheetImg && sheetImg.complete && sheetImg.naturalWidth > 0;
-
-      ctx.imageSmoothingEnabled = false; // Crisp 16x16 Kenney pixel scaling
-      const solidGrassCoords = getTileSourceCoords(5, 0); // Solid grass: col 5, row 0 (sx: 5*17, sy: 0*17)
-
-      for (let r = startRow; r <= endRow; r++) {
-        for (let c = startCol; c <= endCol; c++) {
-          const tx = c * WORLD_TILE_SIZE;
-          const ty = r * WORLD_TILE_SIZE;
-
-          if (hasSheet) {
-            ctx.drawImage(
-              sheetImg,
-              solidGrassCoords.sx,
-              solidGrassCoords.sy,
-              TILE_SIZE,
-              TILE_SIZE,
-              tx,
-              ty,
-              WORLD_TILE_SIZE,
-              WORLD_TILE_SIZE
-            );
-          } else {
-            ctx.fillStyle = '#15803d';
-            ctx.fillRect(tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
-          }
-        }
+      // Screen micro-shake on high-impact secondary/mythic shots
+      let shakeOffsetX = 0;
+      let shakeOffsetY = 0;
+      if (now < screenShakeRef.current.until) {
+        const amp = screenShakeRef.current.intensity * Math.min(1, (screenShakeRef.current.until - now) / 180);
+        shakeOffsetX = (Math.random() - 0.5) * 2 * amp;
+        shakeOffsetY = (Math.random() - 0.5) * 2 * amp;
+      } else {
+        screenShakeRef.current.intensity = 0;
       }
 
-      // =======================================================================
-      // LAYER 1 (STRUCTURED WATER, WATER LILIES & DIRT REGIONS): 9-Slice Ponds & Dirt Roads
-      // =======================================================================
-      if (worldDataRef.current) {
-        for (let r = startRow; r <= endRow; r++) {
-          for (let c = startCol; c <= endCol; c++) {
-            const tile = worldDataRef.current.tiles[r]?.[c];
-            if (!tile) continue;
+      // Translate world by Camera position
+      ctx.translate(-camX + shakeOffsetX, -camY + shakeOffsetY);
 
-            if (tile.overlayCol !== undefined && tile.overlayRow !== undefined) {
-              const tx = c * WORLD_TILE_SIZE;
-              const ty = r * WORLD_TILE_SIZE;
-              if (hasSheet) {
-                const { sx, sy } = getTileSourceCoords(tile.overlayCol, tile.overlayRow);
-                ctx.drawImage(
-                  sheetImg,
-                  sx,
-                  sy,
-                  TILE_SIZE,
-                  TILE_SIZE,
-                  tx,
-                  ty,
-                  WORLD_TILE_SIZE,
-                  WORLD_TILE_SIZE
-                );
-                // Render Sample1 water lilies on top of interior water tiles
-                if (tile.isWater && tile.lilyCol !== undefined && tile.lilyRow !== undefined) {
-                  const { sx: lsx, sy: lsy } = getTileSourceCoords(tile.lilyCol, tile.lilyRow);
-                  ctx.drawImage(
-                    sheetImg,
-                    lsx,
-                    lsy,
-                    TILE_SIZE,
-                    TILE_SIZE,
-                    tx,
-                    ty,
-                    WORLD_TILE_SIZE,
-                    WORLD_TILE_SIZE
-                  );
-                }
-              } else {
-                ctx.fillStyle = tile.isWater ? '#63c5cf' : tile.baseColor;
-                ctx.fillRect(tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
-                if (tile.isWater && tile.lilyCol !== undefined) {
-                  ctx.fillStyle = '#4ba86d';
-                  ctx.beginPath();
-                  ctx.arc(tx + 16, ty + 16, 9, 0, Math.PI * 2);
-                  ctx.fill();
-                  if (tile.lilyCol === 25) {
-                    ctx.fillStyle = '#ffffff';
-                    ctx.beginPath();
-                    ctx.arc(tx + 16, ty + 15, 5, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.fillStyle = '#facc15';
-                    ctx.beginPath();
-                    ctx.arc(tx + 16, ty + 15, 2, 0, Math.PI * 2);
-                    ctx.fill();
+      // =======================================================================
+      // LAYER 0 & 1 (CACHED 512x512 TERRAIN CHUNKS): Grass + Water + Lilies + Dirt Roads
+      // =======================================================================
+      const sheetImg = imageAssets.current['landscape_sheet'];
+      const hasSheet = Boolean(sheetImg && sheetImg.complete && sheetImg.naturalWidth > 0);
+      if (hasSheet !== lastTerrainSheetReadyRef.current) {
+        lastTerrainSheetReadyRef.current = hasSheet;
+        terrainChunksRef.current.clear();
+        buildingCacheRef.current.clear();
+      }
+
+      ctx.imageSmoothingEnabled = false; // Crisp 16x16 Kenney pixel scaling
+      const solidGrassCoords = getTileSourceCoords(5, 0);
+      const tilesPerChunk = TERRAIN_CHUNK_SIZE / WORLD_TILE_SIZE; // 16
+      const maxChunkIdx = Math.ceil(MAP_SIZE / TERRAIN_CHUNK_SIZE) - 1;
+      const startChunkX = Math.max(0, Math.floor(camX / TERRAIN_CHUNK_SIZE));
+      const endChunkX = Math.min(maxChunkIdx, Math.floor((camX + viewW) / TERRAIN_CHUNK_SIZE));
+      const startChunkY = Math.max(0, Math.floor(camY / TERRAIN_CHUNK_SIZE));
+      const endChunkY = Math.min(maxChunkIdx, Math.floor((camY + viewH) / TERRAIN_CHUNK_SIZE));
+
+      for (let cy = startChunkY; cy <= endChunkY; cy++) {
+        for (let cx = startChunkX; cx <= endChunkX; cx++) {
+          const chunkKey = `${cx}_${cy}`;
+          let chunkCanvas = terrainChunksRef.current.get(chunkKey);
+          if (!chunkCanvas) {
+            chunkCanvas = document.createElement('canvas');
+            chunkCanvas.width = TERRAIN_CHUNK_SIZE;
+            chunkCanvas.height = TERRAIN_CHUNK_SIZE;
+            const cCtx = chunkCanvas.getContext('2d');
+            if (cCtx) {
+              cCtx.imageSmoothingEnabled = false;
+              const baseTileCol = cx * tilesPerChunk;
+              const baseTileRow = cy * tilesPerChunk;
+              for (let lr = 0; lr < tilesPerChunk; lr++) {
+                const r = baseTileRow + lr;
+                if (r >= TILES_COUNT) continue;
+                for (let lc = 0; lc < tilesPerChunk; lc++) {
+                  const c = baseTileCol + lc;
+                  if (c >= TILES_COUNT) continue;
+                  const lx = lc * WORLD_TILE_SIZE;
+                  const ly = lr * WORLD_TILE_SIZE;
+
+                  if (hasSheet) {
+                    cCtx.drawImage(
+                      sheetImg,
+                      solidGrassCoords.sx,
+                      solidGrassCoords.sy,
+                      TILE_SIZE,
+                      TILE_SIZE,
+                      lx,
+                      ly,
+                      WORLD_TILE_SIZE,
+                      WORLD_TILE_SIZE
+                    );
+                  } else {
+                    cCtx.fillStyle = '#15803d';
+                    cCtx.fillRect(lx, ly, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+                  }
+
+                  const tile = worldDataRef.current?.tiles[r]?.[c];
+                  if (tile && tile.overlayCol !== undefined && tile.overlayRow !== undefined) {
+                    if (hasSheet) {
+                      const { sx, sy } = getTileSourceCoords(tile.overlayCol, tile.overlayRow);
+                      cCtx.drawImage(
+                        sheetImg,
+                        sx,
+                        sy,
+                        TILE_SIZE,
+                        TILE_SIZE,
+                        lx,
+                        ly,
+                        WORLD_TILE_SIZE,
+                        WORLD_TILE_SIZE
+                      );
+                      if (tile.isWater && tile.lilyCol !== undefined && tile.lilyRow !== undefined) {
+                        const { sx: lsx, sy: lsy } = getTileSourceCoords(tile.lilyCol, tile.lilyRow);
+                        cCtx.drawImage(
+                          sheetImg,
+                          lsx,
+                          lsy,
+                          TILE_SIZE,
+                          TILE_SIZE,
+                          lx,
+                          ly,
+                          WORLD_TILE_SIZE,
+                          WORLD_TILE_SIZE
+                        );
+                      }
+                    } else {
+                      cCtx.fillStyle = tile.isWater ? '#63c5cf' : tile.baseColor;
+                      cCtx.fillRect(lx, ly, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+                      if (tile.isWater && tile.lilyCol !== undefined) {
+                        cCtx.fillStyle = '#4ba86d';
+                        cCtx.beginPath();
+                        cCtx.arc(lx + 16, ly + 16, 9, 0, Math.PI * 2);
+                        cCtx.fill();
+                        if (tile.lilyCol === 25) {
+                          cCtx.fillStyle = '#ffffff';
+                          cCtx.beginPath();
+                          cCtx.arc(lx + 16, ly + 15, 5, 0, Math.PI * 2);
+                          cCtx.fill();
+                          cCtx.fillStyle = '#facc15';
+                          cCtx.beginPath();
+                          cCtx.arc(lx + 16, ly + 15, 2, 0, Math.PI * 2);
+                          cCtx.fill();
+                        }
+                      }
+                    }
                   }
                 }
               }
             }
+            terrainChunksRef.current.set(chunkKey, chunkCanvas);
           }
+          ctx.drawImage(chunkCanvas, cx * TERRAIN_CHUNK_SIZE, cy * TERRAIN_CHUNK_SIZE);
         }
       }
 
       // =======================================================================
-      // LAYER 2 (PREFAB STRUCTURES): Sample1 Gabled Houses, Barns, Cottages & Manors
+      // LAYER 2 (CACHED PREFAB STRUCTURES): Gabled Houses, Barns, Cottages & Manors
       // =======================================================================
       if (worldDataRef.current?.buildings) {
         const prevSmooth = ctx.imageSmoothingEnabled;
         ctx.imageSmoothingEnabled = false;
-        for (const bldg of worldDataRef.current.buildings) {
+        for (let bIdx = 0; bIdx < worldDataRef.current.buildings.length; bIdx++) {
+          const bldg = worldDataRef.current.buildings[bIdx];
           const hb = bldg.hitbox;
-          // Viewport culling check
           if (
             hb.x + hb.w < camX - 40 ||
             hb.x > camX + viewW + 40 ||
@@ -5270,89 +7854,222 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             continue;
           }
 
-          // Soft building ground shadow under each wing hitbox
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
-          for (const wingHb of getBuildingHitboxes(bldg)) {
-            ctx.fillRect(wingHb.x + 3, wingHb.y + wingHb.h - 6, wingHb.w, 10);
-          }
-
-          // Draw multi-layered building tiles (Backdrop Wall -> Roof/Gable/Window/Door -> Trim/Weathervane)
-          for (const t of bldg.tiles) {
-            const tx = t.col * WORLD_TILE_SIZE;
-            const ty = t.row * WORLD_TILE_SIZE;
-
-            if (hasSheet) {
-              if (t.baseSheetCol !== undefined && t.baseSheetRow !== undefined) {
-                const { sx: bsx, sy: bsy } = getTileSourceCoords(t.baseSheetCol, t.baseSheetRow);
-                ctx.drawImage(
-                  sheetImg,
-                  bsx,
-                  bsy,
-                  TILE_SIZE,
-                  TILE_SIZE,
-                  tx,
-                  ty,
-                  WORLD_TILE_SIZE,
-                  WORLD_TILE_SIZE
-                );
-              }
-              const { sx, sy } = getTileSourceCoords(t.sheetCol, t.sheetRow);
-              ctx.drawImage(
-                sheetImg,
-                sx,
-                sy,
-                TILE_SIZE,
-                TILE_SIZE,
-                tx,
-                ty,
-                WORLD_TILE_SIZE,
-                WORLD_TILE_SIZE
-              );
-              if (t.overlayCol !== undefined && t.overlayRow !== undefined) {
-                const { sx: osx, sy: osy } = getTileSourceCoords(t.overlayCol, t.overlayRow);
-                ctx.drawImage(
-                  sheetImg,
-                  osx,
-                  osy,
-                  TILE_SIZE,
-                  TILE_SIZE,
-                  tx,
-                  ty,
-                  WORLD_TILE_SIZE,
-                  WORLD_TILE_SIZE
-                );
-              }
-            } else {
-              ctx.fillStyle = t.isRoof ? '#b48151' : '#e1d5ba';
-              ctx.fillRect(tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+          const bKey = bldg.id || `bldg_${bIdx}`;
+          let cached = buildingCacheRef.current.get(bKey);
+          if (!cached) {
+            const wingHbs = getBuildingHitboxes(bldg);
+            let minX = bldg.worldX;
+            let minY = bldg.worldY;
+            let maxX = bldg.worldX + bldg.worldW;
+            let maxY = bldg.worldY + bldg.worldH;
+            for (const wh of wingHbs) {
+              if (wh.x + 3 < minX) minX = wh.x + 3;
+              if (wh.y < minY) minY = wh.y;
+              if (wh.x + wh.w + 3 > maxX) maxX = wh.x + wh.w + 3;
+              if (wh.y + wh.h + 4 > maxY) maxY = wh.y + wh.h + 4;
             }
+            for (const t of bldg.tiles) {
+              const tx = t.col * WORLD_TILE_SIZE;
+              const ty = t.row * WORLD_TILE_SIZE;
+              if (tx < minX) minX = tx;
+              if (ty < minY) minY = ty;
+              if (tx + WORLD_TILE_SIZE > maxX) maxX = tx + WORLD_TILE_SIZE;
+              if (ty + WORLD_TILE_SIZE > maxY) maxY = ty + WORLD_TILE_SIZE;
+            }
+
+            const offCanvas = document.createElement('canvas');
+            offCanvas.width = Math.max(1, Math.ceil(maxX - minX));
+            offCanvas.height = Math.max(1, Math.ceil(maxY - minY));
+            const bCtx = offCanvas.getContext('2d');
+            if (bCtx) {
+              bCtx.imageSmoothingEnabled = false;
+              bCtx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+              for (const wingHb of wingHbs) {
+                bCtx.fillRect(wingHb.x + 3 - minX, wingHb.y + wingHb.h - 6 - minY, wingHb.w, 10);
+              }
+              for (const t of bldg.tiles) {
+                const tx = t.col * WORLD_TILE_SIZE - minX;
+                const ty = t.row * WORLD_TILE_SIZE - minY;
+                if (hasSheet) {
+                  if (t.baseSheetCol !== undefined && t.baseSheetRow !== undefined) {
+                    const { sx: bsx, sy: bsy } = getTileSourceCoords(t.baseSheetCol, t.baseSheetRow);
+                    bCtx.drawImage(sheetImg, bsx, bsy, TILE_SIZE, TILE_SIZE, tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+                  }
+                  const { sx, sy } = getTileSourceCoords(t.sheetCol, t.sheetRow);
+                  bCtx.drawImage(sheetImg, sx, sy, TILE_SIZE, TILE_SIZE, tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+                  if (t.overlayCol !== undefined && t.overlayRow !== undefined) {
+                    const { sx: osx, sy: osy } = getTileSourceCoords(t.overlayCol, t.overlayRow);
+                    bCtx.drawImage(sheetImg, osx, osy, TILE_SIZE, TILE_SIZE, tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+                  }
+                } else {
+                  bCtx.fillStyle = t.isRoof ? '#b48151' : '#e1d5ba';
+                  bCtx.fillRect(tx, ty, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+                }
+              }
+            }
+            cached = { canvas: offCanvas, minX, minY };
+            buildingCacheRef.current.set(bKey, cached);
           }
+
+          ctx.drawImage(cached.canvas, cached.minX, cached.minY);
         }
         ctx.imageSmoothingEnabled = prevSmooth;
       }
+
+      // =======================================================================
+      // LAYER 2.5 (GROUND WEAPON ZONES): Acid Pools, Mutagen Clouds, Orbital Locks, Black Hole Vortices
+      // =======================================================================
+      weaponVfxRef.current.forEach(vfx => {
+        if (vfx.kind !== 'hazard_pool' && vfx.kind !== 'orbital_lock' && vfx.kind !== 'vortex') return;
+        const t = Math.min(1, Math.max(0, (now - vfx.startedAt) / vfx.durationMs));
+        if (
+          vfx.x + vfx.radius < camX - 40 ||
+          vfx.x - vfx.radius > camX + viewW + 40 ||
+          vfx.y + vfx.radius < camY - 40 ||
+          vfx.y - vfx.radius > camY + viewH + 40
+        ) {
+          return;
+        }
+        ctx.save();
+        if (vfx.kind === 'hazard_pool') {
+          const fadeAlpha = t > 0.78 ? Math.max(0, (1 - t) / 0.22) : Math.min(1, t * 5);
+          const isAcid = vfx.zoneKind === 'acid';
+          ctx.globalAlpha = 0.88 * fadeAlpha;
+          // Outer hazard ring
+          const grad = ctx.createRadialGradient(vfx.x, vfx.y, 4, vfx.x, vfx.y, vfx.radius);
+          grad.addColorStop(0, isAcid ? 'rgba(52, 211, 153, 0.65)' : 'rgba(163, 230, 53, 0.6)');
+          grad.addColorStop(0.65, isAcid ? 'rgba(16, 185, 129, 0.35)' : 'rgba(132, 204, 22, 0.32)');
+          grad.addColorStop(1, 'rgba(16, 185, 129, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(vfx.x, vfx.y, vfx.radius, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Dashed caustic perimeter
+          ctx.strokeStyle = isAcid ? '#34d399' : '#bef264';
+          ctx.lineWidth = 2.2;
+          ctx.setLineDash([8, 6]);
+          ctx.lineDashOffset = -(now / 35);
+          ctx.beginPath();
+          ctx.arc(vfx.x, vfx.y, vfx.radius * (0.94 + Math.sin(now / 140) * 0.04), 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Animated boiling bubbles
+          for (let b = 0; b < 5; b++) {
+            const ang = (b * Math.PI * 2) / 5 + now / 900;
+            const rad = vfx.radius * (0.25 + ((b * 0.17 + now / 1200) % 0.6));
+            const bx = vfx.x + Math.cos(ang) * rad;
+            const by = vfx.y + Math.sin(ang) * rad;
+            const br = 3.5 + Math.sin(now / 110 + b) * 2;
+            ctx.fillStyle = isAcid ? '#a7f3d0' : '#ecfccb';
+            ctx.beginPath();
+            ctx.arc(bx, by, br, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else if (vfx.kind === 'orbital_lock') {
+          // Contracting crimson targeting reticle before positron laser drop
+          ctx.translate(vfx.x, vfx.y);
+          ctx.fillStyle = 'rgba(244, 63, 94, 0.16)';
+          ctx.beginPath();
+          ctx.arc(0, 0, vfx.radius, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = '#f43f5e';
+          ctx.lineWidth = 3.5;
+          ctx.beginPath();
+          ctx.arc(0, 0, vfx.radius, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Contracting countdown ring
+          const innerR = Math.max(8, vfx.radius * (1 - t));
+          ctx.strokeStyle = '#fecdd3';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(0, 0, innerR, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Rotating crosshair ticks
+          ctx.rotate(t * Math.PI);
+          for (let i = 0; i < 4; i++) {
+            ctx.rotate(Math.PI / 2);
+            ctx.strokeStyle = '#fb7185';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(vfx.radius * 0.55, 0);
+            ctx.lineTo(vfx.radius + 14, 0);
+            ctx.stroke();
+          }
+        } else if (vfx.kind === 'vortex') {
+          const fadeAlpha = t > 0.82 ? Math.max(0, (1 - t) / 0.18) : Math.min(1, t * 5);
+          ctx.translate(vfx.x, vfx.y);
+          ctx.globalAlpha = fadeAlpha;
+
+          // Gravity field aura
+          const gGrad = ctx.createRadialGradient(0, 0, 8, 0, 0, vfx.radius);
+          gGrad.addColorStop(0, 'rgba(15, 5, 29, 0.92)');
+          gGrad.addColorStop(0.28, 'rgba(147, 51, 234, 0.55)');
+          gGrad.addColorStop(0.75, 'rgba(168, 85, 247, 0.2)');
+          gGrad.addColorStop(1, 'rgba(168, 85, 247, 0)');
+          ctx.fillStyle = gGrad;
+          ctx.beginPath();
+          ctx.arc(0, 0, vfx.radius, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Spinning spiral accretion arms
+          ctx.rotate(now / 110);
+          for (let arm = 0; arm < 4; arm++) {
+            ctx.save();
+            ctx.rotate((arm * Math.PI) / 2);
+            ctx.strokeStyle = arm % 2 === 0 ? '#e879f9' : '#a855f7';
+            ctx.lineWidth = 3.2;
+            ctx.beginPath();
+            ctx.arc(vfx.radius * 0.25, 0, vfx.radius * 0.48, 0.1, Math.PI * 0.85);
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          // Event horizon core
+          ctx.fillStyle = '#090314';
+          ctx.strokeStyle = '#f0abfc';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(0, 0, 18 + Math.sin(now / 70) * 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.restore();
+      });
 
       // =======================================================================
       // LAYER 3 (DECORATIONS & Y-SORTED PROPS): Trees, Fences, Tents, Flowers, Stumps
       // =======================================================================
       const ySortQueue: YSortEntity[] = [];
 
-      // 1. Scenery Props (Pine Trees, Round Trees, Fences, Tents, Flowers, Stumps)
-      if (worldDataRef.current) {
-        worldDataRef.current.scenery.forEach(sc => {
-          // Viewport culling check
-          if (
-            sc.x + sc.width / 2 < camX - 30 ||
-            sc.x - sc.width / 2 > camX + viewW + 30 ||
-            sc.y + sc.height < camY - 30 ||
-            sc.y - sc.height > camY + viewH + 30
-          ) {
-            return;
-          }
+      // 1. Scenery Props (Spatial-grid viewport culling for O(visible) perf)
+      const sIdxRender = spatialIndexRef.current;
+      if (sIdxRender) {
+        const vr0 = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor((camY - 80) / SPATIAL_CELL_SIZE)));
+        const vr1 = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor((camY + viewH + 80) / SPATIAL_CELL_SIZE)));
+        const vc0 = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor((camX - 80) / SPATIAL_CELL_SIZE)));
+        const vc1 = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor((camX + viewW + 80) / SPATIAL_CELL_SIZE)));
+        for (let sr = vr0; sr <= vr1; sr++) {
+          for (let scell = vc0; scell <= vc1; scell++) {
+            const cellProps = sIdxRender.scenery[sr * SPATIAL_GRID_DIM + scell];
+            for (let pi = 0; pi < cellProps.length; pi++) {
+              const sc = cellProps[pi];
+              if (
+                sc.hp <= 0 ||
+                sc.x + sc.width / 2 < camX - 30 ||
+                sc.x - sc.width / 2 > camX + viewW + 30 ||
+                sc.y + sc.height < camY - 30 ||
+                sc.y - sc.height > camY + viewH + 30
+              ) {
+                continue;
+              }
 
-          if (sc.hp <= 0) return;
-
-          ySortQueue.push({
-            sortY: sc.y, // Footprint ground Y
+              ySortQueue.push({
+                sortY: sc.y, // Footprint ground Y
             render: (cContext) => {
               cContext.save();
 
@@ -5616,7 +8333,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               cContext.restore();
             }
           });
-        });
+            }
+          }
+        }
       }
 
       // 2. Ground Loot Pickups (Bananas, Shield Cells, Ammo Boxes)
@@ -5649,19 +8368,58 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 cContext.arc(loot.x, loot.y, 18 + sensorPulse * 7, 0, Math.PI * 2);
                 cContext.stroke();
               }
-              cContext.fillStyle = loot.type === 'banana' ? 'rgba(250, 204, 21, 0.25)' : 'rgba(34, 211, 238, 0.25)';
+              cContext.fillStyle =
+                loot.type === 'banana'
+                  ? 'rgba(250, 204, 21, 0.28)'
+                  : loot.type === 'ammo_box'
+                  ? 'rgba(74, 222, 128, 0.28)'
+                  : loot.type === 'speed_flask'
+                  ? 'rgba(192, 132, 252, 0.28)'
+                  : 'rgba(34, 211, 238, 0.28)';
               cContext.beginPath();
               cContext.ellipse(loot.x, loot.y + 6, 14, 6, 0, 0, Math.PI * 2);
               cContext.fill();
 
-              const img = imageAssets.current[loot.spriteKey];
+              const img = imageAssets.current[loot.spriteKey] || imageAssets.current[`loot_${loot.type}`];
               if (img && img.complete && img.naturalWidth > 0) {
                 cContext.drawImage(img, loot.x - 16, loot.y - 16 + bob, 32, 32);
               } else {
                 cContext.font = '20px sans-serif';
                 cContext.textAlign = 'center';
                 cContext.textBaseline = 'middle';
-                cContext.fillText(loot.type === 'banana' ? '🍌' : '⚡', loot.x, loot.y + bob);
+                const fallbackIcon =
+                  loot.type === 'banana'
+                    ? '🍌'
+                    : loot.type === 'shield_cell'
+                    ? '🛡️'
+                    : loot.type === 'ammo_box'
+                    ? '📦'
+                    : '⚡';
+                cContext.fillText(fallbackIcon, loot.x, loot.y + bob);
+              }
+
+              // Crisp nearby item effect badge so pickups clearly state what they grant
+              const distToLoot = Math.hypot(loot.x - px, loot.y - py);
+              if (distToLoot < 230) {
+                const shortLabel =
+                  loot.type === 'banana'
+                    ? `+${loot.healHp || 25} HP`
+                    : loot.type === 'shield_cell'
+                    ? `+${loot.grantShield || 30} SHIELD`
+                    : loot.type === 'ammo_box'
+                    ? `+${loot.grantMats?.wood ?? 15}🪵 +${loot.grantMats?.brick ?? 10}🧱 +${loot.grantMats?.metal ?? 5}⚙️`
+                    : `+${loot.healHp ?? 15}HP +${loot.grantShield ?? 15}🛡️ ⚡SPD`;
+                const labelCol =
+                  loot.type === 'banana'
+                    ? '#fde047'
+                    : loot.type === 'shield_cell'
+                    ? '#38bdf8'
+                    : loot.type === 'ammo_box'
+                    ? '#86efac'
+                    : '#e9d5ff';
+                cContext.font = 'bold 9px sans-serif';
+                cContext.textAlign = 'center';
+                drawOutlinedText(cContext, shortLabel, loot.x, loot.y + 22, labelCol);
               }
 
               cContext.restore();
@@ -5820,6 +8578,201 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         });
       });
 
+      // 3B. Fortified City Perimeter Walls & Gatehouse Bastions (Y-sorted & viewport-culled)
+      if (worldDataRef.current?.cityWalls) {
+        const wallHExtra = 14; // Visual wall elevation above 32px footprint
+
+        const drawWallSegmentChunk = (cContext: CanvasRenderingContext2D, rx: number, ry: number, rw: number, rh: number, isHoriz: boolean) => {
+          // Ground drop shadow
+          cContext.fillStyle = 'rgba(0, 0, 0, 0.28)';
+          cContext.fillRect(rx + 2, ry + rh - 2, rw, 7);
+
+          // Main front stone masonry face
+          const faceTop = ry - wallHExtra;
+          const faceBottom = ry + rh;
+          const frontFaceH = 18;
+          const topWalkH = faceBottom - faceTop - frontFaceH;
+
+          // Front vertical face (darker slate stone)
+          cContext.fillStyle = '#475569';
+          cContext.fillRect(rx, faceBottom - frontFaceH, rw, frontFaceH);
+
+          // Mortar & ashlar stone courses on front face
+          cContext.fillStyle = '#334155';
+          cContext.fillRect(rx, faceBottom - frontFaceH + 6, rw, 1.5);
+          cContext.fillRect(rx, faceBottom - frontFaceH + 12, rw, 1.5);
+          for (let bx = rx + 8; bx < rx + rw - 2; bx += 16) {
+            cContext.fillRect(bx, faceBottom - frontFaceH, 1.5, 6);
+            cContext.fillRect(bx - 8 >= rx ? bx - 8 : bx, faceBottom - frontFaceH + 7, 1.5, 6);
+          }
+
+          // Base dark stone footing
+          cContext.fillStyle = '#1e293b';
+          cContext.fillRect(rx, faceBottom - 3, rw, 3);
+
+          // Top stone walkway deck
+          cContext.fillStyle = '#64748b';
+          cContext.fillRect(rx, faceTop, rw, topWalkH);
+
+          // Crisp highlight edge on parapet lip
+          cContext.fillStyle = '#94a3b8';
+          cContext.fillRect(rx, faceTop + topWalkH - 2, rw, 2);
+          cContext.strokeStyle = '#1e293b';
+          cContext.lineWidth = 1.5;
+          cContext.strokeRect(rx, faceTop, rw, faceBottom - faceTop);
+
+          // Crenellated battlements (merlons)
+          cContext.fillStyle = '#cbd5e1';
+          if (isHoriz) {
+            for (let mx = rx + 2; mx <= rx + rw - 14; mx += 16) {
+              cContext.fillRect(mx, faceTop - 4, 10, 7);
+              cContext.strokeStyle = '#334155';
+              cContext.lineWidth = 1;
+              cContext.strokeRect(mx, faceTop - 4, 10, 7);
+            }
+          } else {
+            for (let my = ry - wallHExtra + 2; my <= ry + rh - 12; my += 16) {
+              cContext.fillStyle = '#cbd5e1';
+              cContext.fillRect(rx + 3, my, 8, 9);
+              cContext.fillRect(rx + rw - 11, my, 8, 9);
+              cContext.strokeStyle = '#334155';
+              cContext.lineWidth = 1;
+              cContext.strokeRect(rx + 3, my, 8, 9);
+              cContext.strokeRect(rx + rw - 11, my, 8, 9);
+            }
+          }
+        };
+
+        for (const wall of worldDataRef.current.cityWalls) {
+          if (
+            wall.x + wall.w < camX - 48 ||
+            wall.x > camX + viewW + 48 ||
+            wall.y + wall.h < camY - 48 ||
+            wall.y - wallHExtra > camY + viewH + 48
+          ) {
+            continue;
+          }
+
+          if (wall.orientation === 'h') {
+            const visStartX = Math.max(wall.x, Math.floor((camX - 32) / WORLD_TILE_SIZE) * WORLD_TILE_SIZE);
+            const visEndX = Math.min(wall.x + wall.w, Math.ceil((camX + viewW + 32) / WORLD_TILE_SIZE) * WORLD_TILE_SIZE);
+            const visW = visEndX - visStartX;
+            if (visW <= 0) continue;
+
+            ySortQueue.push({
+              sortY: wall.y + wall.h,
+              render: (cContext) => {
+                cContext.save();
+                drawWallSegmentChunk(cContext, visStartX, wall.y, visW, wall.h, true);
+                cContext.restore();
+              }
+            });
+          } else {
+            const visStartY = Math.max(wall.y, Math.floor((camY - 32) / WORLD_TILE_SIZE) * WORLD_TILE_SIZE);
+            const visEndY = Math.min(wall.y + wall.h, Math.ceil((camY + viewH + 32) / WORLD_TILE_SIZE) * WORLD_TILE_SIZE);
+            for (let ty = visStartY; ty < visEndY; ty += WORLD_TILE_SIZE) {
+              const segY = ty;
+              ySortQueue.push({
+                sortY: segY + WORLD_TILE_SIZE,
+                render: (cContext) => {
+                  cContext.save();
+                  drawWallSegmentChunk(cContext, wall.x, segY, wall.w, WORLD_TILE_SIZE, false);
+                  cContext.restore();
+                }
+              });
+            }
+          }
+        }
+
+        // Flanking Gatehouse Pillars & Glowing Braziers at both City Entrances
+        if (worldDataRef.current.cityGates) {
+          for (const gate of worldDataRef.current.cityGates) {
+            const pillars =
+              gate.side === 'north' || gate.side === 'south'
+                ? [
+                    { x: gate.x - WORLD_TILE_SIZE, y: gate.y },
+                    { x: gate.x + gate.w, y: gate.y }
+                  ]
+                : [
+                    { x: gate.x, y: gate.y - WORLD_TILE_SIZE },
+                    { x: gate.x, y: gate.y + gate.h }
+                  ];
+
+            // Subtle stone threshold flagstones across the gate archway
+            if (
+              gate.x + gate.w >= camX - 40 &&
+              gate.x <= camX + viewW + 40 &&
+              gate.y + gate.h >= camY - 40 &&
+              gate.y <= camY + viewH + 40
+            ) {
+              ySortQueue.push({
+                sortY: gate.y - 10, // Ground level underneath characters walking through the gate
+                render: (cContext) => {
+                  cContext.save();
+                  cContext.fillStyle = 'rgba(100, 116, 139, 0.35)';
+                  cContext.fillRect(gate.x, gate.y, gate.w, gate.h);
+                  cContext.strokeStyle = 'rgba(251, 191, 36, 0.45)';
+                  cContext.lineWidth = 2;
+                  cContext.setLineDash([6, 4]);
+                  cContext.strokeRect(gate.x + 2, gate.y + 2, gate.w - 4, gate.h - 4);
+                  cContext.restore();
+                }
+              });
+            }
+
+            for (const pil of pillars) {
+              if (
+                pil.x + WORLD_TILE_SIZE < camX - 40 ||
+                pil.x > camX + viewW + 40 ||
+                pil.y + WORLD_TILE_SIZE < camY - 40 ||
+                pil.y - 26 > camY + viewH + 40
+              ) {
+                continue;
+              }
+              ySortQueue.push({
+                sortY: pil.y + WORLD_TILE_SIZE + 1,
+                render: (cContext, cNow) => {
+                  cContext.save();
+                  const pxTop = pil.x - 2;
+                  const pyTop = pil.y - 24;
+                  const pw = WORLD_TILE_SIZE + 4;
+                  const ph = WORLD_TILE_SIZE + 24;
+
+                  // Tall gate bastion tower body
+                  cContext.fillStyle = '#334155';
+                  cContext.fillRect(pxTop, pyTop, pw, ph);
+                  cContext.fillStyle = '#475569';
+                  cContext.fillRect(pxTop + 2, pyTop + 2, pw - 4, ph - 8);
+                  cContext.fillStyle = '#94a3b8';
+                  cContext.fillRect(pxTop, pyTop, pw, 12);
+                  cContext.strokeStyle = '#fbbf24';
+                  cContext.lineWidth = 2;
+                  cContext.strokeRect(pxTop, pyTop, pw, ph);
+
+                  // Golden gatehouse torch/brazier glow
+                  const flicker = 0.8 + Math.sin(cNow / 140 + pil.x) * 0.2;
+                  const bx = pil.x + WORLD_TILE_SIZE / 2;
+                  const by = pyTop + 6;
+                  cContext.fillStyle = `rgba(251, 146, 60, ${0.35 * flicker})`;
+                  cContext.beginPath();
+                  cContext.arc(bx, by, 13 * flicker, 0, Math.PI * 2);
+                  cContext.fill();
+                  cContext.fillStyle = '#f97316';
+                  cContext.beginPath();
+                  cContext.arc(bx, by, 5, 0, Math.PI * 2);
+                  cContext.fill();
+                  cContext.fillStyle = '#fef08a';
+                  cContext.beginPath();
+                  cContext.arc(bx, by, 2.5, 0, Math.PI * 2);
+                  cContext.fill();
+                  cContext.restore();
+                }
+              });
+            }
+          }
+        }
+      }
+
       // 4. Supply Crates
       cratesRef.current.forEach(cr => {
         if (cr.isClaimed) return;
@@ -5860,8 +8813,14 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             cContext.fillText('📦', 0, 0);
 
             cContext.font = 'bold 9px sans-serif';
-            cContext.fillStyle = '#ffffff';
-            cContext.fillText(cr.rewardType === 'shield' ? 'SHIELD CRATE' : 'MATS CRATE', 0, 24);
+            cContext.textAlign = 'center';
+            drawOutlinedText(
+              cContext,
+              cr.rewardType === 'shield' ? '🛡️ +50 SHIELD CRATE' : '📦 +45 MATS CRATE',
+              0,
+              24,
+              cr.rewardType === 'shield' ? '#7dd3fc' : '#fde047'
+            );
 
             cContext.restore();
           }
@@ -5888,7 +8847,10 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         cNow: number,
         isAcousticShield?: boolean,
         isMovingOverride?: boolean,
-        moveSpeedPx?: number
+        moveSpeedPx?: number,
+        isHurtOverride?: boolean,
+        isAttackingOverride?: boolean,
+        isChilled?: boolean
       ) => {
         cContext.save();
         cContext.translate(pX, pY);
@@ -5900,7 +8862,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         }
 
         // Overlord Cataclysmic Might 140px Storm Eye aura ring
-        if (dollSkinId === 'overlord' && isLocal && !(!isAliveRef.current)) {
+        if (dollSkinId === 'overlord' && isLocal && isAliveRef.current) {
           const auraSpin = cNow / 700;
           cContext.save();
           cContext.rotate(auraSpin);
@@ -5936,23 +8898,60 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           cContext.stroke();
         }
         if (isAcousticShield) {
-          cContext.strokeStyle = 'rgba(234, 179, 8, 0.9)';
-          cContext.lineWidth = 3;
+          cContext.save();
+          const shieldR = 36 + Math.sin(cNow / 90) * 3;
+          cContext.fillStyle = 'rgba(234, 179, 8, 0.14)';
           cContext.beginPath();
-          cContext.arc(0, 0, 34 + Math.sin(cNow / 100) * 3, 0, 2 * Math.PI);
+          cContext.arc(0, 0, shieldR, 0, 2 * Math.PI);
+          cContext.fill();
+          // Double rotating acoustic hexagonal rings
+          for (let ring = 0; ring < 2; ring++) {
+            cContext.save();
+            cContext.rotate((ring === 0 ? 1 : -1) * (cNow / 320));
+            cContext.strokeStyle = ring === 0 ? '#facc15' : '#fef08a';
+            cContext.lineWidth = ring === 0 ? 3.2 : 2;
+            cContext.beginPath();
+            const r = shieldR + ring * 6;
+            for (let s = 0; s <= 6; s++) {
+              const a = (s / 6) * Math.PI * 2;
+              const hx = Math.cos(a) * r;
+              const hy = Math.sin(a) * r;
+              if (s === 0) cContext.moveTo(hx, hy);
+              else cContext.lineTo(hx, hy);
+            }
+            cContext.stroke();
+            cContext.restore();
+          }
+          cContext.restore();
+        }
+        if (isChilled) {
+          cContext.save();
+          const frostR = 28 + Math.sin(cNow / 110) * 2.5;
+          cContext.fillStyle = 'rgba(34, 211, 238, 0.16)';
+          cContext.beginPath();
+          cContext.arc(0, 0, frostR, 0, 2 * Math.PI);
+          cContext.fill();
+          cContext.rotate(cNow / 500);
+          cContext.strokeStyle = '#67e8f9';
+          cContext.lineWidth = 2.5;
+          cContext.setLineDash([7, 5]);
+          cContext.beginPath();
+          cContext.arc(0, 0, frostR, 0, 2 * Math.PI);
           cContext.stroke();
+          cContext.setLineDash([]);
+          cContext.restore();
         }
 
-        // Check if fantasy character sprite sheet is available
+        // Resolve fantasy sprite sheets stably (prevents flicker & 256x256 bad-slicing glitches)
         const resolvedSkinId = FANTASY_SKIN_ALIASES[skinId] || skinId;
         const skinDef = getFantasySkin(resolvedSkinId);
-        const sheets = skinDef.actionSheets || CHARACTER_ACTION_SHEETS[resolvedSkinId] || CHARACTER_ACTION_SHEETS.hero;
+        const canonicalId = skinDef.id;
+        const sheets = skinDef.actionSheets || CHARACTER_ACTION_SHEETS[canonicalId] || CHARACTER_ACTION_SHEETS.cultist;
 
-        // Determine active action state:
         const isDead = isLocal ? !isAliveRef.current : (hp <= 0);
-        const isHurt = isLocal ? (cNow - lastDamageTimeRef.current < 320) : false;
-        const isAttacking = isLocal ? (cNow - lastShotTimeRef.current < 280) : false;
-        const isMoving = isMovingOverride !== undefined ? isMovingOverride : Math.abs(Math.sin(stride)) > 0.04;
+        const isHurt = isHurtOverride !== undefined ? isHurtOverride : (isLocal ? (cNow - lastDamageTimeRef.current < 320) : false);
+        const isAttacking = isAttackingOverride !== undefined ? isAttackingOverride : (isLocal ? (cNow - lastShotTimeRef.current < 280) : false);
+        const isMoving = isMovingOverride !== undefined ? isMovingOverride : false;
         const isSprinting = isMoving && isLocal && (!!keysPressed.current['shift'] || (moveSpeedPx || 0) >= 340);
 
         let activeAction: 'idle' | 'walk' | 'run' | 'attack' | 'hurt' | 'death' = 'idle';
@@ -5970,17 +8969,27 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           activeAction = 'idle';
         }
 
-        const activeSheetSrc = sheets[activeAction] || sheets.idle;
-        const sheetImg = getActionSheetImage(activeSheetSrc) || 
-                         getActionSheetImage(sheets.idle) || 
-                         imageAssets.current[`char_${resolvedSkinId}`] || 
-                         imageAssets.current[`char_${skinId}`] || 
-                         imageAssets.current['char_knight_hero'] ||
-                         imageAssets.current['char_cultist'];
-        const hasSheet = sheetImg && sheetImg.complete && sheetImg.naturalWidth > 0;
+        const primaryActionImg = getActionSheetImage(sheets[activeAction]);
+        const idleSheetImg = getActionSheetImage(sheets.idle);
+        let sheet4x4: HTMLImageElement | null = null;
+        if (primaryActionImg && primaryActionImg.naturalWidth >= 512) {
+          sheet4x4 = primaryActionImg;
+          lastValid4x4SheetRef.current[canonicalId] = primaryActionImg;
+        } else if (idleSheetImg && idleSheetImg.naturalWidth >= 512) {
+          sheet4x4 = idleSheetImg;
+          lastValid4x4SheetRef.current[canonicalId] = idleSheetImg;
+        } else if (lastValid4x4SheetRef.current[canonicalId]?.naturalWidth >= 512) {
+          sheet4x4 = lastValid4x4SheetRef.current[canonicalId];
+        }
 
-        if (hasSheet) {
-          // --- FULL 4-DIRECTION TOP-DOWN WALKING & IDLE PIXEL SPRITE ANIMATION ---
+        const portraitFallback =
+          imageAssets.current[`char_${canonicalId}`] ||
+          imageAssets.current[`char_${resolvedSkinId}`] ||
+          imageAssets.current['char_cultist'];
+        const hasPortrait = Boolean(portraitFallback && portraitFallback.complete && portraitFallback.naturalWidth > 0);
+
+        if (sheet4x4) {
+          // --- FULL 4-DIRECTION TOP-DOWN 1024x1024 (4x4) SPRITE SHEET ---
           cContext.save();
 
           const walkBob = (isMoving && !isDead) ? Math.abs(Math.sin(stride)) * -2 : 0;
@@ -6019,23 +9028,20 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             frameCol = Math.floor(cNow / 260) % 4;
           }
 
-          const isModular1024 = sheetImg.naturalWidth >= 512;
-          const frameSize = isModular1024 ? 256 : 32;
-
-          const sx = frameCol * frameSize;
-          const sy = dirRow * frameSize;
-          const sw = frameSize;
-          const sh = frameSize;
+          const frameW = Math.floor(sheet4x4.naturalWidth / 4);
+          const frameH = Math.floor(sheet4x4.naturalHeight / 4);
+          const sx = frameCol * frameW;
+          const sy = dirRow * frameH;
 
           const sprW = 48;
           const sprH = 48;
           cContext.imageSmoothingEnabled = false;
           cContext.drawImage(
-            sheetImg,
+            sheet4x4,
             sx,
             sy,
-            sw,
-            sh,
+            frameW,
+            frameH,
             -sprW / 2,
             -sprH + 16,
             sprW,
@@ -6048,7 +9054,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           if (!isDead) {
             cContext.save();
             cContext.rotate(angle);
-            const weaponItem = SHOP_ITEMS.find(i => i.id === weaponId) || equippedWeaponRef.current;
+            const resolvedWeaponId = resolveArenaWeaponId(weaponId);
+            const weaponItem = SHOP_ITEMS.find(i => i.id === resolvedWeaponId) || equippedWeaponRef.current;
             const beamCol = weaponItem?.stats?.beamColor || '#f97316';
 
             cContext.fillStyle = '#fed7aa';
@@ -6071,8 +9078,24 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             cContext.fill();
             cContext.restore();
           }
+        } else if (hasPortrait && portraitFallback) {
+          // Draw full 256x256 character portrait intact while 1024x1024 action sheets finish loading
+          const sprW = 44;
+          const sprH = 44;
+          cContext.imageSmoothingEnabled = false;
+          cContext.drawImage(
+            portraitFallback,
+            0,
+            0,
+            portraitFallback.naturalWidth,
+            portraitFallback.naturalHeight,
+            -sprW / 2,
+            -sprH + 16,
+            sprW,
+            sprH
+          );
         } else {
-          // Fallback to geometric composite paper-doll if sprite still preloading
+          // Fallback to geometric composite paper-doll if images haven't loaded yet
           cContext.rotate(angle);
           const fantasySkin = getFantasySkin(resolvedSkinId);
           const theme = {
@@ -6123,7 +9146,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           cContext.arc(2, 0, 7.5, Math.PI * 0.7, Math.PI * 2.3);
           cContext.fill();
 
-          const weaponItem = SHOP_ITEMS.find(i => i.id === weaponId) || equippedWeaponRef.current;
+          const resolvedFallbackWeaponId = resolveArenaWeaponId(weaponId);
+          const weaponItem = SHOP_ITEMS.find(i => i.id === resolvedFallbackWeaponId) || equippedWeaponRef.current;
           const beamCol = weaponItem?.stats?.beamColor || '#f97316';
 
           cContext.fillStyle = '#fed7aa';
@@ -6146,11 +9170,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         cContext.translate(pX, pY - 34);
 
         cContext.font = isLocal ? 'bold 11px sans-serif' : '10px sans-serif';
-        cContext.fillStyle = isLocal ? '#34d399' : '#ffffff';
         cContext.textAlign = 'center';
-        cContext.shadowColor = '#000000';
-        cContext.shadowBlur = 4;
-        cContext.fillText(isLocal ? `YOU (${pName})` : pName, 0, 0);
+        drawOutlinedText(cContext, isLocal ? `YOU (${pName})` : pName, 0, 0, isLocal ? '#34d399' : '#ffffff');
 
         const barW = 40;
         const barH = 4;
@@ -6171,27 +9192,63 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         cContext.restore();
       };
 
-      // 5. Add Other Players to Y-Sort Queue
+      // 5. Add Other Alive Players to Y-Sort Queue with smooth interpolation (eliminated players are completely invisible)
       arenaPlayersRef.current.forEach(p => {
-        if (p.uid !== user.id && p.isAlive) {
+        if (p.uid !== user.id && p.isAlive && (p.hp === undefined || p.hp > 0)) {
+          let motion = remotePlayerMotionRef.current[p.uid];
+          if (!motion) {
+            motion = {
+              drawX: p.x,
+              drawY: p.y,
+              drawAngle: p.angle || 0,
+              lastMovedAt: 0,
+              prevHp: p.hp,
+              hurtUntil: 0,
+              attackUntil: 0
+            };
+            remotePlayerMotionRef.current[p.uid] = motion;
+          }
+          const deltaStep = Math.hypot(p.x - motion.drawX, p.y - motion.drawY);
+          if (deltaStep > 2.2) {
+            motion.lastMovedAt = now;
+          }
+          if (p.hp < motion.prevHp) {
+            motion.hurtUntil = now + 300;
+          }
+          motion.prevHp = p.hp;
+          const lerpAlpha = 1 - Math.exp(-12 * dt);
+          motion.drawX += (p.x - motion.drawX) * lerpAlpha;
+          motion.drawY += (p.y - motion.drawY) * lerpAlpha;
+          let angleDelta = (p.angle || 0) - motion.drawAngle;
+          while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
+          while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
+          motion.drawAngle += angleDelta * lerpAlpha;
+
           if (
-            p.x < camX - 50 ||
-            p.x > camX + viewW + 50 ||
-            p.y < camY - 50 ||
-            p.y > camY + viewH + 50
+            motion.drawX < camX - 50 ||
+            motion.drawX > camX + viewW + 50 ||
+            motion.drawY < camY - 50 ||
+            motion.drawY > camY + viewH + 50
           ) {
             return;
           }
 
+          const isRemoteMoving = now - motion.lastMovedAt < 380;
+          const isRemoteHurt = now < motion.hurtUntil;
+          const isRemoteAttacking = now < motion.attackUntil;
+          const drawX = motion.drawX;
+          const drawY = motion.drawY;
+          const drawAngle = motion.drawAngle;
+
           ySortQueue.push({
-            sortY: p.y + 12,
+            sortY: drawY + 12,
             render: (cContext, cNow) => {
               renderPaperDoll(
                 cContext,
-                p.x,
-                p.y,
-                p.angle || 0,
-                p.avatar || 'cyber_scientist',
+                drawX,
+                drawY,
+                drawAngle,
+                p.avatar || 'cultist',
                 p.equippedWeapon || 'bunsen_burner',
                 false,
                 p.name,
@@ -6200,14 +9257,23 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 Boolean(p.highGroundActive),
                 Boolean(p.metalShieldActiveUntil && p.metalShieldActiveUntil > cNow),
                 cNow / 150,
-                cNow
+                cNow,
+                false,
+                isRemoteMoving,
+                undefined,
+                isRemoteHurt,
+                isRemoteAttacking,
+                Boolean(
+                  (p.frostSlowUntil && p.frostSlowUntil > cNow) ||
+                  (enemyFrostSlowUntilRef.current[p.uid] && enemyFrostSlowUntilRef.current[p.uid] > cNow)
+                )
               );
             }
           });
         }
       });
 
-      // 6. Add Local Player to Y-Sort Queue
+      // 6. Add Local Player to Y-Sort Queue ONLY when alive (invisible spectator when eliminated)
       if (playerAlive) {
         ySortQueue.push({
           sortY: py + 12,
@@ -6229,7 +9295,10 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               cNow,
               cNow < acousticShieldUntilRef.current,
               isLocallyMovingRef.current,
-              speedPxPerSec
+              speedPxPerSec,
+              undefined,
+              undefined,
+              cNow < frostSlowUntilRef.current
             );
           }
         });
@@ -6239,54 +9308,565 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       ySortQueue.sort((a, b) => a.sortY - b.sortY);
       ySortQueue.forEach(item => item.render(ctx, now));
 
-      // (D) LAYER 3: FLYING PROJECTILES & COMBAT PARTICLES
+      // (D) LAYER 3: PRONOUNCED WEAPON-SPECIFIC PROJECTILES, BEAMS, MUZZLE BLASTS & PARTICLES
       projectilesRef.current.forEach(p => {
         if (
-          p.x < camX - 10 ||
-          p.x > camX + viewW + 10 ||
-          p.y < camY - 10 ||
-          p.y > camY + viewH + 10
+          p.x < camX - 45 ||
+          p.x > camX + viewW + 45 ||
+          p.y < camY - 45 ||
+          p.y > camY + viewH + 45
         ) {
           return;
         }
 
-        ctx.save();
-        ctx.fillStyle = p.color;
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur = 14;
+        const dirAngle = Math.atan2(p.vy, p.vx);
+        const speedMag = Math.max(1, Math.hypot(p.vx, p.vy));
+        const ageNow = p.age || 0;
 
-        if (p.weaponId === 'laser_pointer') {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 4.5, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-        } else if (p.weaponId === 'particle_accelerator') {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 7.5, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.strokeStyle = '#c084fc';
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 12, 0, 2 * Math.PI);
-          ctx.stroke();
-        } else {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.isHighGround ? 6 : 5, 0, 2 * Math.PI);
-          ctx.fill();
+        // Motion trail behind projectile
+        if (p.trail && p.trail.length > 1) {
+          ctx.save();
+          ctx.lineCap = 'round';
+          for (let tIdx = 1; tIdx < p.trail.length; tIdx++) {
+            const frac = tIdx / p.trail.length;
+            ctx.strokeStyle = p.color;
+            ctx.globalAlpha = frac * (p.isAlt ? 0.65 : 0.45);
+            ctx.lineWidth = (p.isAlt ? 7 : 4.5) * frac;
+            ctx.beginPath();
+            ctx.moveTo(p.trail[tIdx - 1].x, p.trail[tIdx - 1].y);
+            ctx.lineTo(p.trail[tIdx].x, p.trail[tIdx].y);
+            ctx.stroke();
+          }
+          ctx.restore();
         }
 
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(dirAngle);
+
+        switch (p.weaponId) {
+          case 'bunsen_burner': {
+            // Blazing elongated fireball / comet jet with bright yellow-white core
+            const scale = p.isAlt ? 1.45 : 1.05;
+            ctx.scale(scale, scale);
+            ctx.fillStyle = '#ea580c';
+            ctx.beginPath();
+            ctx.moveTo(12, 0);
+            ctx.quadraticCurveTo(2, -8, -14, -3 + Math.sin(now / 45 + ageNow) * 2);
+            ctx.lineTo(-19, 0);
+            ctx.lineTo(-14, 3 - Math.sin(now / 45 + ageNow) * 2);
+            ctx.quadraticCurveTo(2, 8, 12, 0);
+            ctx.fill();
+
+            ctx.fillStyle = '#fb923c';
+            ctx.beginPath();
+            ctx.arc(3, 0, 6.2, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#fef08a';
+            ctx.beginPath();
+            ctx.arc(5, 0, 3.3, 0, Math.PI * 2);
+            ctx.fill();
+            break;
+          }
+
+          case 'acid_pipette': {
+            if (p.isAlt) {
+              // Spinning glowing Corrosive Acid Flask / Canister
+              ctx.rotate(now / 65);
+              ctx.fillStyle = '#065f46';
+              ctx.strokeStyle = '#34d399';
+              ctx.lineWidth = 2.2;
+              ctx.beginPath();
+              ctx.roundRect(-8, -8, 16, 16, 5);
+              ctx.fill();
+              ctx.stroke();
+              ctx.fillStyle = '#a7f3d0';
+              ctx.beginPath();
+              ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
+              ctx.fill();
+            } else {
+              // Wobbling toxic emerald Acid Glob + core bubble
+              const wobble = 1 + Math.sin(now / 50 + ageNow) * 0.2;
+              ctx.fillStyle = 'rgba(16, 185, 129, 0.9)';
+              ctx.beginPath();
+              ctx.ellipse(0, 0, 9.5, 5.8 * wobble, 0, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.strokeStyle = '#6ee7b7';
+              ctx.lineWidth = 1.6;
+              ctx.stroke();
+              ctx.fillStyle = '#d1fae5';
+              ctx.beginPath();
+              ctx.arc(3, -1.5, 2.3, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            break;
+          }
+
+          case 'cryo_freeze_ray': {
+            // Sharp jagged Cryo Ice Diamond / Spear
+            const len = p.isAlt ? 18 : 13;
+            const wid = p.isAlt ? 7.5 : 5.5;
+            ctx.fillStyle = '#06b6d4';
+            ctx.strokeStyle = '#e0f2fe';
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            ctx.moveTo(len, 0);
+            ctx.lineTo(0, -wid);
+            ctx.lineTo(-len * 0.7, 0);
+            ctx.lineTo(0, wid);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            // Internal frost crystal cross-glint
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.3;
+            ctx.beginPath();
+            ctx.moveTo(-len * 0.35, 0);
+            ctx.lineTo(len * 0.65, 0);
+            ctx.moveTo(0, -wid * 0.6);
+            ctx.lineTo(0, wid * 0.6);
+            ctx.stroke();
+            break;
+          }
+
+          case 'laser_pointer': {
+            // Sleek elongated Ruby Photon Laser Bolt with white hot core
+            const boltLen = p.isAlt ? 28 : 22;
+            ctx.shadowColor = p.color;
+            ctx.shadowBlur = 12;
+            ctx.strokeStyle = p.color;
+            ctx.lineWidth = p.isAlt ? 6.5 : 5;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(-boltLen * 0.7, 0);
+            ctx.lineTo(boltLen * 0.5, 0);
+            ctx.stroke();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = p.isAlt ? 2.6 : 2;
+            ctx.beginPath();
+            ctx.moveTo(-boltLen * 0.6, 0);
+            ctx.lineTo(boltLen * 0.45, 0);
+            ctx.stroke();
+            break;
+          }
+
+          case 'tesla_coil': {
+            // Crackling jagged electric lightning arc bolt segment
+            ctx.shadowColor = '#38bdf8';
+            ctx.shadowBlur = 12;
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            const j1 = Math.sin(now / 28 + ageNow * 4) * 6;
+            const j2 = Math.cos(now / 23 + ageNow * 5) * 6;
+            ctx.beginPath();
+            ctx.moveTo(-16, 0);
+            ctx.lineTo(-5, j1);
+            ctx.lineTo(4, -j2);
+            ctx.lineTo(14, 0);
+            ctx.stroke();
+            ctx.strokeStyle = '#f0f9ff';
+            ctx.lineWidth = 1.8;
+            ctx.stroke();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(11, 0, 3.2, 0, Math.PI * 2);
+            ctx.fill();
+            break;
+          }
+
+          case 'centrifuge_sonic_blaster': {
+            // Expanding golden curved Acoustic Soundwave Crescent
+            const spread = Math.min(18, 9 + ageNow * 0.35);
+            ctx.strokeStyle = '#eab308';
+            ctx.lineWidth = 3.5;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.arc(-4, 0, spread, -0.75, 0.75);
+            ctx.stroke();
+            ctx.strokeStyle = '#fef08a';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(-8, 0, spread * 0.72, -0.65, 0.65);
+            ctx.stroke();
+            break;
+          }
+
+          case 'particle_accelerator': {
+            // Dark-Matter Plasma Core with two fast spinning atomic electron orbits
+            const coreR = p.isAlt ? 10 : 7;
+            ctx.shadowColor = '#a855f7';
+            ctx.shadowBlur = 14;
+            ctx.fillStyle = '#3b0764';
+            ctx.beginPath();
+            ctx.arc(0, 0, coreR, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#f0abfc';
+            ctx.beginPath();
+            ctx.arc(0, 0, coreR * 0.52, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.rotate(now / 70);
+            ctx.strokeStyle = '#e879f9';
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, coreR * 1.9, coreR * 0.75, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.rotate(Math.PI / 2);
+            ctx.strokeStyle = '#c084fc';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, coreR * 1.9, coreR * 0.75, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            break;
+          }
+
+          case 'biohazard_railgun': {
+            if (p.isAlt) {
+              // Spinning Radioactive Mutagen Cluster Canister
+              ctx.rotate(now / 55);
+              ctx.fillStyle = '#365314';
+              ctx.strokeStyle = '#bef264';
+              ctx.lineWidth = 2.4;
+              ctx.beginPath();
+              ctx.roundRect(-9, -9, 18, 18, 4);
+              ctx.fill();
+              ctx.stroke();
+              ctx.fillStyle = '#a3e635';
+              ctx.beginPath();
+              ctx.arc(0, 0, 4.8, 0, Math.PI * 2);
+              ctx.fill();
+            } else {
+              // Supersonic Tungsten Railgun Slug with lime Mach-cone shock wave
+              ctx.strokeStyle = 'rgba(163, 230, 53, 0.75)';
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+              ctx.moveTo(12, 0);
+              ctx.lineTo(-10, -8);
+              ctx.moveTo(12, 0);
+              ctx.lineTo(-10, 8);
+              ctx.stroke();
+
+              ctx.fillStyle = '#84cc16';
+              ctx.beginPath();
+              ctx.moveTo(15, 0);
+              ctx.lineTo(-9, -4);
+              ctx.lineTo(-12, 0);
+              ctx.lineTo(-9, 4);
+              ctx.closePath();
+              ctx.fill();
+
+              ctx.fillStyle = '#f7fee7';
+              ctx.beginPath();
+              ctx.arc(7, 0, 2.3, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            break;
+          }
+
+          case 'quantum_displacer': {
+            // Braided Dual-Helix Cyan & Violet Tachyon Bolt
+            ctx.shadowColor = '#22d3ee';
+            ctx.shadowBlur = 10;
+            const phase = now / 45 + ageNow * 0.8;
+            ctx.strokeStyle = '#22d3ee';
+            ctx.lineWidth = 2.4;
+            ctx.beginPath();
+            for (let x = -14; x <= 10; x += 4) {
+              const y = Math.sin(phase + x * 0.35) * 5;
+              if (x === -14) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.strokeStyle = '#c084fc';
+            ctx.beginPath();
+            for (let x = -14; x <= 10; x += 4) {
+              const y = -Math.sin(phase + x * 0.35) * 5;
+              if (x === -14) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(9, 0, 3.4, 0, Math.PI * 2);
+            ctx.fill();
+            break;
+          }
+
+          case 'antimatter_annihilator': {
+            // Black-core Void Singularity Sphere rimmed in blazing Crimson Plasma
+            ctx.shadowColor = '#f43f5e';
+            ctx.shadowBlur = 16;
+            const rOuter = 9.5 + Math.sin(now / 45) * 1.5;
+            ctx.strokeStyle = '#fb7185';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(0, 0, rOuter, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = '#09090b';
+            ctx.beginPath();
+            ctx.arc(0, 0, 6.2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            ctx.arc(0, 0, 6.2, 0, Math.PI * 2);
+            ctx.stroke();
+            break;
+          }
+
+          default: {
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(0, 0, p.isHighGround ? 6.5 : 5.5, 0, 2 * Math.PI);
+            ctx.fill();
+            break;
+          }
+        }
+
+        // Extra Dragon's Blood or Wind Walker aura around projectile if active
+        if (p.isDragonBlood && p.weaponId !== 'bunsen_burner') {
+          ctx.strokeStyle = '#f97316';
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.arc(0, 0, 9 + (speedMag > 20 ? 1 : 0), 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (p.isWindWalker) {
+          ctx.strokeStyle = '#2dd4bf';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(-12, -6);
+          ctx.lineTo(8, 0);
+          ctx.lineTo(-12, 6);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+      });
+
+      // Aerial Weapon VFX: Muzzle Blasts, Optical Beams, Expanding Shockwaves, EMP Lightning, Warp Tethers & Orbital Pillars
+      weaponVfxRef.current.forEach(vfx => {
+        if (vfx.kind === 'hazard_pool' || vfx.kind === 'orbital_lock' || vfx.kind === 'vortex') return;
+        const progress = Math.min(1, Math.max(0, (now - vfx.startedAt) / vfx.durationMs));
+        const easeOut = 1 - Math.pow(1 - progress, 3);
+        const alpha = 1 - progress;
+
+        ctx.save();
+        if (vfx.kind === 'muzzle') {
+          ctx.translate(vfx.x, vfx.y);
+          ctx.rotate(vfx.angle);
+          ctx.globalAlpha = Math.max(0, 1 - progress * 0.9);
+          const scale = (vfx.isAlt ? 1.55 : 1.0) * (0.8 + easeOut * 0.55);
+          ctx.scale(scale, scale);
+
+          if (vfx.weaponId === 'bunsen_burner') {
+            // Blazing triangular flame jet cone
+            ctx.fillStyle = '#f97316';
+            ctx.beginPath();
+            ctx.moveTo(0, -6);
+            ctx.lineTo(36, -14);
+            ctx.lineTo(44, 0);
+            ctx.lineTo(36, 14);
+            ctx.lineTo(0, 6);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = '#fef08a';
+            ctx.beginPath();
+            ctx.moveTo(0, -3);
+            ctx.lineTo(24, -6);
+            ctx.lineTo(29, 0);
+            ctx.lineTo(24, 6);
+            ctx.lineTo(0, 3);
+            ctx.closePath();
+            ctx.fill();
+          } else if (vfx.weaponId === 'acid_pipette') {
+            // Toxic emerald splash droplets fan
+            ctx.fillStyle = '#34d399';
+            [-0.4, -0.15, 0, 0.15, 0.4].forEach((a, idx) => {
+              const dist = (16 + idx * 3) * (0.5 + easeOut);
+              ctx.beginPath();
+              ctx.arc(Math.cos(a) * dist, Math.sin(a) * dist, 4.2, 0, Math.PI * 2);
+              ctx.fill();
+            });
+          } else if (vfx.weaponId === 'cryo_freeze_ray') {
+            // 6-point icy frost star crystal at muzzle
+            ctx.strokeStyle = '#a5f3fc';
+            ctx.lineWidth = 2.5;
+            for (let k = 0; k < 6; k++) {
+              const ang = (k * Math.PI) / 3;
+              ctx.beginPath();
+              ctx.moveTo(0, 0);
+              ctx.lineTo(Math.cos(ang) * 20, Math.sin(ang) * 20);
+              ctx.stroke();
+            }
+          } else if (vfx.weaponId === 'centrifuge_sonic_blaster') {
+            // Twin golden muzzle sound arcs
+            ctx.strokeStyle = '#facc15';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(4, 0, 14 + easeOut * 14, -0.7, 0.7);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(4, 0, 22 + easeOut * 16, -0.55, 0.55);
+            ctx.stroke();
+          } else if (vfx.weaponId === 'tesla_coil') {
+            // Branching cyan electric muzzle arcs
+            ctx.strokeStyle = '#7dd3fc';
+            ctx.lineWidth = 2.6;
+            [-0.35, 0, 0.35].forEach((off, i) => {
+              ctx.beginPath();
+              ctx.moveTo(0, 0);
+              ctx.lineTo(14, Math.sin(off) * 16 + (i - 1) * 5);
+              ctx.lineTo(28, Math.sin(off) * 26);
+              ctx.stroke();
+            });
+          } else if (vfx.weaponId === 'antimatter_annihilator' || vfx.weaponId === 'particle_accelerator') {
+            // Contracting/expanding plasma ring at barrel
+            ctx.strokeStyle = vfx.color;
+            ctx.lineWidth = 3.5;
+            ctx.beginPath();
+            ctx.arc(6, 0, 10 + easeOut * 14, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(6, 0, 5.5, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            // Crisp laser/railgun/quantum starburst flare
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = vfx.color;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(0, -10);
+            ctx.lineTo(6, -3);
+            ctx.lineTo(26, 0);
+            ctx.lineTo(6, 3);
+            ctx.lineTo(0, 10);
+            ctx.lineTo(-4, 0);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+          }
+        } else if (vfx.kind === 'beam') {
+          ctx.globalAlpha = Math.max(0, 1 - progress * progress);
+          ctx.lineCap = 'round';
+          ctx.shadowColor = vfx.color;
+          ctx.shadowBlur = 16;
+          ctx.strokeStyle = vfx.color;
+          ctx.lineWidth = vfx.width * (1.25 - progress * 0.5);
+          ctx.beginPath();
+          ctx.moveTo(vfx.x1, vfx.y1);
+          ctx.lineTo(vfx.x2, vfx.y2);
+          ctx.stroke();
+
+          ctx.strokeStyle = vfx.coreColor || '#ffffff';
+          ctx.lineWidth = Math.max(1.5, vfx.width * 0.4 * (1 - progress * 0.4));
+          ctx.beginPath();
+          ctx.moveTo(vfx.x1, vfx.y1);
+          ctx.lineTo(vfx.x2, vfx.y2);
+          ctx.stroke();
+        } else if (vfx.kind === 'shockwave') {
+          const rings = vfx.ringCount || 1;
+          for (let r = 0; r < rings; r++) {
+            const subProgress = Math.min(1, Math.max(0, (progress - r * 0.12) / (1 - r * 0.12)));
+            if (subProgress <= 0) continue;
+            const subEase = 1 - Math.pow(1 - subProgress, 3);
+            const curR = Math.max(6, vfx.maxRadius * subEase * (1 - r * 0.12));
+            ctx.globalAlpha = (1 - subProgress) * (r === 0 ? 0.9 : 0.65);
+            ctx.strokeStyle = r % 2 === 1 && vfx.secondaryColor ? vfx.secondaryColor : vfx.color;
+            ctx.lineWidth = Math.max(1.5, (vfx.lineWidth || 4) * (1 - subProgress * 0.6));
+            ctx.beginPath();
+            ctx.arc(vfx.x, vfx.y, curR, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        } else if (vfx.kind === 'lightning_nova') {
+          ctx.globalAlpha = alpha;
+          ctx.shadowColor = vfx.color;
+          ctx.shadowBlur = 14;
+          const boltCount = 10;
+          for (let i = 0; i < boltCount; i++) {
+            const ang = (i / boltCount) * Math.PI * 2 + (vfx.seed % 7) * 0.1;
+            const reach = vfx.maxRadius * (0.65 + easeOut * 0.35);
+            ctx.strokeStyle = i % 2 === 0 ? '#38bdf8' : '#e0f2fe';
+            ctx.lineWidth = 3.2 * alpha + 1;
+            ctx.beginPath();
+            ctx.moveTo(vfx.x, vfx.y);
+            const segs = 5;
+            for (let s = 1; s <= segs; s++) {
+              const d = (reach * s) / segs;
+              const jitter = s < segs ? Math.sin(now / 30 + i * 3 + s * 7) * 18 : 0;
+              const pxB = vfx.x + Math.cos(ang) * d - Math.sin(ang) * jitter;
+              const pyB = vfx.y + Math.sin(ang) * d + Math.cos(ang) * jitter;
+              ctx.lineTo(pxB, pyB);
+            }
+            ctx.stroke();
+          }
+          // Direct arcs to stunned enemy targets
+          (vfx.targets || []).forEach((tgt, idx) => {
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3 * alpha + 1;
+            ctx.beginPath();
+            ctx.moveTo(vfx.x, vfx.y);
+            const mx = (vfx.x + tgt.x) / 2 + Math.sin(now / 25 + idx) * 20;
+            const my = (vfx.y + tgt.y) / 2 + Math.cos(now / 25 + idx) * 20;
+            ctx.lineTo(mx, my);
+            ctx.lineTo(tgt.x, tgt.y);
+            ctx.stroke();
+          });
+        } else if (vfx.kind === 'warp_tether') {
+          ctx.globalAlpha = alpha;
+          ctx.shadowColor = '#22d3ee';
+          ctx.shadowBlur = 18;
+          ctx.strokeStyle = '#22d3ee';
+          ctx.lineWidth = 6 * alpha + 1.5;
+          ctx.beginPath();
+          ctx.moveTo(vfx.x1, vfx.y1);
+          const steps = 6;
+          for (let s = 1; s < steps; s++) {
+            const f = s / steps;
+            const jx = (Math.sin(now / 30 + s * 5) * 16) * alpha;
+            const jy = (Math.cos(now / 26 + s * 4) * 16) * alpha;
+            ctx.lineTo(vfx.x1 + (vfx.x2 - vfx.x1) * f + jx, vfx.y1 + (vfx.y2 - vfx.y1) * f + jy);
+          }
+          ctx.lineTo(vfx.x2, vfx.y2);
+          ctx.stroke();
+          ctx.strokeStyle = '#f0abfc';
+          ctx.lineWidth = 2.5 * alpha;
+          ctx.stroke();
+        } else if (vfx.kind === 'orbital_beam') {
+          // Colossal Vertical Positron Orbital Strike Pillar from sky to target ground
+          const beamTopY = vfx.y - viewH - 220;
+          const beamHalfW = Math.max(8, (vfx.radius * 0.42) * (1 - progress * 0.72));
+          ctx.globalAlpha = Math.max(0, 1 - progress * 0.85);
+          ctx.shadowColor = '#f43f5e';
+          ctx.shadowBlur = 28;
+
+          const grad = ctx.createLinearGradient(vfx.x - beamHalfW, 0, vfx.x + beamHalfW, 0);
+          grad.addColorStop(0, 'rgba(244, 63, 94, 0)');
+          grad.addColorStop(0.28, 'rgba(244, 63, 94, 0.85)');
+          grad.addColorStop(0.5, 'rgba(255, 255, 255, 1)');
+          grad.addColorStop(0.72, 'rgba(244, 63, 94, 0.85)');
+          grad.addColorStop(1, 'rgba(244, 63, 94, 0)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(vfx.x - beamHalfW, beamTopY, beamHalfW * 2, vfx.y - beamTopY);
+
+          // Blinding ground impact crater ellipse
+          ctx.fillStyle = 'rgba(254, 205, 211, 0.9)';
+          ctx.beginPath();
+          ctx.ellipse(vfx.x, vfx.y, beamHalfW * 1.45, beamHalfW * 0.65, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
         ctx.restore();
       });
 
       // Combat Particles
       particlesRef.current.forEach(pt => {
         if (
-          pt.x < camX ||
-          pt.x > camX + viewW ||
-          pt.y < camY ||
-          pt.y > camY + viewH
+          pt.x < camX - 20 ||
+          pt.x > camX + viewW + 20 ||
+          pt.y < camY - 20 ||
+          pt.y > camY + viewH + 20
         ) {
           return;
         }
@@ -6294,9 +9874,23 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         ctx.save();
         ctx.globalAlpha = pt.alpha;
         ctx.fillStyle = pt.color;
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, pt.size, 0, 2 * Math.PI);
-        ctx.fill();
+        if (pt.type === 'electric') {
+          ctx.strokeStyle = pt.color;
+          ctx.lineWidth = 1.8;
+          ctx.beginPath();
+          ctx.moveTo(pt.x - pt.size, pt.y - pt.size * 0.6);
+          ctx.lineTo(pt.x + pt.size * 0.4, pt.y);
+          ctx.lineTo(pt.x - pt.size * 0.2, pt.y + pt.size);
+          ctx.stroke();
+        } else if (pt.type === 'flame') {
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, pt.size * (1.25 - (1 - pt.alpha) * 0.5), 0, 2 * Math.PI);
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, pt.size, 0, 2 * Math.PI);
+          ctx.fill();
+        }
         ctx.restore();
       });
 
@@ -6423,30 +10017,21 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         }
       }
 
-      // (F) LAYER 5: FLOATING COMBAT TEXTS
+      // (F) LAYER 5: FLOATING COMBAT TEXTS (fast outlined fillText, no per-frame shadowBlur)
       floatingTextsRef.current.forEach(ft => {
         ctx.save();
         ctx.font = 'bold 12px sans-serif';
-        ctx.fillStyle = ft.color;
         ctx.textAlign = 'center';
-        ctx.shadowColor = '#000000';
-        ctx.shadowBlur = 6;
-        ctx.fillText(ft.text, ft.x, ft.y);
+        drawOutlinedText(ctx, ft.text, ft.x, ft.y, ft.color);
         ctx.restore();
       });
 
-      // (G) LAYER 6: GHOST BLUEPRINT PLACEMENT PREVIEW & ROTATION
+      // (G) LAYER 6: GHOST BLUEPRINT PLACEMENT PREVIEW & PRECISION CROSSHAIR RETICLE
       const curBuildType = selectedBuildTypeRef.current;
       const curBuildRot = buildRotationRef.current;
       if (curBuildType && playerAlive) {
-        const canvasRect = canvas.getBoundingClientRect();
-        const mouseX = mouseScreenPos.current.x - canvasRect.left;
-        const mouseY = mouseScreenPos.current.y - canvasRect.top;
-        const worldMouseX = cameraRef.current.x + mouseX;
-        const worldMouseY = cameraRef.current.y + mouseY;
-
-        const dX = worldMouseX - px;
-        const dY = worldMouseY - py;
+        const dX = worldAimX - px;
+        const dY = worldAimY - py;
         const rawDist = Math.hypot(dX, dY);
         const aimAngle = rawDist > 5 ? Math.atan2(dY, dX) : facingAngleRef.current;
 
@@ -6549,6 +10134,34 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         ctx.fillText(`${matCostText} [${curBuildRot}°]`, 0, -37);
 
         ctx.restore();
+      } else if (playerAlive) {
+        // Subtle 1:1 scaled precision aim reticle at exact world projectile intersection
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.72)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(worldAimX, worldAimY, 7, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = '#facc15';
+        ctx.beginPath();
+        ctx.arc(worldAimX, worldAimY, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      } else {
+        // Local-only subtle invisible-spectator observer ring
+        ctx.save();
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.55)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.arc(px, py, 22, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillStyle = 'rgba(186, 230, 253, 0.85)';
+        ctx.textAlign = 'center';
+        ctx.fillText('👁️ OBSERVING (INVISIBLE)', px, py - 28);
+        ctx.restore();
       }
 
       ctx.restore(); // Restore Viewport Camera
@@ -6558,30 +10171,39 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
     animationFrameId = requestAnimationFrame(gameLoop);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [user.id, user.name, isOwnerTester]);
+  }, [user.id, user.name, isOwnerTester, getWorldMouseCoords]);
 
-  // 7. Auto Victory Royale Detection (Disabled during instructor test mode)
+  // 7. Auto Victory Royale Detection (Elected single-writer so 30 clients don't race)
   useEffect(() => {
-    if (isOwnerTester) return; // Do not auto-declare victory royale when testing solo!
-    const alivePlayers = arenaPlayers.filter(p => p.isAlive);
+    if (isOwnerTester || hasDeclaredWinnerRef.current) return;
+    const alivePlayers = arenaPlayers.filter(p => p.isAlive && (p.hp === undefined || p.hp > 0));
     if (alivePlayers.length === 1 && arenaPlayers.length > 1 && battleState?.status === 'IN_PROGRESS') {
       const victor = alivePlayers[0];
-      declareBattleWinner({
-        uid: victor.uid,
-        name: victor.name,
-        avatar: victor.avatar
-      });
+      if (victor.uid === user.id || isInstructor) {
+        hasDeclaredWinnerRef.current = true;
+        declareBattleWinner({
+          uid: victor.uid,
+          name: victor.name,
+          avatar: victor.avatar
+        });
+      }
     }
-  }, [arenaPlayers, battleState?.status, isOwnerTester]);
+  }, [arenaPlayers, battleState?.status, isOwnerTester, user.id, isInstructor]);
 
-  // Crate 3-second rapid question timer
+  // Crate 15-second rapid question timer
   useEffect(() => {
     if (!activeCrateModal) return;
+    const modalCrateId = activeCrateModal.id;
     const interval = setInterval(() => {
       setCrateQuestionTimer(prev => {
         if (prev <= 1) {
           clearInterval(interval);
-          setActiveCrateModal(null);
+          if (!crateSubmittingRef.current) {
+            crateDismissCooldownRef.current[modalCrateId] = Date.now() + 4000;
+            activeCrateModalRef.current = null;
+            setActiveCrateModal(null);
+            setCrateFeedback(null);
+          }
           return 0;
         }
         return prev - 1;
@@ -6593,18 +10215,14 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   // Answer science supply drop question
   const handleAnswerCrateQuestion = async (idx: number) => {
     const crateModal = activeCrateModalRef.current || activeCrateModal;
-    if (!crateModal) return;
+    if (!crateModal || crateSubmittingRef.current) return;
+    crateSubmittingRef.current = true;
     const isCorrect = idx === crateModal.question.answerIndex;
 
     if (isCorrect) {
       const skinId = effectiveSkinDefRef.current.id;
       const isGoblin = skinId === 'goblin';
       const maxShCap = skinId === 'knight_hero' ? 120 : 100;
-      setCrateFeedback(
-        isGoblin
-          ? '✅ Correct! Supply rewards claimed + 👺 +50% Goblin Bonus!'
-          : '✅ Correct! Supply rewards claimed!'
-      );
       soundEngine.playVictory();
 
       // Immediately remove crate locally so fast movement doesn't re-trigger it
@@ -6612,31 +10230,75 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       cratesRef.current = nextCrates;
       setCrates(nextCrates);
 
-      await claimSupplyCrate(crateModal.id, user.id, crateModal.rewardType);
       if (crateModal.rewardType === 'shield') {
-        const nextSh = Math.min(maxShCap, shieldRef.current + 50);
+        const prevSh = shieldRef.current;
+        const nextSh = Math.min(maxShCap, prevSh + 50);
+        const gainedSh = nextSh - prevSh;
+        const overflow = Math.max(0, prevSh + 50 - maxShCap);
+        const prevHp = hpRef.current;
+        const nextHp = overflow > 0 ? Math.min(100, prevHp + overflow) : prevHp;
+        const gainedHp = nextHp - prevHp;
         shieldRef.current = nextSh;
         setLocalShield(nextSh);
+        if (gainedHp > 0) {
+          hpRef.current = nextHp;
+          setLocalHp(nextHp);
+        }
+        const rewardMsg =
+          gainedHp > 0
+            ? `✅ Correct! +${gainedSh}🛡️ Shield & +${gainedHp}❤️ HP restored!`
+            : `✅ Correct! +${gainedSh || 50}🛡️ Shield restored!`;
+        setCrateFeedback(rewardMsg);
+        addFloatingText(
+          playerPosRef.current.x,
+          playerPosRef.current.y - 30,
+          gainedHp > 0 ? `+${gainedSh}🛡️ +${gainedHp}❤️` : `+${gainedSh}🛡️ Shield`,
+          '#38bdf8'
+        );
       } else {
-        woodRef.current += isGoblin ? 30 : 20;
-        brickRef.current += isGoblin ? 23 : 15;
-        metalRef.current += isGoblin ? 15 : 10;
+        const addW = isGoblin ? 30 : 20;
+        const addB = isGoblin ? 23 : 15;
+        const addM = isGoblin ? 15 : 10;
+        woodRef.current += addW;
+        brickRef.current += addB;
+        metalRef.current += addM;
         setLocalWood(woodRef.current);
         setLocalBrick(brickRef.current);
         setLocalMetal(metalRef.current);
+        setCrateFeedback(
+          isGoblin
+            ? `✅ Correct! +${addW}🪵 +${addB}🧱 +${addM}⚙️ (+50% Goblin Bonus!)`
+            : `✅ Correct! +${addW}🪵 +${addB}🧱 +${addM}⚙️ Materials claimed!`
+        );
+        addFloatingText(
+          playerPosRef.current.x,
+          playerPosRef.current.y - 30,
+          `+${addW}🪵 +${addB}🧱 +${addM}⚙️`,
+          '#4ade80'
+        );
       }
+
+      if (wsConnectedRef.current && wsClientRef.current) {
+        wsClientRef.current.sendCrateClaim(crateModal.id, user.id, crateModal.rewardType);
+      } else {
+        await claimSupplyCrate(crateModal.id, user.id, crateModal.rewardType);
+      }
+
       if (isGoblin) {
         flashSkinAbility('Gold Snatcher (+50% Crate Bonus!)');
       }
       setTimeout(() => {
+        crateSubmittingRef.current = false;
         activeCrateModalRef.current = null;
         setActiveCrateModal(null);
         setCrateFeedback(null);
       }, 900);
     } else {
+      crateDismissCooldownRef.current[crateModal.id] = Date.now() + 4000;
       setCrateFeedback(`❌ Incorrect! ${crateModal.question.explanation}`);
       soundEngine.playHit();
       setTimeout(() => {
+        crateSubmittingRef.current = false;
         activeCrateModalRef.current = null;
         setActiveCrateModal(null);
         setCrateFeedback(null);
@@ -6644,7 +10306,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     }
   };
 
-  const aliveCount = arenaPlayers.filter(p => p.isAlive).length;
+  const aliveCount = arenaPlayers.filter(p => p.isAlive && (p.hp === undefined || p.hp > 0)).length;
   const isMatchCurrentlyActive = !battleState || battleState.status === 'IN_PROGRESS';
   const distToStormSafe = isMatchCurrentlyActive 
     ? Math.max(0, Math.round(Math.hypot(localX - stormCenter.current.x, localY - stormCenter.current.y) - stormRadius))
@@ -6728,6 +10390,17 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               </div>
             );
           })()}
+
+          {speedBoostUntil > Date.now() && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-purple-100 text-purple-800 border border-purple-300 text-xs font-bold animate-pulse">
+              ⚡ +25% Speed ({Math.max(1, Math.ceil((speedBoostUntil - Date.now()) / 1000))}s)
+            </span>
+          )}
+          {frostSlowUntil > Date.now() && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-cyan-100 text-cyan-800 border border-cyan-300 text-xs font-bold animate-pulse">
+              ❄️ Chilled -35% Speed ({Math.max(1, Math.ceil((frostSlowUntil - Date.now()) / 1000))}s)
+            </span>
+          )}
         </div>
 
         {/* Center: Match Timer, Alive Counter, Kills & Storm Alert */}
@@ -6820,15 +10493,35 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             </>
           )}
 
-          {/* Instructor End Match Host Control */}
+          {/* Instructor End Match Host Control (Inline iframe-safe confirmation) */}
           {isInstructor && (
-            <button
-              onClick={handleInstructorEndMatch}
-              className="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs transition cursor-pointer"
-              title="End tournament match"
-            >
-              End Match
-            </button>
+            confirmEndMatch ? (
+              <div className="flex items-center gap-1 bg-rose-50 border border-rose-300 rounded-lg px-2 py-1">
+                <span className="text-[11px] font-bold text-rose-900">End now?</span>
+                <button
+                  onClick={handleInstructorEndMatch}
+                  disabled={isEndingMatch}
+                  className="px-2 py-0.5 rounded bg-rose-700 hover:bg-rose-600 text-white font-bold text-[11px] cursor-pointer"
+                >
+                  {isEndingMatch ? 'Ending...' : 'Confirm'}
+                </button>
+                <button
+                  onClick={() => setConfirmEndMatch(false)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold text-[11px] cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmEndMatch(true)}
+                disabled={isEndingMatch}
+                className="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs transition cursor-pointer"
+                title="End tournament match"
+              >
+                {isEndingMatch ? 'Ending...' : 'End Match'}
+              </button>
+            )
           )}
 
           {/* Leave Battle */}
@@ -6842,34 +10535,44 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
       </div>
 
+      {endMatchError && (
+        <div className="bg-rose-50 border border-rose-300 text-rose-800 text-xs font-bold px-3 py-2 rounded-xl flex items-center justify-between">
+          <span>⚠️ {endMatchError}</span>
+          <button onClick={() => setEndMatchError(null)} className="text-rose-700 hover:text-rose-950 font-bold cursor-pointer">
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* =========================================================================
           2D CANVAS VIEWPORT (SPRITE ENGINE, Y-SORTING DEPTH, DYNAMIC MINIMAP)
           ========================================================================= */}
       <div 
-        className={`relative w-full rounded-3xl overflow-hidden border-2 border-slate-800/90 shadow-2xl bg-slate-950 cursor-crosshair ${isFullscreen ? 'flex-1 my-1' : ''}`}
+        className={`relative w-full rounded-3xl overflow-hidden border-2 border-slate-800/90 shadow-2xl bg-slate-950 ${isAlive ? 'cursor-crosshair' : 'cursor-grab'} ${isFullscreen ? 'flex-1 my-1' : ''}`}
         style={isFullscreen ? { height: `${viewDims.height}px` } : { height: `${viewDims.height}px` }}
         onMouseMove={(e) => {
           mouseScreenPos.current = { x: e.clientX, y: e.clientY };
         }}
         onContextMenu={(e) => {
           e.preventDefault();
-          if (!selectedBuildType) {
-            handleFireWeapon(true);
-          }
         }}
         onMouseDown={(e) => {
+          mouseScreenPos.current = { x: e.clientX, y: e.clientY };
+          if (!isAliveRef.current) return;
           if (e.button === 2) {
             e.preventDefault();
-            if (!selectedBuildType) {
-              handleFireWeapon(true);
+            if (!selectedBuildTypeRef.current) {
+              handleFireWeapon(true, e.clientX, e.clientY);
             }
+          } else if (e.button === 0 && !selectedBuildTypeRef.current) {
+            handleFireWeapon(false, e.clientX, e.clientY);
           }
         }}
         onClick={(e) => {
-          if (selectedBuildType) {
-            executeBuildStructure(selectedBuildType);
-          } else {
-            handleFireWeapon(false);
+          mouseScreenPos.current = { x: e.clientX, y: e.clientY };
+          if (!isAliveRef.current) return;
+          if (selectedBuildTypeRef.current) {
+            executeBuildStructure(selectedBuildTypeRef.current);
           }
         }}
       >
@@ -6907,254 +10610,16 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         )}
 
         {/* =====================================================================
-            DYNAMIC MINIMAP HUD OVERLAY (TOP-RIGHT CORNER)
+            DYNAMIC MINIMAP HUD OVERLAY (TOP-RIGHT CORNER - OFFSCREEN CANVAS)
             ===================================================================== */}
         <div className={`absolute top-4 right-4 z-20 transition-all duration-200 ${minimapExpanded ? 'w-60 h-60' : 'w-44 h-44'}`}>
           <div className="relative w-full h-full rounded-2xl overflow-hidden border-2 border-fuchsia-500/70 bg-slate-950/90 backdrop-blur-md shadow-2xl p-1">
-            <svg 
-              key={mapRevision}
-              viewBox={`0 0 ${MAP_SIZE} ${MAP_SIZE}`} 
-              className="w-full h-full rounded-xl overflow-hidden bg-slate-900"
-            >
-              <defs>
-                <mask id="minimap-storm-mask">
-                  <rect x="0" y="0" width={MAP_SIZE} height={MAP_SIZE} fill="white" />
-                  <circle 
-                    cx={Number.isFinite(stormCenter.current?.x) ? stormCenter.current.x : 2560} 
-                    cy={Number.isFinite(stormCenter.current?.y) ? stormCenter.current.y : 2560} 
-                    r={Math.max(0, Number.isFinite(stormRadius) ? stormRadius : 3600)} 
-                    fill="black" 
-                  />
-                </mask>
-              </defs>
-
-              {/* Dynamic Procedural World Blueprint synced to current mapMeta */}
-              {(() => {
-                const meta = worldDataRef.current?.mapMeta;
-                if (!meta) {
-                  return (
-                    <>
-                      <rect x="0" y="0" width={MAP_SIZE} height={MAP_SIZE} fill="#15803d" opacity="0.45" />
-                      <rect x="0" y="0" width="800" height={MAP_SIZE} fill="#064e3b" opacity="0.6" />
-                    </>
-                  );
-                }
-                return (
-                  <>
-                    {/* Base Lush Green Meadows */}
-                    <rect x="0" y="0" width={MAP_SIZE} height={MAP_SIZE} fill="#15803d" opacity="0.45" />
-
-                    {/* Dense Pine Forest Zone */}
-                    <rect
-                      x={meta.forestBox.x}
-                      y={meta.forestBox.y}
-                      width={meta.forestBox.w}
-                      height={meta.forestBox.h}
-                      fill="#064e3b"
-                      opacity="0.7"
-                    />
-
-                    {/* Randomized Lakes */}
-                    {meta.lakes.map((lk, idx) => (
-                      <rect
-                        key={`mlake_${idx}`}
-                        x={lk.x}
-                        y={lk.y}
-                        width={lk.w}
-                        height={lk.h}
-                        rx="80"
-                        fill="#0284c7"
-                        opacity="0.78"
-                      />
-                    ))}
-
-                    {/* Randomized Arterial Highways & Spurs */}
-                    {meta.roads.map((rd, idx) => (
-                      <line
-                        key={`mroad_${idx}`}
-                        x1={rd.x1}
-                        y1={rd.y1}
-                        x2={rd.x2}
-                        y2={rd.y2}
-                        stroke="#78350f"
-                        strokeWidth={rd.width}
-                        opacity="0.85"
-                      />
-                    ))}
-
-                    {/* Designated City / Village District (<= 15% of map) */}
-                    {meta.villages.map((vil, idx) => (
-                      <rect
-                        key={`mvil_${idx}`}
-                        x={vil.x}
-                        y={vil.y}
-                        width={vil.w}
-                        height={vil.h}
-                        rx="40"
-                        fill="#334155"
-                        opacity="0.45"
-                        stroke="#fbbf24"
-                        strokeWidth="18"
-                      />
-                    ))}
-
-                    {/* Sample1 Buildings (City Cluster + Scattered Homesteads) */}
-                    {(worldDataRef.current?.buildings || []).map((bldg, idx) => (
-                      <rect
-                        key={`mbldg_${bldg.id || idx}`}
-                        x={bldg.worldX}
-                        y={bldg.worldY}
-                        width={bldg.worldW}
-                        height={bldg.worldH}
-                        fill="#d97706"
-                        stroke="#fef3c7"
-                        strokeWidth="12"
-                        opacity="0.92"
-                      />
-                    ))}
-
-                    {/* Central Crossroads Hub */}
-                    <circle
-                      cx={meta.hub.x}
-                      cy={meta.hub.y}
-                      r="260"
-                      fill="none"
-                      stroke="#d97706"
-                      strokeWidth="35"
-                      opacity="0.65"
-                    />
-                  </>
-                );
-              })()}
-
-              {/* Transparent Violet Filter Outside Eye on Radar */}
-              <rect 
-                x="0" 
-                y="0" 
-                width={MAP_SIZE} 
-                height={MAP_SIZE} 
-                fill="#8b5cf6" 
-                opacity={isSurgeActive ? 0.6 : 0.45} 
-                mask="url(#minimap-storm-mask)" 
-              />
-
-              {/* Shrinking Storm Safe Zone Ring */}
-              <circle 
-                cx={Number.isFinite(stormCenter.current?.x) ? stormCenter.current.x : 2560} 
-                cy={Number.isFinite(stormCenter.current?.y) ? stormCenter.current.y : 2560} 
-                r={Math.max(0, Number.isFinite(stormRadius) ? stormRadius : 3600)} 
-                fill="none" 
-                stroke={isSurgeActive ? "#f43f5e" : "#d946ef"} 
-                strokeWidth="110" 
-                opacity="0.95" 
-              />
-
-              {/* Target Showdown Destination Center Blip */}
-              <circle 
-                cx={Number.isFinite(targetFinalCenterRef.current?.x) ? targetFinalCenterRef.current.x : 2560} 
-                cy={Number.isFinite(targetFinalCenterRef.current?.y) ? targetFinalCenterRef.current.y : 2560} 
-                r="75" 
-                fill="#fbbf24" 
-                stroke="#ffffff" 
-                strokeWidth="20" 
-                opacity="0.85" 
-              />
-
-              {/* Ground Loot Bananas & Caches (Enhanced for Discoverer) */}
-              <g id="minimap-ground-loot">
-                {(worldDataRef.current?.groundLoot || [])
-                  .filter(l => !l.isCollected && Number.isFinite(l.x) && Number.isFinite(l.y))
-                  .map(l => (
-                    <circle
-                      key={`loot_${l.id}`}
-                      cx={l.x}
-                      cy={l.y}
-                      r={equippedSkinDef.id === 'discoverer' ? '60' : '35'}
-                      fill={equippedSkinDef.id === 'discoverer' ? '#fde047' : '#facc15'}
-                      opacity={equippedSkinDef.id === 'discoverer' ? '0.95' : '0.8'}
-                    />
-                  ))}
-              </g>
-
-              {/* Supply Drops (Highlighted inside Storm Eye) */}
-              <g id="minimap-crates">
-                {(crates || [])
-                  .filter(c => !c.isClaimed && Number.isFinite(c.x) && Number.isFinite(c.y))
-                  .map(c => (
-                    <circle
-                      key={`crate_${c.id}`}
-                      cx={c.x}
-                      cy={c.y}
-                      r={equippedSkinDef.id === 'discoverer' ? '125' : '85'}
-                      fill="#facc15"
-                      stroke="#ffffff"
-                      strokeWidth="25"
-                    />
-                  ))}
-              </g>
-
-              {/* Placed Structures */}
-              <g id="minimap-structures">
-                {(structures || [])
-                  .filter(s => Number.isFinite(s.x) && Number.isFinite(s.y))
-                  .map(s => (
-                    <rect 
-                      key={`struct_${s.id}`} 
-                      x={s.x - 35} 
-                      y={s.y - 35} 
-                      width="70" 
-                      height="70" 
-                      fill={s.type === 'wood_wall' ? '#b45309' : s.type === 'brick_ramp' ? '#ea580c' : '#06b6d4'} 
-                    />
-                  ))}
-              </g>
-
-              {/* Enemy Players (Red; Bat Sonar Pings Highlighted Within 950px) */}
-              <g id="minimap-enemies">
-                {(arenaPlayers || [])
-                  .filter(p => p.uid !== user.id && p.isAlive && Number.isFinite(p.x) && Number.isFinite(p.y))
-                  .map(p => {
-                    const isBatSonarPing = equippedSkinDef.id === 'bat' && Math.hypot(p.x - localX, p.y - localY) <= 950;
-                    return (
-                      <g key={`player_${p.uid}`}>
-                        {isBatSonarPing && (
-                          <circle cx={p.x} cy={p.y} r="170" fill="none" stroke="#c084fc" strokeWidth="28" opacity="0.85" />
-                        )}
-                        <circle
-                          cx={p.x}
-                          cy={p.y}
-                          r={isBatSonarPing ? '105' : '90'}
-                          fill={isBatSonarPing ? '#c084fc' : '#ef4444'}
-                          stroke="#ffffff"
-                          strokeWidth="25"
-                        />
-                      </g>
-                    );
-                  })}
-              </g>
-
-              {/* Camera Viewport Bounding Box */}
-              <rect 
-                x={Number.isFinite(cameraRef.current?.x) ? cameraRef.current.x : 0} 
-                y={Number.isFinite(cameraRef.current?.y) ? cameraRef.current.y : 0} 
-                width={Number.isFinite(viewDims?.width) && viewDims.width > 0 ? viewDims.width : 1000} 
-                height={Number.isFinite(viewDims?.height) && viewDims.height > 0 ? viewDims.height : 650} 
-                fill="none" 
-                stroke="#38bdf8" 
-                strokeWidth="50" 
-                strokeDasharray="140 80"
-              />
-
-              {/* Local Player (Green Blip) */}
-              <circle 
-                cx={Number.isFinite(localX) ? localX : 2560} 
-                cy={Number.isFinite(localY) ? localY : 2560} 
-                r="110" 
-                fill="#10b981" 
-                stroke="#ffffff" 
-                strokeWidth="30" 
-              />
-            </svg>
+            <canvas
+              ref={minimapCanvasRef}
+              width={256}
+              height={256}
+              className="w-full h-full rounded-xl bg-slate-900 block"
+            />
 
             {/* Radar Header Label */}
             <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between text-[9px] font-black font-mono text-fuchsia-300 bg-slate-950/80 px-2 py-0.5 rounded">
@@ -7278,6 +10743,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 setStructures([]);
                 projectilesRef.current = [];
                 particlesRef.current = [];
+                weaponVfxRef.current = [];
                 worldDataRef.current = generateSuperAnimalStyleMap(
                   Date.now() + Math.floor(Math.random() * 1000000)
                 );
@@ -7316,261 +10782,296 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         )}
 
         {/* =====================================================================
-            BOTTOM ARCADE HOTBAR & ACTIONS
+            BOTTOM ARCADE HOTBAR OR SPECTATOR CONTROLS STRIP
             ===================================================================== */}
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-slate-950/90 border border-slate-800/90 rounded-2xl p-2 shadow-2xl backdrop-blur-md">
-          
-          {/* Materials Pill Badges */}
-          <div className="flex items-center gap-1.5 bg-slate-900/90 px-2.5 py-1.5 rounded-xl border border-slate-800 text-xs font-mono font-bold">
-            <span className="text-amber-400">🪵 {localWood}</span>
-            <span className="text-orange-400">🧱 {localBrick}</span>
-            <span className="text-cyan-400">⚙️ {localMetal}</span>
-          </div>
-
-          <div className="h-6 w-px bg-slate-800" />
-
-          {/* Hotkey [1]: Wood Wall */}
-          <button
-            onClick={() => buildStructure('wood_wall')}
-            className={`px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
-              selectedBuildType === 'wood_wall'
-                ? 'bg-amber-500/30 border-amber-400 text-amber-200 ring-2 ring-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.5)]'
-                : localWood >= 10 
-                  ? 'bg-amber-950/40 border-amber-500/50 text-amber-300 hover:bg-amber-900/50' 
-                  : 'bg-slate-900 border-slate-800 text-slate-500 opacity-60'
-            }`}
-          >
-            <span className="px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 text-[10px] font-black">1</span>
-            <span>🪵 Wall (10)</span>
-          </button>
-
-          {/* Hotkey [2]: Brick Ramp */}
-          <button
-            onClick={() => buildStructure('brick_ramp')}
-            className={`px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
-              selectedBuildType === 'brick_ramp'
-                ? 'bg-orange-500/30 border-orange-400 text-orange-200 ring-2 ring-orange-400 shadow-[0_0_15px_rgba(249,115,22,0.5)]'
-                : localBrick >= 15 
-                  ? 'bg-orange-950/40 border-orange-500/50 text-orange-300 hover:bg-orange-900/50' 
-                  : 'bg-slate-900 border-slate-800 text-slate-500 opacity-60'
-            }`}
-          >
-            <span className="px-1.5 py-0.5 rounded bg-orange-500 text-slate-950 text-[10px] font-black">2</span>
-            <span>🧱 Ramp (15)</span>
-          </button>
-
-          {/* Hotkey [3]: Metal Bunker */}
-          <button
-            onClick={() => buildStructure('metal_bunker')}
-            className={`px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
-              selectedBuildType === 'metal_bunker'
-                ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200 ring-2 ring-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.5)]'
-                : localMetal >= 15 
-                  ? 'bg-cyan-950/40 border-cyan-500/50 text-cyan-300 hover:bg-cyan-900/50' 
-                  : 'bg-slate-900 border-slate-800 text-slate-500 opacity-60'
-            }`}
-          >
-            <span className="px-1.5 py-0.5 rounded bg-cyan-500 text-slate-950 text-[10px] font-black">3</span>
-            <span>⚙️ Bunker (15)</span>
-          </button>
-
-          {/* Rotate & Cancel Blueprint Controls when Build Mode is Active */}
-          {selectedBuildType && (
-            <>
-              <div className="h-6 w-px bg-slate-800" />
-              <button
-                onClick={() => {
-                  setBuildRotation(prev => ((prev + 90) % 360));
-                  soundEngine.playRotate();
-                }}
-                className="px-3 py-1.5 rounded-xl border border-cyan-400 bg-cyan-950/80 hover:bg-cyan-900/90 text-cyan-200 text-xs font-black flex items-center gap-1.5 transition cursor-pointer shadow-[0_0_15px_rgba(6,182,212,0.4)] animate-pulse"
-                title="Rotate Structure 90° [R]"
-              >
-                <RotateCw className="w-3.5 h-3.5 text-cyan-400" />
-                <span>[R] Rotate ({buildRotation}°)</span>
-              </button>
-              <button
-                onClick={() => setSelectedBuildType(null)}
-                className="px-2.5 py-1.5 rounded-xl border border-rose-500/60 bg-rose-950/70 hover:bg-rose-900/80 text-rose-300 text-xs font-bold flex items-center gap-1 transition cursor-pointer"
-                title="Cancel Placement [ESC]"
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>Cancel</span>
-              </button>
-            </>
-          )}
-
-          {/* Equipped Weapon & Primary Fire */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-black text-slate-300">
-            <span className="text-sm">{equippedWeapon.icon}</span>
-            <div className="hidden sm:block text-left leading-tight">
-              <span className="text-[10px] text-slate-400 block font-normal">Primary [L-Click]</span>
-              <span className="text-xs font-bold text-amber-300">{equippedWeapon.name}</span>
+        {isAlive ? (
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-slate-950/90 border border-slate-800/90 rounded-2xl p-2 shadow-2xl backdrop-blur-md">
+            
+            {/* Materials Pill Badges */}
+            <div className="flex items-center gap-1.5 bg-slate-900/90 px-2.5 py-1.5 rounded-xl border border-slate-800 text-xs font-mono font-bold">
+              <span className="text-amber-400">🪵 {localWood}</span>
+              <span className="text-orange-400">🧱 {localBrick}</span>
+              <span className="text-cyan-400">⚙️ {localMetal}</span>
             </div>
-          </div>
 
-          {/* Alternate Fire Button [F / Right-Click] */}
-          {equippedWeapon.stats?.altFire && (
+            <div className="h-6 w-px bg-slate-800" />
+
+            {/* Hotkey [1]: Wood Wall */}
             <button
-              onClick={() => handleFireWeapon(true)}
-              disabled={Date.now() < altFireCooldownUntil}
+              onClick={() => buildStructure('wood_wall')}
               className={`px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
-                Date.now() >= altFireCooldownUntil
-                  ? 'bg-gradient-to-r from-cyan-950/80 to-purple-950/80 border-cyan-400/80 text-cyan-200 hover:border-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.35)]'
-                  : 'bg-slate-900 border-slate-800 text-slate-500 opacity-60'
+                selectedBuildType === 'wood_wall'
+                  ? 'bg-amber-500/30 border-amber-400 text-amber-200 ring-2 ring-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.5)]'
+                  : localWood >= 10 
+                    ? 'bg-amber-950/40 border-amber-500/50 text-amber-300 hover:bg-amber-900/50' 
+                    : 'bg-slate-900 border-slate-800 text-slate-500 opacity-60'
               }`}
-              title={equippedWeapon.stats.altFire.altDescription}
             >
-              <span className="px-1.5 py-0.5 rounded bg-cyan-500 text-slate-950 text-[10px] font-black">F</span>
-              <span>
-                {equippedWeapon.stats.altFire.altType === 'teleport' ? '⚡ ' : '✨ '}
-                {equippedWeapon.stats.altFire.altName}
-              </span>
-              {Date.now() < altFireCooldownUntil && (
-                <span className="text-[10px] font-mono text-rose-400">
-                  {((altFireCooldownUntil - Date.now()) / 1000).toFixed(1)}s
-                </span>
-              )}
+              <span className="px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 text-[10px] font-black">1</span>
+              <span>🪵 Wall (10)</span>
             </button>
-          )}
 
-          {/* Special Ability [E] */}
-          <button
-            onClick={triggerSpecialPower}
-            disabled={Date.now() < powerCooldownUntil}
-            className={`px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
-              Date.now() >= powerCooldownUntil
-                ? 'bg-purple-950/40 border-purple-500/50 text-purple-300 hover:bg-purple-900/50'
-                : 'bg-slate-900 border-slate-800 text-slate-500'
-            }`}
-          >
-            <span className="px-1.5 py-0.5 rounded bg-purple-500 text-slate-950 text-[10px] font-black">E</span>
-            <span>{equippedPower.icon} {equippedPower.name}</span>
-          </button>
-
-          {/* Slime Active Skin Ability [G] */}
-          {equippedSkinDef.id === 'slime' && (
+            {/* Hotkey [2]: Brick Ramp */}
             <button
-              onClick={triggerSlimeBounce}
-              disabled={Date.now() < slimeBounceCooldownUntil}
+              onClick={() => buildStructure('brick_ramp')}
               className={`px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
-                Date.now() >= slimeBounceCooldownUntil
-                  ? 'bg-emerald-950/60 border-emerald-400/70 text-emerald-200 hover:bg-emerald-900/70'
+                selectedBuildType === 'brick_ramp'
+                  ? 'bg-orange-500/30 border-orange-400 text-orange-200 ring-2 ring-orange-400 shadow-[0_0_15px_rgba(249,115,22,0.5)]'
+                  : localBrick >= 15 
+                    ? 'bg-orange-950/40 border-orange-500/50 text-orange-300 hover:bg-orange-900/50' 
+                    : 'bg-slate-900 border-slate-800 text-slate-500 opacity-60'
+              }`}
+            >
+              <span className="px-1.5 py-0.5 rounded bg-orange-500 text-slate-950 text-[10px] font-black">2</span>
+              <span>🧱 Ramp (15)</span>
+            </button>
+
+            {/* Hotkey [3]: Metal Bunker */}
+            <button
+              onClick={() => buildStructure('metal_bunker')}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
+                selectedBuildType === 'metal_bunker'
+                  ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200 ring-2 ring-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.5)]'
+                  : localMetal >= 15 
+                    ? 'bg-cyan-950/40 border-cyan-500/50 text-cyan-300 hover:bg-cyan-900/50' 
+                    : 'bg-slate-900 border-slate-800 text-slate-500 opacity-60'
+              }`}
+            >
+              <span className="px-1.5 py-0.5 rounded bg-cyan-500 text-slate-950 text-[10px] font-black">3</span>
+              <span>⚙️ Bunker (15)</span>
+            </button>
+
+            {/* Rotate & Cancel Blueprint Controls when Build Mode is Active */}
+            {selectedBuildType && (
+              <>
+                <div className="h-6 w-px bg-slate-800" />
+                <button
+                  onClick={() => {
+                    setBuildRotation(prev => ((prev + 90) % 360));
+                    soundEngine.playRotate();
+                  }}
+                  className="px-3 py-1.5 rounded-xl border border-cyan-400 bg-cyan-950/80 hover:bg-cyan-900/90 text-cyan-200 text-xs font-black flex items-center gap-1.5 transition cursor-pointer shadow-[0_0_15px_rgba(6,182,212,0.4)] animate-pulse"
+                  title="Rotate Structure 90° [R]"
+                >
+                  <RotateCw className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>[R] Rotate ({buildRotation}°)</span>
+                </button>
+                <button
+                  onClick={() => setSelectedBuildType(null)}
+                  className="px-2.5 py-1.5 rounded-xl border border-rose-500/60 bg-rose-950/70 hover:bg-rose-900/80 text-rose-300 text-xs font-bold flex items-center gap-1 transition cursor-pointer"
+                  title="Cancel Placement [ESC]"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Cancel</span>
+                </button>
+              </>
+            )}
+
+            {/* Equipped Weapon & Primary Fire */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-black text-slate-300">
+              <span className="text-sm">{equippedWeapon.icon}</span>
+              <div className="hidden sm:block text-left leading-tight">
+                <span className="text-[10px] text-slate-400 block font-normal">Primary [L-Click]</span>
+                <span className="text-xs font-bold text-amber-300">{equippedWeapon.name}</span>
+              </div>
+            </div>
+
+            {/* Alternate Fire Button [F / Right-Click] */}
+            {equippedWeapon.stats?.altFire && (
+              <button
+                onClick={() => handleFireWeapon(true)}
+                disabled={Date.now() < altFireCooldownUntil}
+                className={`px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
+                  Date.now() >= altFireCooldownUntil
+                    ? 'bg-gradient-to-r from-cyan-950/80 to-purple-950/80 border-cyan-400/80 text-cyan-200 hover:border-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.35)]'
+                    : 'bg-slate-900 border-slate-800 text-slate-500 opacity-60'
+                }`}
+                title={equippedWeapon.stats.altFire.altDescription}
+              >
+                <span className="px-1.5 py-0.5 rounded bg-cyan-500 text-slate-950 text-[10px] font-black">F</span>
+                <span>
+                  {equippedWeapon.stats.altFire.altType === 'teleport' ? '⚡ ' : '✨ '}
+                  {equippedWeapon.stats.altFire.altName}
+                </span>
+                {Date.now() < altFireCooldownUntil && (
+                  <span className="text-[10px] font-mono text-rose-400">
+                    {((altFireCooldownUntil - Date.now()) / 1000).toFixed(1)}s
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* Special Ability [E] */}
+            <button
+              onClick={triggerSpecialPower}
+              disabled={Date.now() < powerCooldownUntil}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
+                Date.now() >= powerCooldownUntil
+                  ? 'bg-purple-950/40 border-purple-500/50 text-purple-300 hover:bg-purple-900/50'
                   : 'bg-slate-900 border-slate-800 text-slate-500'
               }`}
-              title={equippedSkinDef.ability}
             >
-              <span className="px-1.5 py-0.5 rounded bg-emerald-400 text-slate-950 text-[10px] font-black">G</span>
-              <span>🟢 Bounce</span>
-              {Date.now() < slimeBounceCooldownUntil && (
-                <span className="text-[10px] font-mono text-rose-400">
-                  {((slimeBounceCooldownUntil - Date.now()) / 1000).toFixed(1)}s
+              <span className="px-1.5 py-0.5 rounded bg-purple-500 text-slate-950 text-[10px] font-black">E</span>
+              <span>{equippedPower.icon} {equippedPower.name}</span>
+            </button>
+
+            {/* Slime Active Skin Ability [G] */}
+            {equippedSkinDef.id === 'slime' && (
+              <button
+                onClick={triggerSlimeBounce}
+                disabled={Date.now() < slimeBounceCooldownUntil}
+                className={`px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
+                  Date.now() >= slimeBounceCooldownUntil
+                    ? 'bg-emerald-950/60 border-emerald-400/70 text-emerald-200 hover:bg-emerald-900/70'
+                    : 'bg-slate-900 border-slate-800 text-slate-500'
+                }`}
+                title={equippedSkinDef.ability}
+              >
+                <span className="px-1.5 py-0.5 rounded bg-emerald-400 text-slate-950 text-[10px] font-black">G</span>
+                <span>🟢 Bounce</span>
+                {Date.now() < slimeBounceCooldownUntil && (
+                  <span className="text-[10px] font-mono text-rose-400">
+                    {((slimeBounceCooldownUntil - Date.now()) / 1000).toFixed(1)}s
+                  </span>
+                )}
+              </button>
+            )}
+
+            <div className="h-6 w-px bg-slate-800" />
+
+            {/* Quick-Select Weapon Arsenal (10 Weapons) */}
+            <div className="hidden lg:flex items-center gap-1">
+              {SHOP_ITEMS.filter(i => i.category === 'weapon').map((w, idx) => {
+                const isSelected = w.id === equippedWeapon.id;
+                const isOwned = isInstructor || hasWeaponInInventory(gameProfile?.inventory, w.id) || w.id === 'bunsen_burner';
+                const rarityBorder = 
+                  w.rarity === 'mythic' ? 'border-rose-400' :
+                  w.rarity === 'legendary' ? 'border-amber-400' :
+                  w.rarity === 'epic' ? 'border-purple-400' :
+                  w.rarity === 'rare' ? 'border-cyan-400' : 'border-slate-600';
+
+                return (
+                  <button
+                    key={w.id}
+                    onClick={() => {
+                      if (isOwned) handleSelectWeapon(w.id);
+                    }}
+                    disabled={!isOwned}
+                    className={`w-7 h-7 rounded-lg border flex items-center justify-center text-xs transition cursor-pointer relative ${
+                      isSelected
+                        ? `bg-slate-800 ${rarityBorder} ring-2 ring-amber-400 shadow-md scale-110 z-10`
+                        : isOwned
+                          ? `bg-slate-900/90 ${rarityBorder} hover:scale-105 opacity-80 hover:opacity-100`
+                          : 'bg-slate-950 border-slate-800 opacity-30 cursor-not-allowed'
+                    }`}
+                    title={`${w.name} (${w.rarity.toUpperCase()}) - ${w.stats?.altFire?.altName || 'Weapon'}`}
+                  >
+                    <span>{w.icon}</span>
+                    {idx < 7 && (
+                      <span className="absolute -top-1.5 -right-1.5 px-1 rounded-full bg-slate-800 text-[8px] font-mono text-slate-300 border border-slate-700">
+                        {idx + 4 <= 9 ? idx + 4 : 0}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Instructor Morph Skin Button in Hotbar */}
+            {isInstructor && (
+              <button
+                onClick={() => setShowInstructorSkinDrawer(prev => !prev)}
+                className={`px-2.5 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
+                  showInstructorSkinDrawer
+                    ? 'bg-amber-500/30 border-amber-400 text-amber-200 ring-2 ring-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.4)]'
+                    : 'bg-amber-950/40 border-amber-500/50 text-amber-300 hover:bg-amber-900/50'
+                }`}
+                title={`Instructor Instant Character Morph (All ${ALL_FANTASY_SKINS.length} Fantasy Characters Unlocked)`}
+              >
+                <span>👔</span>
+                <span className="hidden xl:inline">Skins ({ALL_FANTASY_SKINS.length})</span>
+              </button>
+            )}
+
+          </div>
+        ) : (
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-slate-950/90 border border-sky-500/60 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-md text-xs font-semibold text-sky-100">
+            <span className="font-bold text-sky-300">👻 Invisible Spectator</span>
+            <span className="text-slate-400">•</span>
+            <span>WASD / Arrows: Free Roam</span>
+            <span className="text-slate-400 hidden sm:inline">•</span>
+            <span className="hidden sm:inline">Shift: Speed Boost</span>
+            <span className="text-slate-400 hidden sm:inline">•</span>
+            <span className="hidden sm:inline">M: Radar</span>
+          </div>
+        )}
+
+        {/* Non-blocking Elimination Toast (3.8s) */}
+        {!isAlive && showEliminationToast && (
+          <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+            <div className="bg-slate-950/95 border border-rose-400/80 text-white px-4 py-2 rounded-xl shadow-xl text-xs sm:text-sm font-bold flex items-center gap-2 backdrop-blur-md">
+              <span>💀</span>
+              <span>Eliminated! You are now an invisible spectator — move freely to observe the match.</span>
+            </div>
+          </div>
+        )}
+
+        {/* Non-blocking Top-Center Spectator HUD Bar */}
+        {!isAlive && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-auto max-w-[95%]">
+            <div className="bg-slate-950/90 border border-sky-400/70 rounded-2xl px-3.5 py-2 shadow-xl backdrop-blur-md flex flex-wrap items-center justify-center gap-2.5 text-xs text-white">
+              <span className="font-bold text-sky-300 flex items-center gap-1.5">
+                <Eye className="w-3.5 h-3.5" />
+                <span>SPECTATING INVISIBLY</span>
+              </span>
+              <span className="text-slate-300 font-semibold">
+                Kills: <strong className="text-white">{kills}</strong>
+              </span>
+              {spectateTargetName && (
+                <span className="text-[11px] bg-sky-950/80 text-sky-200 px-2 py-0.5 rounded-lg border border-sky-500/40">
+                  Focus: {spectateTargetName}
                 </span>
               )}
-            </button>
-          )}
-
-          <div className="h-6 w-px bg-slate-800" />
-
-          {/* Quick-Select Weapon Arsenal (10 Weapons) */}
-          <div className="hidden lg:flex items-center gap-1">
-            {SHOP_ITEMS.filter(i => i.category === 'weapon').map((w, idx) => {
-              const isSelected = w.id === equippedWeapon.id;
-              const isOwned = isInstructor || gameProfile?.inventory?.includes(w.id) || w.id === 'bunsen_burner';
-              const rarityBorder = 
-                w.rarity === 'mythic' ? 'border-rose-400' :
-                w.rarity === 'legendary' ? 'border-amber-400' :
-                w.rarity === 'epic' ? 'border-purple-400' :
-                w.rarity === 'rare' ? 'border-cyan-400' : 'border-slate-600';
-
-              return (
+              <button
+                onClick={handleFollowNextAlivePlayer}
+                className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-[11px] transition cursor-pointer"
+                title="Jump camera to next active player"
+              >
+                Follow Alive Player
+              </button>
+              {isOwnerTester && (
                 <button
-                  key={w.id}
                   onClick={() => {
-                    if (isOwned) handleSelectWeapon(w.id);
+                    const maxSh = effectiveSkinDefRef.current.id === 'knight_hero' ? 120 : 100;
+                    localEliminatedRef.current = false;
+                    localDeathTimeRef.current = 0;
+                    hpRef.current = 100;
+                    shieldRef.current = maxSh;
+                    isAliveRef.current = true;
+                    setLocalHp(100);
+                    setLocalShield(maxSh);
+                    setIsAlive(true);
+                    setWinnerCelebration(null);
                   }}
-                  disabled={!isOwned}
-                  className={`w-7 h-7 rounded-lg border flex items-center justify-center text-xs transition cursor-pointer relative ${
-                    isSelected
-                      ? `bg-slate-800 ${rarityBorder} ring-2 ring-amber-400 shadow-md scale-110 z-10`
-                      : isOwned
-                        ? `bg-slate-900/90 ${rarityBorder} hover:scale-105 opacity-80 hover:opacity-100`
-                        : 'bg-slate-950 border-slate-800 opacity-30 cursor-not-allowed'
-                  }`}
-                  title={`${w.name} (${w.rarity.toUpperCase()}) - ${w.stats?.altFire?.altName || 'Weapon'}`}
+                  className="px-2.5 py-1 rounded-lg bg-purple-700 hover:bg-purple-600 text-white text-[11px] font-bold transition cursor-pointer"
                 >
-                  <span>{w.icon}</span>
-                  {idx < 7 && (
-                    <span className="absolute -top-1.5 -right-1.5 px-1 rounded-full bg-slate-800 text-[8px] font-mono text-slate-300 border border-slate-700">
-                      {idx + 4 <= 9 ? idx + 4 : 0}
-                    </span>
-                  )}
+                  Respawn
                 </button>
-              );
-            })}
-          </div>
-
-          {/* Instructor Morph Skin Button in Hotbar */}
-          {isInstructor && (
-            <button
-              onClick={() => setShowInstructorSkinDrawer(prev => !prev)}
-              className={`px-2.5 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition cursor-pointer ${
-                showInstructorSkinDrawer
-                  ? 'bg-amber-500/30 border-amber-400 text-amber-200 ring-2 ring-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.4)]'
-                  : 'bg-amber-950/40 border-amber-500/50 text-amber-300 hover:bg-amber-900/50'
-              }`}
-              title={`Instructor Instant Character Morph (All ${ALL_FANTASY_SKINS.length} Fantasy Characters Unlocked)`}
-            >
-              <span>👔</span>
-              <span className="hidden xl:inline">Skins ({ALL_FANTASY_SKINS.length})</span>
-            </button>
-          )}
-
-        </div>
-
-        {/* Elimination Overlay */}
-        {!isAlive && (
-          <div className="absolute inset-0 bg-black/40 flex items-center justify-center p-6 text-center animate-in fade-in z-30">
-            <div className="space-y-4 max-w-sm bg-white border border-slate-300 p-6 rounded-2xl shadow-lg text-slate-800">
-              <span className="text-4xl block">💀</span>
-              <h3 className="text-2xl font-bold text-slate-900 tracking-tight">You Were Eliminated</h3>
-              <p className="text-sm text-slate-600 leading-relaxed">
-                You finished with <strong>{kills} eliminations</strong> across the 5000m arena! Revise more Cambridge slide decks to gather extra building materials and gold!
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-                {isOwnerTester && (
-                  <button
-                    onClick={() => {
-                      const maxSh = effectiveSkinDefRef.current.id === 'knight_hero' ? 120 : 100;
-                      localDeathTimeRef.current = 0;
-                      hpRef.current = 100;
-                      shieldRef.current = maxSh;
-                      isAliveRef.current = true;
-                      setLocalHp(100);
-                      setLocalShield(maxSh);
-                      setIsAlive(true);
-                      setWinnerCelebration(null);
-                    }}
-                    className="px-4 py-2 rounded-xl bg-purple-700 hover:bg-purple-600 text-white text-xs font-bold transition cursor-pointer shadow-xs"
-                  >
-                    Respawn & Continue Testing
-                  </button>
-                )}
+              )}
+              {onOpenShop && (
                 <button
-                  onClick={handleExit}
-                  className="px-4 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-black text-xs font-bold transition cursor-pointer shadow-xs"
+                  onClick={onOpenShop}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition cursor-pointer"
                 >
-                  Return to Study
+                  Open Shop
                 </button>
-                {onOpenShop && (
-                  <button
-                    onClick={onOpenShop}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition cursor-pointer shadow-xs border border-black"
-                  >
-                    Open Booster Packs
-                  </button>
-                )}
-              </div>
+              )}
+              <button
+                onClick={handleExit}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 text-[11px] font-bold transition cursor-pointer"
+              >
+                Leave Match
+              </button>
             </div>
           </div>
         )}
@@ -7647,7 +11148,16 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               <div className="flex items-center justify-between border-b border-slate-200 pb-3">
                 <div className="flex items-center gap-2">
                   <Package className="w-5 h-5 text-slate-800" />
-                  <span className="font-bold text-base text-slate-800">Science Supply Challenge</span>
+                  <div>
+                    <span className="font-bold text-base text-slate-800 block">Science Supply Challenge</span>
+                    <span className={`text-xs font-bold ${activeCrateModal.rewardType === 'shield' ? 'text-sky-700' : 'text-emerald-700'}`}>
+                      {activeCrateModal.rewardType === 'shield'
+                        ? '🛡️ Reward: +50 Shield (overflow heals HP)'
+                        : equippedSkinDef.id === 'goblin'
+                        ? '📦 Reward: +30 Wood, +23 Brick, +15 Metal (Goblin +50%!)'
+                        : '📦 Reward: +20 Wood, +15 Brick, +10 Metal'}
+                    </span>
+                  </div>
                 </div>
                 <div className="px-3 py-1 rounded-lg bg-[#EBF3F5] border border-slate-300 text-slate-800 font-bold text-xs">
                   {crateQuestionTimer}s remaining
@@ -7662,8 +11172,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 {activeCrateModal.question.options.map((opt, oIdx) => (
                   <button
                     key={oIdx}
+                    disabled={!!crateFeedback}
                     onClick={() => handleAnswerCrateQuestion(oIdx)}
-                    className="p-3 rounded-lg bg-[#FDFBF7] hover:bg-[#EBF3F5] text-slate-800 border-2 border-black text-sm font-semibold text-left transition cursor-pointer"
+                    className="p-3 rounded-lg bg-[#FDFBF7] hover:bg-[#EBF3F5] disabled:opacity-60 text-slate-800 border-2 border-black text-sm font-semibold text-left transition cursor-pointer"
                   >
                     {opt}
                   </button>
@@ -7713,7 +11224,13 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             currentUser={user}
             worldData={worldDataRef.current}
             onSaveMap={(updated) => {
-              worldDataRef.current = updated;
+              worldDataRef.current = {
+                ...worldDataRef.current,
+                ...updated,
+                cityWalls: worldDataRef.current?.cityWalls,
+                cityGates: worldDataRef.current?.cityGates,
+                mapMeta: worldDataRef.current?.mapMeta
+              };
               try {
                 localStorage.setItem('igcse_royale_custom_map_corbanb', JSON.stringify(updated));
               } catch {}

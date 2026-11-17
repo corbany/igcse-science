@@ -64,15 +64,15 @@ export const CURATED_CHEM_QUESTIONS: Record<string, QuizQuestion[]> = {
       subject: 'chemistry',
       topicCode: 'C2',
       syllabusRef: 'C2.2',
-      question: 'Why are carbon-12 and carbon-14 isotopes of the same element?',
+      question: 'Which row correctly states the relative electrical charge and relative mass of a proton, neutron, and electron?',
       options: [
-        'Both have 6 protons in their nuclei, while their nuclei contain different numbers of neutrons',
-        'Both have 12 neutrons and different numbers of outer-shell electrons',
-        'Carbon-14 has 8 protons while carbon-12 has 6 protons',
-        'They react differently with oxygen during combustion due to different electron shells'
+        'Proton: charge +1, mass 1; Neutron: charge 0, mass 1; Electron: charge −1, mass negligible (1/1840)',
+        'Proton: charge +1, mass 0; Neutron: charge 0, mass 1; Electron: charge −1, mass 1',
+        'Proton: charge −1, mass 1; Neutron: charge +1, mass 1; Electron: charge 0, mass negligible',
+        'Proton: charge 0, mass 1; Neutron: charge +1, mass negligible; Electron: charge −1, mass 1'
       ],
       correctIndex: 0,
-      explanation: 'Isotopes are atoms of the same element with the same proton number (atomic number) but different numbers of neutrons.'
+      explanation: 'Protons (+1) and neutrons (0) reside in the nucleus and each have a relative mass of 1. Electrons (−1) orbit in shells and have negligible relative mass.'
     },
     {
       id: 'cc-c22-3',
@@ -704,7 +704,7 @@ export const CURATED_CHEM_QUESTIONS: Record<string, QuizQuestion[]> = {
         'React explosively with cold water to release hydrogen'
       ],
       correctIndex: 0,
-      explanation: 'Transition metals have high densities and melting points, variable oxidation states, coloured compounds, and catalytic properties (e.g. Fe in Haber process).'
+      explanation: 'Transition metals have high densities and melting points, form coloured compounds, and often act as catalysts.'
     },
     {
       id: 'cc-c84-2',
@@ -726,10 +726,15 @@ export const CURATED_CHEM_QUESTIONS: Record<string, QuizQuestion[]> = {
       subject: 'chemistry',
       topicCode: 'C8',
       syllabusRef: 'C8.4',
-      question: 'Which transition metal acts as an industrial catalyst in the manufacture of ammonia (Haber process)?',
-      options: ['Iron', 'Sodium', 'Aluminium', 'Calcium'],
+      question: 'Why are transition elements such as platinum, nickel, and iron widely used in chemical industry?',
+      options: [
+        'They and their compounds act as catalysts to speed up chemical reactions without being used up',
+        'They melt at room temperature so they can be poured easily into pipes',
+        'They are soft enough to cut with a knife and float on water',
+        'They are completely unreactive monatomic gases'
+      ],
       correctIndex: 0,
-      explanation: 'Finely divided iron catalysts speed up the synthesis of ammonia without being consumed.'
+      explanation: 'Transition elements have high melting points and densities, form coloured compounds, and often act as catalysts in reactions.'
     }
   ],
 

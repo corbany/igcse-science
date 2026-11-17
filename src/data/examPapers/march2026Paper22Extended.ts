@@ -254,16 +254,16 @@ export const march2026Paper22Extended: PastExamPaper = {
     {
       id: 'm26-22-q14',
       number: 14,
-      questionText: 'Two atoms of chlorine are isotopes: ³⁵Cl and ³⁷Cl. In what way do their atomic structures differ?',
+      questionText: 'An atom of calcium has atomic (proton) number 20 and mass (nucleon) number 40. What are the subatomic particles and electronic configuration of a calcium ion, Ca²⁺?',
       options: [
-        { key: 'A', text: '³⁷Cl has two more electrons in its outer valence shell than ³⁵Cl' },
-        { key: 'B', text: '³⁷Cl has two more neutrons in its nucleus than ³⁵Cl' },
-        { key: 'C', text: '³⁷Cl has two more protons in its nucleus than ³⁵Cl' },
-        { key: 'D', text: '³⁷Cl has different chemical reactivity from ³⁵Cl' }
+        { key: 'A', text: '20 protons, 20 neutrons, 18 electrons; configuration 2,8,8' },
+        { key: 'B', text: '20 protons, 20 neutrons, 22 electrons; configuration 2,8,8,4' },
+        { key: 'C', text: '18 protons, 20 neutrons, 18 electrons; configuration 2,8,8' },
+        { key: 'D', text: '20 protons, 40 neutrons, 18 electrons; configuration 2,8,8' }
       ],
-      correctAnswer: 'B',
+      correctAnswer: 'A',
       marks: 1,
-      explanation: 'Isotopes are atoms of the same element with the same number of protons (17 for chlorine) and electrons, but different numbers of neutrons (³⁵Cl has 18 neutrons, ³⁷Cl has 20 neutrons).',
+      explanation: 'A neutral calcium atom has 20 protons, 40 − 20 = 20 neutrons, and 20 electrons (2,8,8,2). To form a Ca²⁺ ion it loses 2 outer-shell electrons, leaving 18 electrons arranged as 2,8,8 while protons remain 20.',
       subject: 'chemistry',
       syllabusCode: 'C2.2',
       questionType: 'mcq'
@@ -305,16 +305,16 @@ export const march2026Paper22Extended: PastExamPaper = {
     {
       id: 'm26-22-q17',
       number: 17,
-      questionText: 'What is the relative formula mass (Mr) of hydrated copper(II) sulfate, CuSO4·5H2O? [Ar: Cu = 64, S = 32, O = 16, H = 1]',
+      questionText: 'Aluminium forms Al³⁺ ions and sulfate is a SO4²⁻ ion. What is the correct chemical formula of aluminium sulfate?',
       options: [
-        { key: 'A', text: '160' },
-        { key: 'B', text: '178' },
-        { key: 'C', text: '250' },
-        { key: 'D', text: '320' }
+        { key: 'A', text: 'AlSO4' },
+        { key: 'B', text: 'Al2SO4' },
+        { key: 'C', text: 'Al2(SO4)3' },
+        { key: 'D', text: 'Al3(SO4)2' }
       ],
       correctAnswer: 'C',
       marks: 1,
-      explanation: 'CuSO4 = 64 + 32 + (4 × 16) = 160. 5H2O = 5 × (2 + 16) = 90. Total Mr = 160 + 90 = 250.',
+      explanation: 'For the compound to be electrically neutral, total positive charge must equal total negative charge: two Al³⁺ ions (+6) balance three SO4²⁻ ions (−6), giving Al2(SO4)3.',
       subject: 'chemistry',
       syllabusCode: 'C3.1',
       questionType: 'mcq'
@@ -613,16 +613,16 @@ export const march2026Paper22Extended: PastExamPaper = {
     {
       id: 'm26-22-q35',
       number: 35,
-      questionText: 'A light ray passes from air into a rectangular glass block at an angle of incidence of 45°. The refractive index of the glass is 1.50. What is the angle of refraction r?',
+      questionText: 'A light ray travels from air into a rectangular glass block at an angle of incidence of 45°. What happens to the speed, wavelength, and direction of the light as it enters the glass?',
       options: [
-        { key: 'A', text: '28°' },
-        { key: 'B', text: '30°' },
-        { key: 'C', text: '45°' },
-        { key: 'D', text: '60°' }
+        { key: 'A', text: 'Speed decreases, wavelength decreases, and the ray bends towards the normal' },
+        { key: 'B', text: 'Speed increases, wavelength increases, and the ray bends away from the normal' },
+        { key: 'C', text: 'Speed decreases, frequency decreases, and the ray bends away from the normal' },
+        { key: 'D', text: 'Speed remains constant, wavelength decreases, and the ray bends towards the normal' }
       ],
       correctAnswer: 'A',
       marks: 1,
-      explanation: 'Snell’s law: n = sin(i) / sin(r) → sin(r) = sin(45°) / 1.50 = 0.7071 / 1.50 = 0.4714. r = arcsin(0.4714) ≈ 28°.',
+      explanation: 'Glass is optically denser than air, so light slows down and bends towards the normal (angle of refraction < 45°). Frequency stays constant, so from v = fλ wavelength also decreases.',
       subject: 'physics',
       syllabusCode: 'P3.2.2',
       questionType: 'mcq'

@@ -69,6 +69,8 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
   const [isResetting, setIsResetting] = useState(false);
   const [isResettingStudents, setIsResettingStudents] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmResetStudents, setConfirmResetStudents] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);
   const [selectedWinnerUid, setSelectedWinnerUid] = useState<string>('auto');
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -200,9 +202,7 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
   };
 
   const handleReset = async () => {
-    if (!window.confirm('Reset arena and return status to LOBBY? This clears all existing structures and player HP.')) {
-      return;
-    }
+    setConfirmReset(false);
     setIsResetting(true);
     try {
       await resetBattleEvent();
@@ -216,9 +216,7 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
   };
 
   const handleResetAllStudents = async () => {
-    if (!window.confirm('⚠️ WARNING: This will reset ALL student accounts to 100 Gold and the default common starter loadout (Cultist Skin, Bunsen Burner weapon, Element Shield). Instructor accounts are protected. Are you sure you want to proceed?')) {
-      return;
-    }
+    setConfirmResetStudents(false);
     setIsResettingStudents(true);
     try {
       const res = await resetAllStudentsGameProfiles(user?.email);
@@ -577,33 +575,79 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
                 </p>
               </button>
 
-              <button
-                onClick={handleReset}
-                disabled={isResetting}
-                className="p-3 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-300 text-left space-y-1 transition cursor-pointer shadow-xs"
-              >
-                <div className="flex items-center gap-2 text-xs font-bold text-rose-800">
-                  <Trash2 className="w-4 h-4 text-rose-600" />
-                  <span>Reset Arena and HP</span>
+              {confirmReset ? (
+                <div className="p-3 rounded-xl bg-rose-100 border-2 border-rose-500 text-left space-y-2 shadow-xs">
+                  <div className="text-xs font-bold text-rose-900">
+                    Reset arena to LOBBY & clear HP/builds?
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleReset}
+                      disabled={isResetting}
+                      className="flex-1 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer"
+                    >
+                      {isResetting ? 'Resetting...' : 'Confirm Reset'}
+                    </button>
+                    <button
+                      onClick={() => setConfirmReset(false)}
+                      className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-semibold cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-600">
-                  Restores status to LOBBY, clears structures, and resets HP.
-                </p>
-              </button>
+              ) : (
+                <button
+                  onClick={() => setConfirmReset(true)}
+                  disabled={isResetting}
+                  className="p-3 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-300 text-left space-y-1 transition cursor-pointer shadow-xs"
+                >
+                  <div className="flex items-center gap-2 text-xs font-bold text-rose-800">
+                    <Trash2 className="w-4 h-4 text-rose-600" />
+                    <span>Reset Arena and HP</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600">
+                    Restores status to LOBBY, clears structures, and resets HP.
+                  </p>
+                </button>
+              )}
 
-              <button
-                onClick={handleResetAllStudents}
-                disabled={isResettingStudents}
-                className="p-3 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-300 text-left space-y-1 transition cursor-pointer sm:col-span-2 shadow-xs"
-              >
-                <div className="flex items-center gap-2 text-xs font-bold text-amber-900">
-                  <RefreshCw className={`w-4 h-4 text-amber-700 ${isResettingStudents ? 'animate-spin' : ''}`} />
-                  <span>{isResettingStudents ? 'Resetting Student Loadouts...' : 'Reset All Students (100 Gold & Starter Loadout)'}</span>
+              {confirmResetStudents ? (
+                <div className="p-3 rounded-xl bg-amber-100 border-2 border-amber-500 text-left space-y-2 sm:col-span-2 shadow-xs">
+                  <div className="text-xs font-bold text-amber-950">
+                    Reset ALL student accounts to 100 Gold & default starter loadout? (Instructors are protected)
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleResetAllStudents}
+                      disabled={isResettingStudents}
+                      className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold cursor-pointer"
+                    >
+                      {isResettingStudents ? 'Resetting Students...' : 'Confirm Reset All Students'}
+                    </button>
+                    <button
+                      onClick={() => setConfirmResetStudents(false)}
+                      className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-semibold cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-600">
-                  Resets all student accounts back to 100 Gold, starter skin, Bunsen Burner, and standard starter loadout. Instructors are protected.
-                </p>
-              </button>
+              ) : (
+                <button
+                  onClick={() => setConfirmResetStudents(true)}
+                  disabled={isResettingStudents}
+                  className="p-3 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-300 text-left space-y-1 transition cursor-pointer sm:col-span-2 shadow-xs"
+                >
+                  <div className="flex items-center gap-2 text-xs font-bold text-amber-900">
+                    <RefreshCw className={`w-4 h-4 text-amber-700 ${isResettingStudents ? 'animate-spin' : ''}`} />
+                    <span>{isResettingStudents ? 'Resetting Student Loadouts...' : 'Reset All Students (100 Gold & Starter Loadout)'}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600">
+                    Resets all student accounts back to 100 Gold, starter skin, Bunsen Burner, and standard starter loadout. Instructors are protected.
+                  </p>
+                </button>
+              )}
 
               {isMatchLive && (
                 <button
@@ -645,11 +689,11 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
           <p className="text-xs text-slate-500 py-4">No students currently in the lobby.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            {lobbyPlayers.map((p) => {
+            {lobbyPlayers.map((p, idx) => {
               const skin = SHOP_ITEMS.find(i => i.id === p.avatar) || SHOP_ITEMS[0];
               const wp = SHOP_ITEMS.find(i => i.id === p.equippedWeapon) || SHOP_ITEMS[6];
               return (
-                <div key={p.uid} className="p-3 rounded-xl bg-[#FDFBF7] border border-slate-200 flex items-center justify-between gap-2 text-xs">
+                <div key={p.uid ? `${p.uid}_${idx}` : `lobby_${idx}`} className="p-3 rounded-xl bg-[#FDFBF7] border border-slate-200 flex items-center justify-between gap-2 text-xs">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span className="text-2xl">{skin.icon}</span>
                     <div className="min-w-0">
@@ -733,9 +777,9 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 block px-1">
                     Or Crown Specific Student:
                   </span>
-                  {arenaPlayers.map(p => (
+                  {arenaPlayers.map((p, idx) => (
                     <label
-                      key={p.uid}
+                      key={p.uid ? `${p.uid}_${idx}` : `arena_${idx}`}
                       className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition text-xs ${
                         selectedWinnerUid === p.uid
                           ? 'bg-amber-50 border-2 border-amber-600 text-slate-900'

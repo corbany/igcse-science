@@ -23,7 +23,7 @@ import {
   Lock,
   ShoppingBag
 } from 'lucide-react';
-import { ScienceSubject, UserProfile, StudentProgress } from '../types';
+import { ScienceSubject, UserProfile, StudentProgress, ClassTask, TaskWithSubmission } from '../types';
 import { BattleEventState } from '../services/firebaseGameService';
 import { TaskNotificationBell } from './TaskNotificationBell';
 
@@ -42,8 +42,8 @@ interface NavbarProps {
   enrolledClassIds?: string[];
   progress?: StudentProgress;
   pendingTasksCount?: number;
-  onNavigateToLessons?: (subtopicCode?: string) => void;
-  onNavigateToQuizzes?: (topicCode?: string) => void;
+  onNavigateToLessons?: (subtopicCode?: string, task?: ClassTask | TaskWithSubmission) => void;
+  onNavigateToQuizzes?: (topicCode?: string, task?: ClassTask | TaskWithSubmission) => void;
   isPreviewingAsStudent?: boolean;
   onEnterStudentPreview?: () => void;
   onExitStudentPreview?: () => void;

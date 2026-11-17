@@ -10,6 +10,7 @@ import { CURATED_BIO_QUESTIONS } from './curatedQuestionsBio';
 import { CURATED_CHEM_QUESTIONS } from './curatedQuestionsChem';
 import { CURATED_PHY_QUESTIONS } from './curatedQuestionsPhy';
 import { isValidQuizQuestion } from './quizSanitizer';
+import { practiceQuizzes } from './quizData';
 
 export interface DynamicTopicMeta {
   code: string;
@@ -57,7 +58,7 @@ export const SYLLABUS_TOPICS_META: Record<string, DynamicTopicMeta> = {
   'P2': { code: 'P2', subject: 'physics', title: 'Thermal Physics', syllabusRef: 'P2.1' },
   'P3': { code: 'P3', subject: 'physics', title: 'Waves, Light & Sound', syllabusRef: 'P3.1' },
   'P4': { code: 'P4', subject: 'physics', title: 'Electricity & Magnetism', syllabusRef: 'P4.1' },
-  'P5': { code: 'P5', subject: 'physics', title: 'Nuclear & Space Physics', syllabusRef: 'P5.1' }
+  'P5': { code: 'P5', subject: 'physics', title: 'Space Physics', syllabusRef: 'P5.1' }
 };
 
 interface QuestionTemplate {
@@ -370,8 +371,8 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
       stem: 'What is the balanced symbol equation for aerobic respiration in human cells?',
       correct: 'C₆H₁₂O₆ + 6O₂ → 6CO₂ + 6H₂O',
       distractors: [
-        'C₆H₁₂O₆ → 2C₂H₅OH + 2CO₂',
-        'C₆H₁₂O₆ → 2C₃H₆O₃ (lactic acid)',
+        'C₆H₁₂O₆ + O₂ → CO₂ + H₂O',
+        '2C₆H₁₂O₆ + 6O₂ → 6CO₂ + 12H₂O',
         '6CO₂ + 6H₂O → C₆H₁₂O₆ + 6O₂'
       ],
       explanation: 'Aerobic respiration uses oxygen to fully oxidise glucose into carbon dioxide and water, releasing energy stored in ATP.',
@@ -961,29 +962,40 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
     }
   ],
 
-  // P5 Nuclear & Space Physics
+  // P5 Space Physics
   'P5': [
     {
       stem: 'Which nuclear reaction powers the core of the Sun and main sequence stars, releasing vast amounts of energy?',
       correct: 'Nuclear fusion of light hydrogen nuclei into helium nuclei',
       distractors: [
-        'Nuclear fission of uranium and plutonium heavy nuclei',
+        'Gravitational friction between orbiting gas giant planets',
         'Chemical combustion of hydrogen gas in solar oxygen',
-        'Radioactive alpha decay of solar radioactive isotopes'
+        'Thermal convection currents passing through the asteroid belt'
       ],
-      explanation: 'In the core of the Sun, hydrogen nuclei fuse into helium at millions of degrees, releasing energy described by E = mc².',
-      ref: 'P5.1'
+      explanation: 'In the core of the Sun, hydrogen nuclei fuse into helium at extreme temperature and pressure, releasing energy.',
+      ref: 'P5.2.1'
     },
     {
-      stem: 'Which statement correctly compares alpha (α), beta (β), and gamma (γ) radiation in terms of ionising ability and penetrating power?',
-      correct: 'Alpha is most ionising and stopped by paper; Gamma is least ionising and stopped by thick lead',
+      stem: 'What observation of light emitted from distant galaxies provides evidence that the Universe is expanding (Big Bang theory)?',
+      correct: 'Light is red-shifted to longer wavelengths, with more distant galaxies showing greater redshift',
       distractors: [
-        'Gamma is most ionising and stopped by thin aluminium foil',
-        'Beta is most ionising and easily penetrates several metres of lead',
-        'Alpha has no electric charge and penetrates lead walls'
+        'Light is blue-shifted to shorter wavelengths as galaxies move closer to Earth',
+        'Light slows down below 3.0 × 10⁸ m/s as it leaves the Milky Way',
+        'All distant stars appear bright green due to ozone absorption'
       ],
-      explanation: 'Alpha (+2 charge, heavy) is strongly ionising and stopped by paper/skin. Gamma (unloaded photon) is weakly ionising and requires thick lead or concrete.',
-      ref: 'P5.2'
+      explanation: 'Space itself is expanding, stretching the wavelength of light from receding galaxies toward the red end of the spectrum (redshift). More distant galaxies recede faster and show greater redshift.',
+      ref: 'P5.2.3'
+    },
+    {
+      stem: 'Which evolutionary sequence correctly describes the life cycle of a low-mass star like our Sun after leaving the main sequence?',
+      correct: 'Red giant → planetary nebula + white dwarf',
+      distractors: [
+        'Red supergiant → supernova → black hole',
+        'Protostar → neutron star → asteroid belt',
+        'Main sequence → supernova → red dwarf'
+      ],
+      explanation: 'A Sun-sized star runs out of hydrogen in its core, expands into a red giant, sheds its outer gas layers as a planetary nebula, and leaves behind a dense white dwarf.',
+      ref: 'P5.2.2'
     }
   ]
 };
@@ -1233,4 +1245,162 @@ export function generateDynamicSyllabusQuestions(
   }
 
   return randomizeQuizQuestions(finalInterleaved.slice(0, safeCount));
+}
+
+export interface VaultCrateQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  answerIndex: number;
+  explanation: string;
+  subject: ScienceSubject;
+}
+
+let cachedPracticeVaultPool: QuizQuestion[] | null = null;
+
+function buildPracticeVaultPool(): QuizQuestion[] {
+  if (cachedPracticeVaultPool && cachedPracticeVaultPool.length > 0) {
+    return cachedPracticeVaultPool;
+  }
+
+  const collected: QuizQuestion[] = [];
+  const seenStems = new Set<string>();
+  const normStem = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  const pushIfValid = (q: QuizQuestion) => {
+    if (!isValidQuizQuestion(q)) return;
+    const key = normStem(q.question);
+    if (key.length < 15 || seenStems.has(key)) return;
+    seenStems.add(key);
+    collected.push(q);
+  };
+
+  // 1. Core practiceQuizzes bank
+  for (const q of practiceQuizzes) pushIfValid(q);
+
+  // 2. Curated Biology, Chemistry, Physics & Subtopic banks
+  const banks: Record<string, QuizQuestion[]>[] = [
+    CURATED_BIO_QUESTIONS,
+    CURATED_CHEM_QUESTIONS,
+    CURATED_PHY_QUESTIONS,
+    predefinedSubtopicQuizzes
+  ];
+  for (const bank of banks) {
+    for (const list of Object.values(bank)) {
+      for (const q of list) pushIfValid(q);
+    }
+  }
+
+  // 3. Topic Question Library
+  for (const list of Object.values(TOPIC_QUESTION_LIBRARY)) {
+    for (const q of list) pushIfValid(q);
+  }
+
+  // 4. Official Cambridge 0653 Exam Papers (4-option MCQs)
+  for (const paper of [march2026Paper12Core, march2026Paper22Extended, specimen2025Paper2]) {
+    for (const q of paper.questions) {
+      if (!q.options || q.options.length !== 4) continue;
+      const optTexts = q.options.map(opt => (typeof opt === 'string' ? opt : (opt as any).text));
+      const letter = q.correctAnswer || 'A';
+      const correctIdx = ['A', 'B', 'C', 'D'].indexOf(letter);
+      const topicCode = q.syllabusCode ? q.syllabusCode.split('.')[0].toUpperCase() : 'B1';
+      pushIfValid({
+        id: `vault-exam-${q.id}`,
+        subject: q.subject,
+        topicCode,
+        syllabusRef: q.syllabusCode,
+        question: q.questionText,
+        options: optTexts,
+        correctIndex: correctIdx >= 0 ? correctIdx : 0,
+        explanation:
+          q.explanation ||
+          `Correct answer is Option ${letter}. Sourced from official Cambridge IGCSE 0653 ${paper.tier} paper.`
+      });
+    }
+  }
+
+  // 5. Topic Templates (static & parameterized samples)
+  for (const [parentCode, templates] of Object.entries(TOPIC_TEMPLATES)) {
+    const meta = SYLLABUS_TOPICS_META[parentCode] || SYLLABUS_TOPICS_META['B1'];
+    templates.forEach((tpl, tIdx) => {
+      const vars = tpl.generateVars ? tpl.generateVars() : null;
+      const stem = typeof tpl.stem === 'function' ? tpl.stem(vars) : tpl.stem;
+      const correctAns = typeof tpl.correct === 'function' ? tpl.correct(vars) : tpl.correct;
+      const distractors = typeof tpl.distractors === 'function' ? tpl.distractors(vars) : tpl.distractors;
+      const explanation = typeof tpl.explanation === 'function' ? tpl.explanation(vars) : tpl.explanation;
+      pushIfValid({
+        id: `vault-tpl-${parentCode.toLowerCase()}-${tIdx}`,
+        subject: meta.subject,
+        topicCode: parentCode,
+        topicTitle: meta.title,
+        syllabusRef: tpl.ref || meta.syllabusRef,
+        question: stem,
+        options: [correctAns, ...distractors.slice(0, 3)],
+        correctIndex: 0,
+        explanation
+      });
+    });
+  }
+
+  // 6. Clean subtopic engine quizzes
+  for (const sub of allSubtopicsData) {
+    const subQuiz = getQuizForSubtopic(sub.subtopicCode, { count: 8 });
+    for (const q of subQuiz) pushIfValid(q);
+  }
+
+  cachedPracticeVaultPool = collected;
+  return collected;
+}
+
+/**
+ * Picks `count` randomized, syllabus-validated questions directly from the Practice Quiz Question Vault,
+ * shuffling both question selection and the 4 answer options every time.
+ */
+export function getRandomizedPracticeVaultQuestions(
+  count: number = 1,
+  excludeIds?: Set<string>
+): VaultCrateQuestion[] {
+  const safeCount = Math.max(1, count);
+  const pool = buildPracticeVaultPool();
+
+  // Filter out recently seen IDs if plenty of unseen questions remain
+  let candidates = excludeIds && excludeIds.size > 0
+    ? pool.filter(q => !excludeIds.has(q.id))
+    : [...pool];
+
+  if (candidates.length < safeCount) {
+    candidates = [...pool];
+  }
+
+  // Fisher-Yates shuffle on candidates
+  const shuffledPool = [...candidates];
+  for (let i = shuffledPool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffledPool[i], shuffledPool[j]] = [shuffledPool[j], shuffledPool[i]];
+  }
+
+  const picked = shuffledPool.slice(0, safeCount);
+
+  // Randomize option order for every picked question and convert to VaultCrateQuestion
+  return picked.map((q) => {
+    const safeCorrectIdx =
+      typeof q.correctIndex === 'number' && q.correctIndex >= 0 && q.correctIndex < q.options.length
+        ? q.correctIndex
+        : 0;
+    const tagged = q.options.map((text, idx) => ({ text, isCorrect: idx === safeCorrectIdx }));
+    for (let i = tagged.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [tagged[i], tagged[j]] = [tagged[j], tagged[i]];
+    }
+    const newAnswerIndex = Math.max(0, tagged.findIndex(o => o.isCorrect));
+
+    return {
+      id: q.id,
+      question: q.question,
+      options: tagged.map(o => o.text),
+      answerIndex: newAnswerIndex,
+      explanation: q.explanation || 'Review the Cambridge IGCSE 0653 topic notes for full details.',
+      subject: q.subject || 'biology'
+    };
+  });
 }

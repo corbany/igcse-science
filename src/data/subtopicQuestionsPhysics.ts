@@ -304,7 +304,7 @@ export const PHYSICS_SUBTOPIC_QUESTIONS: Record<string, QuizQuestion[]> = {
         'It slows down and refracts towards the normal (angle of refraction is less than 40°)',
         'It speeds up and refracts away from the normal',
         'It continues in a straight line with no deviation',
-        'It undergoes total internal reflection back into air'
+        'It refracts along the glass surface at 90° to the normal'
       ],
       correctIndex: 0,
       explanation: 'Glass is optically denser than air. Light travels slower in glass, bending towards the normal line so that r < i.'
@@ -509,12 +509,12 @@ export const PHYSICS_SUBTOPIC_QUESTIONS: Record<string, QuizQuestion[]> = {
       question: 'What nuclear reaction powers the Sun and releases vast quantities of electromagnetic radiation?',
       options: [
         'Nuclear fusion of hydrogen nuclei into helium nuclei',
-        'Nuclear fission of uranium-235 atoms',
+        'Combustion of liquid hydrogen and coal in the solar corona',
         'Chemical combustion of methane and oxygen',
-        'Radioactive alpha decay of radon gas'
+        'Gravitational friction between Mercury and Mars'
       ],
       correctIndex: 0,
-      explanation: 'The Sun produces energy in its core through nuclear fusion, where hydrogen nuclei fuse under extreme temperature and pressure to form helium, converting mass into energy (E=mc²).'
+      explanation: 'The Sun produces energy in its core through nuclear fusion, where hydrogen nuclei fuse under extreme temperature and pressure to form helium, releasing energy.'
     }
   ],
 
@@ -646,7 +646,7 @@ export const PHYSICS_SUBTOPIC_QUESTIONS: Record<string, QuizQuestion[]> = {
         'Fossil fuels (coal and petroleum)'
       ],
       correctIndex: 0,
-      explanation: 'Geothermal energy originates from radioactive decay and residual heat deep within Earth’s core/mantle. Wind, hydro, and fossil fuels all derive from solar radiation.'
+      explanation: 'Geothermal energy originates from internal thermal energy deep within Earth’s hot rocks and mantle. Wind, hydro, and fossil fuels all derive from solar radiation.'
     }
   ],
 
@@ -842,7 +842,7 @@ export const PHYSICS_SUBTOPIC_QUESTIONS: Record<string, QuizQuestion[]> = {
     }
   ],
 
-  // P4.4 Electromagnetic Effects & Transformers
+  // P4.4 Electromagnetic Converters (Motors & Generators)
   'P4.4': [
     {
       id: 'p4-4-q1',
@@ -850,15 +850,15 @@ export const PHYSICS_SUBTOPIC_QUESTIONS: Record<string, QuizQuestion[]> = {
       topicCode: 'P4',
       syllabusRef: 'P4.4',
       tier: 'Extended',
-      question: 'A step-up transformer has 200 turns on its primary coil and 4000 turns on its secondary coil. If an alternating voltage of 12 V a.c. is applied to the primary coil, what is the output voltage from the secondary coil?',
+      question: 'Which useful energy transfer takes place inside an electric motor and inside an electrical generator respectively?',
       options: [
-        '240 V a.c.',
-        '0.60 V a.c.',
-        '48 V a.c.',
-        '2400 V a.c.'
+        'Motor: electrical energy to kinetic (mechanical) energy; Generator: kinetic energy to electrical energy',
+        'Motor: chemical energy to thermal energy; Generator: thermal energy to light energy',
+        'Motor: kinetic energy to electrical energy; Generator: electrical energy to kinetic energy',
+        'Motor: gravitational potential energy to electrical energy; Generator: nuclear energy to kinetic energy'
       ],
       correctIndex: 0,
-      explanation: 'Transformer equation: Vp / Vs = Np / Ns → Vs = (Ns / Np) × Vp = (4000 / 200) × 12 V = 20 × 12 V = 240 V a.c.'
+      explanation: 'An electric motor converts electrical energy into kinetic (mechanical) work, whereas an electric generator uses kinetic rotation to induce electrical output.'
     }
   ],
 

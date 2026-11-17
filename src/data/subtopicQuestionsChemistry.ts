@@ -696,7 +696,7 @@ export const CHEMISTRY_SUBTOPIC_QUESTIONS: Record<string, QuizQuestion[]> = {
         'Gaseous state at room temperature with full valence electron shells'
       ],
       correctIndex: 0,
-      explanation: 'Transition elements have high densities and melting points, exhibit variable oxidation states, form coloured ions/compounds (e.g. blue Cu²⁺), and act as industrial catalysts (e.g. iron in Haber process).'
+      explanation: 'Transition elements have high densities and melting points, exhibit variable oxidation states, form coloured ions/compounds (e.g. blue Cu²⁺), and often act as catalysts.'
     }
   ],
 

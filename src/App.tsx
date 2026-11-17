@@ -23,11 +23,17 @@ import { BattleRoyaleArena } from './components/BattleRoyaleArena';
 import { StudentTaskProgressBar } from './components/StudentTaskProgressBar';
 import { TaskView } from './components/TaskView';
 import { Dashboard } from './components/Dashboard';
-import { subscribeToBattleState, BattleEventState } from './services/firebaseGameService';
+import { 
+  subscribeToBattleState, 
+  BattleEventState,
+  awardQuizAndLevelGold,
+  ensureRewardedLevelBaseline,
+  QuizAndLevelRewardResult
+} from './services/firebaseGameService';
 import { ScienceSubject, UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, SubtopicSlideProgress, QuizLengthRecord, TaskWithSubmission, ClassTask } from './types';
 import { resolveSubtopicByQuery } from './data/subtopicSlidesData';
 import { logCompletedActivity } from './services/activityService';
-import { evaluateStudentBadges } from './services/badgeService';
+import { evaluateStudentBadges, calculateStudentLevel } from './services/badgeService';
 import { 
   Users,
   ShieldAlert,
@@ -36,13 +42,17 @@ import {
   Lock,
   Package,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Coins,
+  Sparkles,
+  X
 } from 'lucide-react';
 import { auth, logout } from './services/firebaseAuth';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { 
   getOrCreateUserProfile, 
   syncStudentProgressToClasses, 
+  hydrateStudentProgressFromFirestore,
   fetchStudentEnrolledClasses,
   autoCheckTaskCompletion,
   autoEvaluateAllTasksForStudent,
@@ -177,6 +187,9 @@ export default function App() {
       return defaultProgress;
     }
   });
+  const progressRef = useRef<StudentProgress>(progress);
+  progressRef.current = progress;
+  const hydratedUidRef = useRef<string | null>(null);
 
   // List of enrolled class IDs for live syncing
   const [enrolledClassIds, setEnrolledClassIds] = useState<string[]>([]);
@@ -194,6 +207,43 @@ export default function App() {
         ? { ...user, role: 'student', name: `${user.name} (Student View)` }
         : user)
     : null;
+
+  // Quiz & Level-Up Gold reward state + toast
+  const [lastQuizReward, setLastQuizReward] = useState<QuizAndLevelRewardResult | null>(null);
+  const [rewardToast, setRewardToast] = useState<{
+    title: string;
+    subtitle: string;
+    isLevelUp: boolean;
+  } | null>(null);
+  const rewardToastTimerRef = useRef<any>(null);
+
+  const showRewardToast = (res: QuizAndLevelRewardResult, sourceLabel: string) => {
+    if (res.totalGoldAdded <= 0 && res.xpAdded <= 0 && res.levelsGained <= 0) return;
+    if (rewardToastTimerRef.current) clearTimeout(rewardToastTimerRef.current);
+
+    const isLevelUp = res.levelsGained > 0;
+    const parts: string[] = [];
+    if (res.quizGold > 0) parts.push(`+${res.quizGold} Quiz Gold`);
+    if (res.levelUpGold > 0) parts.push(`+${res.levelUpGold} Level-Up Gold`);
+    if (res.xpAdded > 0) parts.push(`+${res.xpAdded} XP`);
+
+    setRewardToast({
+      title: isLevelUp
+        ? `Level Up! +${res.totalGoldAdded} Gold Earned`
+        : `${sourceLabel}: +${res.totalGoldAdded} Gold`,
+      subtitle: parts.join(' • '),
+      isLevelUp
+    });
+    rewardToastTimerRef.current = setTimeout(() => {
+      setRewardToast(null);
+    }, 5500);
+  };
+
+  useEffect(() => {
+    if (!user?.id || user.role !== 'student') return;
+    const currentScholarLv = calculateStudentLevel(progress.bestTotalXP || 0).level;
+    ensureRewardedLevelBaseline(user.id, currentScholarLv);
+  }, [user?.id, user?.role]);
 
   // Real-time live subscription for student tasks
   useEffect(() => {
@@ -242,9 +292,25 @@ export default function App() {
           }
 
           initialBootSession.current = false;
+          const validIds = validClasses.map(c => c.id);
+          if (profile.role === 'student') {
+            try {
+              const merged = await hydrateStudentProgressFromFirestore(profile.id, validIds, progressRef.current);
+              hydratedUidRef.current = profile.id;
+              progressRef.current = merged;
+              setProgress(merged);
+              try {
+                localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(merged));
+              } catch {}
+            } catch {
+              hydratedUidRef.current = profile.id;
+            }
+          } else {
+            hydratedUidRef.current = profile.id;
+          }
           setUser(profile);
           localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(profile));
-          setEnrolledClassIds(validClasses.map(c => c.id));
+          setEnrolledClassIds(validIds);
         } catch (e) {
           console.error('Error resolving user profile on auth change:', e);
         }
@@ -263,8 +329,24 @@ export default function App() {
                 setEnrolledClassIds([]);
                 setSignOutNotice('Notice: The default class SCI-0653 has been retired. Students must enter an instructor-created class code to access revision materials. Please sign in and enter your teacher’s class code.');
               } else {
+                const validIds = validClasses.map(c => c.id);
+                if (profile.role === 'student') {
+                  try {
+                    const merged = await hydrateStudentProgressFromFirestore(profile.id, validIds, progressRef.current);
+                    hydratedUidRef.current = profile.id;
+                    progressRef.current = merged;
+                    setProgress(merged);
+                    try {
+                      localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(merged));
+                    } catch {}
+                  } catch {
+                    hydratedUidRef.current = profile.id;
+                  }
+                } else {
+                  hydratedUidRef.current = profile.id;
+                }
                 setUser(profile);
-                setEnrolledClassIds(validClasses.map(c => c.id));
+                setEnrolledClassIds(validIds);
               }
             } else {
               setUser(null);
@@ -303,7 +385,7 @@ export default function App() {
     }
   }, [user]);
 
-  // Persist progress changes & sync to instructor classes
+  // Persist progress changes & sync to instructor classes once remote progress is hydrated
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(progress));
@@ -311,7 +393,7 @@ export default function App() {
       console.error(e);
     }
 
-    if (user && user.role === 'student' && enrolledClassIds.length > 0) {
+    if (user && user.role === 'student' && enrolledClassIds.length > 0 && hydratedUidRef.current === user.id) {
       syncStudentProgressToClasses(user, progress, enrolledClassIds);
       autoEvaluateAllTasksForStudent(user, enrolledClassIds, progress);
     }
@@ -381,71 +463,85 @@ export default function App() {
 
   // Handler functions for progress updates
   const handleUpdateSlidesRead = (subtopicCode: string, slideProgress: SubtopicSlideProgress) => {
-    setProgress(prev => {
-      const completedSet = new Set(prev.completedLessons || []);
-      if (slideProgress.allSlidesRead) {
-        completedSet.add(subtopicCode);
-      }
-      const updated = applyMonotonicBadgesAndXP({
-        ...prev,
-        completedLessons: Array.from(completedSet),
-        slidesReadBySubtopic: {
-          ...(prev.slidesReadBySubtopic || {}),
-          [subtopicCode]: slideProgress
-        },
-        lastActive: new Date().toISOString()
-      }, effectiveUser || user);
-      try {
-        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
-      } catch {}
-      if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
-        syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
-        autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'slides', subtopicCode, { progress: updated });
-      }
-      return updated;
-    });
+    const base = progressRef.current;
+    const prevScholarLevel = calculateStudentLevel(base.bestTotalXP || 0).level;
+    const completedSet = new Set(base.completedLessons || []);
+    if (slideProgress.allSlidesRead) {
+      completedSet.add(subtopicCode);
+    }
+    const updated = applyMonotonicBadgesAndXP({
+      ...base,
+      completedLessons: Array.from(completedSet),
+      slidesReadBySubtopic: {
+        ...(base.slidesReadBySubtopic || {}),
+        [subtopicCode]: slideProgress
+      },
+      lastActive: new Date().toISOString()
+    }, effectiveUser || user);
+    const newScholarLevel = calculateStudentLevel(updated.bestTotalXP || 0).level;
+
+    progressRef.current = updated;
+    setProgress(updated);
+    try {
+      localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
+    } catch {}
+    if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
+      syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
+      autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'slides', subtopicCode, { progress: updated });
+    }
+
+    if (user && isEffectiveStudent && newScholarLevel > prevScholarLevel) {
+      awardQuizAndLevelGold({
+        uid: user.id,
+        prevScholarLevel,
+        newScholarLevel,
+        isInstructorPreview: isPreviewingAsStudent
+      }).then(res => {
+        if (res.levelUpGold > 0) showRewardToast(res, 'Rank Level Up');
+      }).catch(() => {});
+    }
   };
 
   const handleToggleCompleteLesson = (lessonId: string) => {
-    setProgress(prev => {
-      const isCompleted = prev.completedLessons.includes(lessonId);
-      // Prevent marking a lesson complete unless all slides in that subtopic have actually been read
-      if (!isCompleted && prev.slidesReadBySubtopic?.[lessonId] && !prev.slidesReadBySubtopic[lessonId].allSlidesRead) {
-        return prev;
-      }
-      const newCompleted = isCompleted
-        ? prev.completedLessons.filter(id => id !== lessonId)
-        : [...prev.completedLessons, lessonId];
-      const updated: StudentProgress = { ...prev, completedLessons: newCompleted, lastActive: new Date().toISOString() };
-      try {
-        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
-      } catch {}
-      if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
-        syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
-        autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'slides', lessonId, { progress: updated });
-      }
-      return updated;
-    });
+    const base = progressRef.current;
+    const isCompleted = base.completedLessons.includes(lessonId);
+    // Prevent marking a lesson complete unless all slides in that subtopic have actually been read
+    if (!isCompleted && base.slidesReadBySubtopic?.[lessonId] && !base.slidesReadBySubtopic[lessonId].allSlidesRead) {
+      return;
+    }
+    const newCompleted = isCompleted
+      ? base.completedLessons.filter(id => id !== lessonId)
+      : [...base.completedLessons, lessonId];
+    const updated: StudentProgress = { ...base, completedLessons: newCompleted, lastActive: new Date().toISOString() };
+    progressRef.current = updated;
+    setProgress(updated);
+    try {
+      localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
+    } catch {}
+    if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
+      syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
+      autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'slides', lessonId, { progress: updated });
+    }
   };
 
   const handleUpdateConfidence = (topicCode: string, rating: number) => {
-    setProgress(prev => {
-      const updated: StudentProgress = {
-        ...prev,
-        topicConfidence: {
-          ...prev.topicConfidence,
-          [topicCode]: rating
-        },
-        lastActive: new Date().toISOString()
-      };
-      try {
-        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
-      } catch {}
-      if (user && user.role === 'student' && enrolledClassIds.length > 0) {
-        syncStudentProgressToClasses(user, updated, enrolledClassIds);
-      }
-      return updated;
-    });
+    const base = progressRef.current;
+    const updated: StudentProgress = {
+      ...base,
+      topicConfidence: {
+        ...base.topicConfidence,
+        [topicCode]: rating
+      },
+      lastActive: new Date().toISOString()
+    };
+    progressRef.current = updated;
+    setProgress(updated);
+    try {
+      localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
+    } catch {}
+    if (user && user.role === 'student' && enrolledClassIds.length > 0) {
+      syncStudentProgressToClasses(user, updated, enrolledClassIds);
+    }
   };
 
   const handleUpdateNote = (topicCode: string, noteContent: string) => {
@@ -463,87 +559,104 @@ export default function App() {
     subject: string,
     score: number,
     total: number,
-    meta?: { topics?: string[]; subtopics?: string[]; taskId?: string }
+    meta?: { topics?: string[]; subtopics?: string[]; taskId?: string; answeredCount?: number; requestedLength?: number }
   ) => {
     const safeTotal = Math.max(1, total);
+    const completedForReward = meta?.answeredCount !== undefined ? Math.max(0, meta.answeredCount) : safeTotal;
     const pct = Math.round((score / safeTotal) * 100);
     const nowIso = new Date().toISOString();
-    const recordKey = `${meta?.taskId ? `task_${meta.taskId}` : subject}_len${safeTotal}_${(meta?.subtopics && meta.subtopics.length > 0 ? meta.subtopics.slice().sort().join(',') : (meta?.topics || []).slice().sort().join(',')) || 'general'}`;
+    const recordLen = meta?.requestedLength || safeTotal;
+    const recordKey = `${meta?.taskId ? `task_${meta.taskId}` : subject}_len${recordLen}_${(meta?.subtopics && meta.subtopics.length > 0 ? meta.subtopics.slice().sort().join(',') : (meta?.topics || []).slice().sort().join(',')) || 'general'}`;
     const lengthRecord: QuizLengthRecord = {
       score,
       total: safeTotal,
       percentage: pct,
       quizLength: safeTotal,
+      requestedLength: meta?.requestedLength ?? safeTotal,
       topics: meta?.topics,
       subtopics: meta?.subtopics,
       taskId: meta?.taskId,
       date: nowIso
     };
 
-    let updatedProgressRef: StudentProgress | null = null;
-    setProgress(prev => {
-      const prevSubScores = Object.values(prev.subtopicQuizScores || {});
-      const prevMainScores = Object.values(prev.quizScores || {});
-      const prevLengthRecords = Object.values(prev.practiceQuizByLength || {});
-      const prevLengthDates = new Set(prevLengthRecords.map(r => r?.date).filter(Boolean));
-      const prevUnrecordedMain = prevMainScores.filter(q => q && !prevLengthDates.has(q.date));
+    const base = progressRef.current;
+    const prevScholarLevel = calculateStudentLevel(base.bestTotalXP || 0).level;
 
-      const prevSubSum = prevSubScores.reduce((acc, s) => acc + (s?.score || 0), 0);
-      const prevMainSum = prevMainScores.reduce((acc, q) => acc + (q?.score || 0), 0);
-      const prevLengthSum = prevLengthRecords.reduce((acc, r) => acc + (r?.score || 0), 0) +
-        prevUnrecordedMain.reduce((acc, q) => acc + (q?.score || 0), 0);
+    const prevSubScores = Object.values(base.subtopicQuizScores || {});
+    const prevMainScores = Object.values(base.quizScores || {});
+    const prevLengthRecords = Object.values(base.practiceQuizByLength || {});
+    const prevLengthDates = new Set(prevLengthRecords.map(r => r?.date).filter(Boolean));
+    const prevUnrecordedMain = prevMainScores.filter(q => q && !prevLengthDates.has(q.date));
 
-      const prevBaselinePoints = Math.max(
-        prev.cumulativeQuizPoints || 0,
-        prevSubSum + prevMainSum,
-        prevSubSum + prevLengthSum
-      );
-      const prevBaselineCount = Math.max(
-        prev.cumulativeQuizzesCount || 0,
-        prevSubScores.length + prevMainScores.length,
-        prevSubScores.length + prevLengthRecords.length + prevUnrecordedMain.length
-      );
+    const prevSubSum = prevSubScores.reduce((acc, s) => acc + (s?.score || 0), 0);
+    const prevMainSum = prevMainScores.reduce((acc, q) => acc + (q?.score || 0), 0);
+    const prevLengthSum = prevLengthRecords.reduce((acc, r) => acc + (r?.score || 0), 0) +
+      prevUnrecordedMain.reduce((acc, q) => acc + (q?.score || 0), 0);
 
-      // Keep highest subject benchmark so a shorter (<40 question) or lower quiz never reduces subject score or badges
-      const existingSubjectScore = prev.quizScores?.[subject];
-      const existingPct = existingSubjectScore ? (existingSubjectScore.score / Math.max(1, existingSubjectScore.total)) : -1;
-      const newPct = score / safeTotal;
-      const shouldUpdateSubjectScore =
-        !existingSubjectScore ||
-        newPct > existingPct ||
-        (newPct === existingPct && score >= existingSubjectScore.score);
+    const prevBaselinePoints = Math.max(
+      base.cumulativeQuizPoints || 0,
+      prevSubSum + prevMainSum,
+      prevSubSum + prevLengthSum
+    );
+    const prevBaselineCount = Math.max(
+      base.cumulativeQuizzesCount || 0,
+      prevSubScores.length + prevMainScores.length,
+      prevSubScores.length + prevLengthRecords.length + prevUnrecordedMain.length
+    );
 
-      const updated = applyMonotonicBadgesAndXP({
-        ...prev,
-        quizScores: {
-          ...prev.quizScores,
-          [subject]: shouldUpdateSubjectScore ? { score, total: safeTotal, date: nowIso } : existingSubjectScore
-        },
-        practiceQuizByLength: {
-          ...(prev.practiceQuizByLength || {}),
-          [recordKey]: lengthRecord
-        },
-        cumulativeQuizPoints: prevBaselinePoints + score,
-        cumulativeQuizzesCount: prevBaselineCount + 1,
-        lastActive: nowIso
-      }, effectiveUser || user);
+    // Keep highest subject benchmark so a shorter (<40 question) or lower quiz never reduces subject score or badges
+    const existingSubjectScore = base.quizScores?.[subject];
+    const existingPct = existingSubjectScore ? (existingSubjectScore.score / Math.max(1, existingSubjectScore.total)) : -1;
+    const newPct = score / safeTotal;
+    const shouldUpdateSubjectScore =
+      !existingSubjectScore ||
+      newPct > existingPct ||
+      (newPct === existingPct && score >= existingSubjectScore.score);
 
-      updatedProgressRef = updated;
-      try {
-        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
-      } catch {}
-      if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
-        syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
-      }
-      return updated;
-    });
+    const updated = applyMonotonicBadgesAndXP({
+      ...base,
+      quizScores: {
+        ...base.quizScores,
+        [subject]: shouldUpdateSubjectScore ? { score, total: safeTotal, date: nowIso } : existingSubjectScore
+      },
+      practiceQuizByLength: {
+        ...(base.practiceQuizByLength || {}),
+        [recordKey]: lengthRecord
+      },
+      cumulativeQuizPoints: prevBaselinePoints + score,
+      cumulativeQuizzesCount: prevBaselineCount + 1,
+      lastActive: nowIso
+    }, effectiveUser || user);
+
+    const newScholarLevel = calculateStudentLevel(updated.bestTotalXP || 0).level;
+
+    progressRef.current = updated;
+    setProgress(updated);
+    try {
+      localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
+    } catch {}
+    if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
+      syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
+    }
 
     if (user && isEffectiveStudent) {
+      awardQuizAndLevelGold({
+        uid: user.id,
+        quizQuestionsCompleted: completedForReward,
+        quizScore: score,
+        prevScholarLevel,
+        newScholarLevel,
+        isInstructorPreview: isPreviewingAsStudent
+      }).then(rewardRes => {
+        setLastQuizReward(rewardRes);
+        showRewardToast(rewardRes, `Practice Quiz (${completedForReward} Qs)`);
+      }).catch(() => {});
+
       const targetCode = meta?.subtopics?.[0] || meta?.topics?.[0] || subject;
       autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'quiz', targetCode, {
         quizScore: pct,
-        quizLength: safeTotal,
-        progress: updatedProgressRef || undefined
+        quizLength: meta?.requestedLength ?? safeTotal,
+        progress: updated
       });
       logCompletedActivity(user.id, {
         type: 'subject_quiz',
@@ -561,94 +674,106 @@ export default function App() {
   };
 
   const handleUpdateTrafficLight = (subtopicCode: string, status: TrafficLightStatus) => {
-    setProgress(prev => {
-      const updated: StudentProgress = {
-        ...prev,
-        trafficLights: {
-          ...(prev.trafficLights || {}),
-          [subtopicCode]: status
-        },
-        lastActive: new Date().toISOString()
-      };
-      try {
-        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
-      } catch {}
-      if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
-        syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
-        autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'traffic_light', subtopicCode, {
-          trafficLight: status,
-          progress: updated
-        });
-      }
-      return updated;
-    });
+    const base = progressRef.current;
+    const updated: StudentProgress = {
+      ...base,
+      trafficLights: {
+        ...(base.trafficLights || {}),
+        [subtopicCode]: status
+      },
+      lastActive: new Date().toISOString()
+    };
+    progressRef.current = updated;
+    setProgress(updated);
+    try {
+      localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
+    } catch {}
+    if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
+      syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
+      autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'traffic_light', subtopicCode, {
+        trafficLight: status,
+        progress: updated
+      });
+    }
   };
 
   const handleSaveSubtopicQuizResult = (subtopicCode: string, result: SubtopicQuizResult) => {
     const assignedLight: TrafficLightStatus = result.percentage >= 80 ? 'green' : result.percentage >= 50 ? 'orange' : 'red';
-    let updatedProgressRef: StudentProgress | null = null;
+    const base = progressRef.current;
+    const prevScholarLevel = calculateStudentLevel(base.bestTotalXP || 0).level;
 
-    setProgress(prev => {
-      const completedSet = new Set(prev.completedLessons || []);
-      // Only mark lesson completed if all slides have actually been read
-      if (prev.slidesReadBySubtopic?.[subtopicCode]?.allSlidesRead) {
-        completedSet.add(subtopicCode);
-      }
+    const completedSet = new Set(base.completedLessons || []);
+    if (base.slidesReadBySubtopic?.[subtopicCode]?.allSlidesRead) {
+      completedSet.add(subtopicCode);
+    }
 
-      const prevSubScores = Object.values(prev.subtopicQuizScores || {});
-      const prevMainScores = Object.values(prev.quizScores || {});
-      const prevLengthRecords = Object.values(prev.practiceQuizByLength || {});
-      const prevLengthDates = new Set(prevLengthRecords.map(r => r?.date).filter(Boolean));
-      const prevUnrecordedMain = prevMainScores.filter(q => q && !prevLengthDates.has(q.date));
+    const prevSubScores = Object.values(base.subtopicQuizScores || {});
+    const prevMainScores = Object.values(base.quizScores || {});
+    const prevLengthRecords = Object.values(base.practiceQuizByLength || {});
+    const prevLengthDates = new Set(prevLengthRecords.map(r => r?.date).filter(Boolean));
+    const prevUnrecordedMain = prevMainScores.filter(q => q && !prevLengthDates.has(q.date));
 
-      const prevSubSum = prevSubScores.reduce((acc, s) => acc + (s?.score || 0), 0);
-      const prevMainSum = prevMainScores.reduce((acc, q) => acc + (q?.score || 0), 0);
-      const prevLengthSum = prevLengthRecords.reduce((acc, r) => acc + (r?.score || 0), 0) +
-        prevUnrecordedMain.reduce((acc, q) => acc + (q?.score || 0), 0);
+    const prevSubSum = prevSubScores.reduce((acc, s) => acc + (s?.score || 0), 0);
+    const prevMainSum = prevMainScores.reduce((acc, q) => acc + (q?.score || 0), 0);
+    const prevLengthSum = prevLengthRecords.reduce((acc, r) => acc + (r?.score || 0), 0) +
+      prevUnrecordedMain.reduce((acc, q) => acc + (q?.score || 0), 0);
 
-      const prevBaselinePoints = Math.max(
-        prev.cumulativeQuizPoints || 0,
-        prevSubSum + prevMainSum,
-        prevSubSum + prevLengthSum
-      );
-      const prevBaselineCount = Math.max(
-        prev.cumulativeQuizzesCount || 0,
-        prevSubScores.length + prevMainScores.length,
-        prevSubScores.length + prevLengthRecords.length + prevUnrecordedMain.length
-      );
+    const prevBaselinePoints = Math.max(
+      base.cumulativeQuizPoints || 0,
+      prevSubSum + prevMainSum,
+      prevSubSum + prevLengthSum
+    );
+    const prevBaselineCount = Math.max(
+      base.cumulativeQuizzesCount || 0,
+      prevSubScores.length + prevMainScores.length,
+      prevSubScores.length + prevLengthRecords.length + prevUnrecordedMain.length
+    );
 
-      const updated = applyMonotonicBadgesAndXP({
-        ...prev,
-        completedLessons: Array.from(completedSet),
-        trafficLights: {
-          ...(prev.trafficLights || {}),
-          [subtopicCode]: assignedLight
-        },
-        subtopicQuizScores: {
-          ...(prev.subtopicQuizScores || {}),
-          [subtopicCode]: result
-        },
-        cumulativeQuizPoints: prevBaselinePoints + (result.score || 0),
-        cumulativeQuizzesCount: prevBaselineCount + 1,
-        lastActive: new Date().toISOString()
-      }, effectiveUser || user);
+    const updated = applyMonotonicBadgesAndXP({
+      ...base,
+      completedLessons: Array.from(completedSet),
+      trafficLights: {
+        ...(base.trafficLights || {}),
+        [subtopicCode]: assignedLight
+      },
+      subtopicQuizScores: {
+        ...(base.subtopicQuizScores || {}),
+        [subtopicCode]: result
+      },
+      cumulativeQuizPoints: prevBaselinePoints + (result.score || 0),
+      cumulativeQuizzesCount: prevBaselineCount + 1,
+      lastActive: new Date().toISOString()
+    }, effectiveUser || user);
 
-      updatedProgressRef = updated;
-      try {
-        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
-      } catch {}
-      if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
-        syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
-      }
-      return updated;
-    });
+    const newScholarLevel = calculateStudentLevel(updated.bestTotalXP || 0).level;
+
+    progressRef.current = updated;
+    setProgress(updated);
+    try {
+      localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
+    } catch {}
+    if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
+      syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
+    }
 
     if (user && isEffectiveStudent) {
+      awardQuizAndLevelGold({
+        uid: user.id,
+        quizQuestionsCompleted: result.total || 10,
+        quizScore: result.score,
+        prevScholarLevel,
+        newScholarLevel,
+        isInstructorPreview: isPreviewingAsStudent
+      }).then(rewardRes => {
+        setLastQuizReward(rewardRes);
+        showRewardToast(rewardRes, `${subtopicCode} Traffic Light Quiz`);
+      }).catch(() => {});
+
       autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'quiz', subtopicCode, {
         quizScore: result.percentage,
         quizLength: result.total || 10,
         trafficLight: assignedLight,
-        progress: updatedProgressRef || undefined
+        progress: updated
       });
       logCompletedActivity(user.id, {
         type: 'subtopic_quiz',
@@ -718,6 +843,7 @@ export default function App() {
     } catch (e) {
       console.error('Logout error:', e);
     }
+    hydratedUidRef.current = null;
     setUser(null);
     localStorage.removeItem(STORAGE_KEY_USER);
     setCurrentTab('lessons');
@@ -753,11 +879,24 @@ export default function App() {
           try {
             const classes = await fetchStudentEnrolledClasses(profile.id);
             const validClasses = classes.filter(c => c && c.id && c.id !== 'class_default_0653');
+            const validIds = validClasses.map(c => c.id);
+            if (profile.role === 'student') {
+              const merged = await hydrateStudentProgressFromFirestore(profile.id, validIds, progressRef.current);
+              hydratedUidRef.current = profile.id;
+              progressRef.current = merged;
+              setProgress(merged);
+              try {
+                localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(merged));
+              } catch {}
+            } else {
+              hydratedUidRef.current = profile.id;
+            }
             setUser(profile);
             localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(profile));
-            setEnrolledClassIds(validClasses.map(c => c.id));
+            setEnrolledClassIds(validIds);
           } catch (e) {
             console.error('Error fetching enrolled classes:', e);
+            hydratedUidRef.current = profile.id;
             setUser(profile);
             setEnrolledClassIds([]);
           }
@@ -779,11 +918,13 @@ export default function App() {
             try {
               await logout();
             } catch {}
+            hydratedUidRef.current = null;
             localStorage.removeItem(STORAGE_KEY_USER);
             setUser(null);
             setEnrolledClassIds([]);
           }}
-          onClassJoined={(classItem) => {
+          onClassJoined={async (classItem) => {
+            hydratedUidRef.current = user.id;
             setEnrolledClassIds([classItem.id]);
           }}
         />
@@ -810,8 +951,16 @@ export default function App() {
         enrolledClassIds={enrolledClassIds}
         progress={progress}
         pendingTasksCount={pendingTasksCount}
-        onNavigateToLessons={handleOpenLesson}
-        onNavigateToQuizzes={() => setCurrentTab('quizzes')}
+        onNavigateToLessons={(subtopicCode, task) =>
+          task ? handleOpenTaskInLessons(task, subtopicCode) : handleOpenLesson(subtopicCode)
+        }
+        onNavigateToQuizzes={(_topicCode, task) => {
+          if (task) {
+            handleOpenTaskInQuizzes(task);
+          } else {
+            setCurrentTab('quizzes');
+          }
+        }}
         isPreviewingAsStudent={isPreviewingAsStudent}
         onEnterStudentPreview={() => {
           setIsPreviewingAsStudent(true);
@@ -1016,6 +1165,8 @@ export default function App() {
             onNavigateToTaskQuiz={() => setCurrentTab('quizzes')}
             theme={theme}
             onToggleTheme={handleToggleTheme}
+            lastQuizReward={lastQuizReward}
+            onClearQuizReward={() => setLastQuizReward(null)}
           />
         )}
 
@@ -1086,6 +1237,8 @@ export default function App() {
             taskContext={activeTaskContext}
             onClearTaskContext={() => setActiveTaskContext(null)}
             onQuizCompleted={handleQuizCompleted}
+            lastQuizReward={lastQuizReward}
+            onClearQuizReward={() => setLastQuizReward(null)}
           />
         )}
 
@@ -1311,6 +1464,31 @@ export default function App() {
           )
         )}
       </main>
+
+      {/* Gold & Level-Up Reward Notification Toast */}
+      {rewardToast && (
+        <div className="fixed bottom-5 right-5 z-50 max-w-sm bg-white border-2 border-slate-800 rounded-xl shadow-lg p-4 flex items-start gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border ${
+            rewardToast.isLevelUp
+              ? 'bg-emerald-50 border-emerald-400 text-emerald-700'
+              : 'bg-amber-50 border-amber-400 text-amber-700'
+          }`}>
+            {rewardToast.isLevelUp ? <Sparkles className="w-5 h-5" /> : <Coins className="w-5 h-5" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-slate-900 leading-tight">{rewardToast.title}</p>
+            <p className="text-xs font-semibold text-slate-600 mt-0.5">{rewardToast.subtitle}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRewardToast(null)}
+            className="text-slate-400 hover:text-slate-700 cursor-pointer p-0.5"
+            aria-label="Close notification"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -1242,8 +1242,8 @@ export const CURATED_BIO_QUESTIONS: Record<string, QuizQuestion[]> = {
       options: [
         'glucose + oxygen → carbon dioxide + water (+ energy released)',
         'carbon dioxide + water → glucose + oxygen',
-        'glucose → lactic acid',
-        'glucose → alcohol + carbon dioxide'
+        'glucose → starch + water',
+        'oxygen + water → glucose + carbon dioxide'
       ],
       correctIndex: 0,
       explanation: 'Aerobic respiration uses oxygen to completely break down glucose in mitochondria, forming carbon dioxide and water and releasing energy.'
@@ -1293,15 +1293,15 @@ export const CURATED_BIO_QUESTIONS: Record<string, QuizQuestion[]> = {
       subject: 'biology',
       topicCode: 'B12',
       syllabusRef: 'B12.1',
-      question: 'Why does aerobic respiration release much more energy per glucose molecule than anaerobic respiration in muscle cells?',
+      question: 'Which gas is required by living plant and animal cells for aerobic respiration, and which waste gas is released?',
       options: [
-        'Aerobic respiration completely breaks down glucose into CO₂ and H₂O, whereas anaerobic respiration only partially breaks down glucose into lactic acid',
-        'Anaerobic respiration absorbs energy from ATP rather than releasing it',
-        'Aerobic respiration takes place without enzymes inside blood plasma',
-        'Lactic acid contains no carbon atoms'
+        'Oxygen is required; carbon dioxide is released',
+        'Carbon dioxide is required; oxygen is released',
+        'Nitrogen is required; hydrogen is released',
+        'Carbon monoxide is required; water vapour is never produced'
       ],
       correctIndex: 0,
-      explanation: 'Because lactic acid still stores significant chemical energy in its bonds, anaerobic respiration releases far less energy per glucose molecule.'
+      explanation: 'Aerobic respiration uses oxygen to break down glucose in cells, producing carbon dioxide and water while releasing energy.'
     },
     {
       id: 'cb-b121-6',
@@ -1312,7 +1312,7 @@ export const CURATED_BIO_QUESTIONS: Record<string, QuizQuestion[]> = {
       options: [
         'C₆H₁₂O₆ + 6O₂ → 6CO₂ + 6H₂O',
         '6CO₂ + 6H₂O → C₆H₁₂O₆ + 6O₂',
-        'C₆H₁₂O₆ → 2C₂H₅OH + 2CO₂',
+        'C₆H₁₂O₆ + O₂ → CO₂ + H₂O',
         'C₆H₁₂O₆ + 3O₂ → 6CO + 6H₂O'
       ],
       correctIndex: 0,
@@ -1323,30 +1323,30 @@ export const CURATED_BIO_QUESTIONS: Record<string, QuizQuestion[]> = {
       subject: 'biology',
       topicCode: 'B12',
       syllabusRef: 'B12.1',
-      question: 'Why does an athlete continue to breathe deeply and have an elevated heart rate immediately after a 400 m sprint?',
+      question: 'Why do skeletal muscle cells and active liver cells contain far more mitochondria than fat storage cells?',
       options: [
-        'To repay the oxygen debt by supplying extra oxygen to break down accumulated lactic acid in the liver',
-        'To produce additional ethanol in skeletal muscles',
-        'To stop aerobic respiration in the heart muscle',
-        'To increase the concentration of glucose in exhaled air'
+        'They require large amounts of energy released by aerobic respiration for contraction and protein synthesis',
+        'Mitochondria store starch granules for long-term photosynthesis',
+        'Mitochondria carry oxygen gas instead of haemoglobin in red blood cells',
+        'Fat cells have thick cellulose cell walls that block mitochondria'
       ],
       correctIndex: 0,
-      explanation: 'After vigorous anaerobic exercise, high breathing and heart rates transport lactic acid to the liver and supply O₂ to aerobically respire/remove it (repaying the oxygen debt).'
+      explanation: 'Aerobic respiration takes place in mitochondria. Metabolically active cells such as muscle cells need many mitochondria to release energy rapidly.'
     },
     {
       id: 'cb-b121-8',
       subject: 'biology',
       topicCode: 'B12',
       syllabusRef: 'B12.1',
-      question: 'Which two products are formed during anaerobic respiration in yeast?',
+      question: 'A student places living woodlice in a test-tube above soda lime (which absorbs CO₂) connected to a capillary tube containing a coloured oil drop. What happens to the oil drop and why?',
       options: [
-        'Alcohol (ethanol) and carbon dioxide',
-        'Lactic acid and oxygen',
-        'Carbon dioxide and water only',
-        'Starch and glycogen'
+        'The drop moves towards the woodlice because they absorb oxygen for aerobic respiration and any CO₂ produced is absorbed by the soda lime',
+        'The drop moves away from the woodlice because they release oxygen gas',
+        'The drop stays completely stationary because woodlice do not respire',
+        'The drop turns blue-black because starch diffuses through the air'
       ],
       correctIndex: 0,
-      explanation: 'Yeast respires anaerobically via fermentation: glucose → alcohol (ethanol) + carbon dioxide.'
+      explanation: 'As the woodlice carry out aerobic respiration, they take in oxygen; soda lime removes the exhaled CO₂, lowering gas volume/pressure in the tube and pulling the drop inward.'
     }
   ],
 
@@ -1769,15 +1769,15 @@ export const CURATED_BIO_QUESTIONS: Record<string, QuizQuestion[]> = {
       subject: 'biology',
       topicCode: 'B16',
       syllabusRef: 'B16.1',
-      question: 'Why does untreated sewage or excess nitrate fertiliser entering a river cause aquatic fish to die (eutrophication)?',
+      question: 'What does the term "biodiversity" mean in an ecosystem?',
       options: [
-        'Algal blooms block light; dead algae are decomposed by aerobic bacteria which multiply and use up dissolved oxygen',
-        'Nitrates make the river water acidic enough to dissolve fish scales immediately',
-        'Algae release toxic carbon monoxide that suffocates fish on contact',
-        'Fertilisers freeze dissolved oxygen into solid crystals'
+        'The number of different species that live in an area',
+        'The total mass of non-living rock and soil in a habitat',
+        'The rate at which trees absorb carbon monoxide during the night',
+        'The percentage of nitrogen gas present in the atmosphere'
       ],
       correctIndex: 0,
-      explanation: 'Excess nutrients trigger rapid algal growth; when algae die, aerobic decomposers multiply hugely and deplete dissolved oxygen, suffocating fish.'
+      explanation: 'In Cambridge IGCSE 0653 B16.1, biodiversity is defined as the number of different species that live in an area.'
     }
   ],
 

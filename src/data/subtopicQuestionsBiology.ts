@@ -688,15 +688,15 @@ export const BIOLOGY_SUBTOPIC_QUESTIONS: Record<string, QuizQuestion[]> = {
       subject: 'biology',
       topicCode: 'B12',
       syllabusRef: 'B12.1',
-      question: 'What is the end product of anaerobic respiration in vigorously exercising human muscle tissue?',
+      question: 'Which list contains ONLY processes in living organisms that use energy released by aerobic respiration?',
       options: [
-        'Lactic acid (lactate)',
-        'Ethanol and carbon dioxide',
-        'Water and carbon dioxide',
-        'Urea and glucose'
+        'Muscle contraction, protein synthesis, cell division, growth, and maintenance of a constant body temperature',
+        'Diffusion of oxygen across alveoli, osmosis into root hairs, and transpiration',
+        'Passive movement of water up xylem vessels and melting of ice',
+        'Photosynthesis in root hair cells and evaporation of sweat'
       ],
       correctIndex: 0,
-      explanation: 'In human muscles during intense exercise when oxygen supply is insufficient, glucose is partially broken down into lactic acid, creating an oxygen debt.'
+      explanation: 'In Cambridge 0653 B12.1, energy from aerobic respiration is used for muscle contraction, protein synthesis, cell division, growth, and maintaining a constant body temperature.'
     }
   ],
 

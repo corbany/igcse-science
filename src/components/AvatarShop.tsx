@@ -24,15 +24,25 @@ import {
   ShopItem,
   BattleEventState,
   getLocalGameItem,
-  setLocalGameItem
+  setLocalGameItem,
+  openBoosterPackTransaction
 } from '../services/firebaseGameService';
 import { db } from '../services/firebaseAuth';
-import { doc, setDoc, updateDoc, increment, arrayUnion, runTransaction } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import { 
   ALL_FANTASY_SKINS, 
   FantasySkinDefinition, 
   FANTASY_SKIN_ALIASES 
 } from '../data/fantasySkinsData';
+import {
+  BOOSTER_PACKS,
+  BoosterPackConfig,
+  RARITY_RANK,
+  ALL_WEAPON_ITEMS
+} from '../data/gameCatalogData';
+
+export type { BoosterPackConfig };
+export { BOOSTER_PACKS, RARITY_RANK, ALL_WEAPON_ITEMS };
 
 export type SkinCard = FantasySkinDefinition;
 export const ALL_SKIN_CARDS: SkinCard[] = ALL_FANTASY_SKINS;
@@ -40,66 +50,6 @@ export const ALL_SKIN_CARDS: SkinCard[] = ALL_FANTASY_SKINS;
 export type BoosterReward = 
   | { type: 'skin'; item: SkinCard }
   | { type: 'weapon'; item: ShopItem };
-
-export interface BoosterPackConfig {
-  id: string;
-  name: string;
-  subtitle: string;
-  price: number;
-  badge: string;
-  description: string;
-  packNumber?: 1 | 2 | 3 | 4;
-  odds: {
-    common: number;
-    rare: number;
-    epic: number;
-    legendary: number;
-    mythic: number;
-  };
-}
-
-export const BOOSTER_PACKS: BoosterPackConfig[] = [
-  {
-    id: 'pack_1_catacombs',
-    name: 'Pack 1: Starter Science Pack',
-    subtitle: 'Tier I Science Champions and Lab Tools',
-    price: 90,
-    badge: 'Pack 1',
-    packNumber: 1,
-    description: 'Contains common and rare science characters and standard laboratory weapons.',
-    odds: { common: 50, rare: 35, epic: 11, legendary: 3.5, mythic: 0.5 }
-  },
-  {
-    id: 'pack_2_citadel',
-    name: 'Pack 2: Advanced Science Pack',
-    subtitle: 'Tier II Characters and Energy Tools',
-    price: 120,
-    badge: 'Pack 2',
-    packNumber: 2,
-    description: 'Higher chance for rare skirmishers, epic characters, and high-energy weapons.',
-    odds: { common: 40, rare: 42, epic: 14, legendary: 3.5, mythic: 0.5 }
-  },
-  {
-    id: 'pack_3_legends',
-    name: 'Pack 3: Master Science Pack',
-    subtitle: 'Tier III Armored Champions and Top Arsenals',
-    price: 150,
-    badge: 'Pack 3',
-    packNumber: 3,
-    description: 'Guarantees higher chances for legendary heroes and top-tier scientific equipment.',
-    odds: { common: 25, rare: 40, epic: 24, legendary: 10.5, mythic: 0.5 }
-  },
-  {
-    id: 'super_gold_pack',
-    name: 'Super Gold Science Pack',
-    subtitle: 'All 19 Characters and 10 Weapons',
-    price: 250,
-    badge: 'Super Pack',
-    packNumber: 4,
-    description: 'Premium booster pack with boosted epic and legendary drop rates.',
-    odds: { common: 20, rare: 40, epic: 28, legendary: 11.5, mythic: 0.5 }
-  }
-];
 
 class PackSoundFX {
   private ctx: AudioContext | null = null;
@@ -158,126 +108,6 @@ class PackSoundFX {
 
 const packSfx = new PackSoundFX();
 
-export const RARITY_RANK: Record<ItemRarity, { rank: number; label: string; badgeClass: string }> = {
-  mythic: { rank: 1, label: 'Mythic', badgeClass: 'bg-rose-100 text-rose-900 border-rose-300 font-black' },
-  legendary: { rank: 2, label: 'Legendary', badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-bold' },
-  epic: { rank: 3, label: 'Epic', badgeClass: 'bg-purple-100 text-purple-900 border-purple-300 font-bold' },
-  rare: { rank: 4, label: 'Rare', badgeClass: 'bg-cyan-100 text-cyan-900 border-cyan-300 font-bold' },
-  common: { rank: 5, label: 'Common', badgeClass: 'bg-slate-100 text-slate-800 border-slate-300 font-semibold' }
-};
-
-export const ALL_WEAPON_ITEMS: ShopItem[] = [
-  // --- COMMON (Rank 5) ---
-  {
-    id: 'wpn_starter_blaster',
-    name: 'Laboratory Pulse Blaster',
-    category: 'weapon',
-    rarity: 'common',
-    price: 0,
-    icon: '🔫',
-    description: 'Standard issue laboratory scientific blaster for precision target practice.',
-    stats: { damage: 18, fireRate: 2.9, cooldownSeconds: 0.35, range: 450, specialEffect: 'laser' }
-  },
-  {
-    id: 'bunsen_burner',
-    name: 'Thermal Bunsen Burner',
-    category: 'weapon',
-    rarity: 'common',
-    price: 0,
-    icon: '🔥',
-    description: 'Pressurized laboratory methane burner with continuous thermal cone spray.',
-    stats: { damage: 16, fireRate: 4.5, cooldownSeconds: 0.22, range: 340, specialEffect: 'thermal' }
-  },
-  {
-    id: 'acid_pipette',
-    name: 'Corrosive Acid Pipette',
-    category: 'weapon',
-    rarity: 'common',
-    price: 80,
-    icon: '🧪',
-    description: 'Pressurized jet of dilute hydrochloric acid that rapidly dissolves defenses.',
-    stats: { damage: 20, fireRate: 3.1, cooldownSeconds: 0.32, range: 380, specialEffect: 'acid' }
-  },
-
-  // --- RARE (Rank 4) ---
-  {
-    id: 'wpn_heavy_cannon',
-    name: 'Tesla Ion Cannon',
-    category: 'weapon',
-    rarity: 'rare',
-    price: 180,
-    icon: '⚡',
-    description: 'Fires high-voltage electromagnetic rounds that pierce multiple targets.',
-    stats: { damage: 45, fireRate: 1.2, cooldownSeconds: 0.85, range: 600, specialEffect: 'lightning' }
-  },
-  {
-    id: 'wpn_rapid_repeater',
-    name: 'Quantum Rapid Repeater',
-    category: 'weapon',
-    rarity: 'rare',
-    price: 150,
-    icon: '🌀',
-    description: 'Rapid-fire quantum particle accelerator with high cycle rate.',
-    stats: { damage: 12, fireRate: 8.3, cooldownSeconds: 0.12, range: 380, specialEffect: 'plasma' }
-  },
-
-  // --- EPIC (Rank 3) ---
-  {
-    id: 'wpn_sniper_railgun',
-    name: 'Linear Accelerator Railgun',
-    category: 'weapon',
-    rarity: 'epic',
-    price: 260,
-    icon: '🎯',
-    description: 'Long-range electromagnetic projectile rifle with extreme velocity.',
-    stats: { damage: 85, fireRate: 0.7, cooldownSeconds: 1.4, range: 900, specialEffect: 'beam' }
-  },
-  {
-    id: 'wpn_freezer_lance',
-    name: 'Cryogenic Absolute Zero Lance',
-    category: 'weapon',
-    rarity: 'epic',
-    price: 240,
-    icon: '❄️',
-    description: 'Emits a cryogenic wave that slows targets and freezes projectiles.',
-    stats: { damage: 32, fireRate: 2.0, cooldownSeconds: 0.5, range: 500, specialEffect: 'frost' }
-  },
-
-  // --- LEGENDARY (Rank 2) ---
-  {
-    id: 'wpn_solar_disintegrator',
-    name: 'Solar Thermal Disintegrator',
-    category: 'weapon',
-    rarity: 'legendary',
-    price: 360,
-    icon: '☀️',
-    description: 'Channels concentrated solar radiation for massive thermal area damage.',
-    stats: { damage: 95, fireRate: 0.8, cooldownSeconds: 1.2, range: 750, specialEffect: 'solar' }
-  },
-
-  // --- MYTHIC (Rank 1) ---
-  {
-    id: 'quantum_displacer',
-    name: 'Quantum Displacer Rifle',
-    category: 'weapon',
-    rarity: 'mythic',
-    price: 780,
-    icon: '🌌',
-    description: 'Harnesses quantum entanglement to fire tachyon bolts with phase warp.',
-    stats: { damage: 54, fireRate: 4.0, cooldownSeconds: 0.25, range: 680, specialEffect: 'tachyon' }
-  },
-  {
-    id: 'wpn_antimatter_rifle',
-    name: 'Antimatter Annihilator',
-    category: 'weapon',
-    rarity: 'mythic',
-    price: 500,
-    icon: '⚛️',
-    description: 'Experimental antimatter particle rifle with maximum theoretical power.',
-    stats: { damage: 120, fireRate: 0.7, cooldownSeconds: 1.5, range: 850, specialEffect: 'void' }
-  }
-];
-
 interface AvatarShopProps {
   user: UserProfile;
   initialTab?: 'shop' | 'collection' | 'armory';
@@ -322,6 +152,15 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
   const equippedSkin = gameProfile?.equippedSkin ?? 'cultist';
   const equippedWeapon = gameProfile?.equippedWeapon ?? 'wpn_starter_blaster';
   const inventory = gameProfile?.inventory ?? ['wpn_starter_blaster', 'bunsen_burner', 'cultist'];
+  const giftedPacks = gameProfile?.giftedPacks ?? {};
+  const totalGiftedPacks = useMemo(
+    () => Object.values(giftedPacks).reduce((sum, count) => sum + Math.max(0, Number(count) || 0), 0),
+    [giftedPacks]
+  );
+  const recentRewards = useMemo(
+    () => [...(gameProfile?.rewardHistory || [])].reverse().slice(0, 6),
+    [gameProfile?.rewardHistory]
+  );
   const isInstructor = user?.role === 'instructor';
 
   // Sort skins by rarity rank (Rank 1 Mythic -> Rank 2 Legendary -> Rank 3 Epic -> Rank 4 Rare -> Rank 5 Common)
@@ -361,9 +200,17 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
     return 'common';
   };
 
-  const handleOpenPack = async (pack: BoosterPackConfig) => {
+  const handleOpenPack = async (pack: BoosterPackConfig, useGiftedOverride?: boolean) => {
     if (!user?.id) return;
-    if (!isInstructor && currentGold < pack.price) {
+    const giftedAvailable = Math.max(0, Number(giftedPacks[pack.id] || 0));
+    const useGiftedPack = useGiftedOverride ?? giftedAvailable > 0;
+
+    if (useGiftedPack && giftedAvailable <= 0) {
+      setFeedback('No gifted packs of this tier available.');
+      return;
+    }
+
+    if (!useGiftedPack && !isInstructor && currentGold < pack.price) {
       setFeedback(`You need ${pack.price} Gold to open this pack.`);
       return;
     }
@@ -392,67 +239,22 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
         duplicate = inventory.includes(selected.id) || selected.id === 'wpn_starter_blaster' || selected.id === 'bunsen_burner';
       }
 
-      const newGold = isInstructor ? currentGold : Math.max(0, currentGold - pack.price);
-      const updatedUnlockedSkins = reward.type === 'skin'
-        ? (unlockedSkins.includes(reward.item.id) ? unlockedSkins : [...unlockedSkins, reward.item.id])
-        : unlockedSkins;
-      const updatedInventory = reward.type === 'weapon'
-        ? (inventory.includes(reward.item.id) ? inventory : [...inventory, reward.item.id])
-        : (reward.type === 'skin' ? (inventory.includes(reward.item.id) ? inventory : [...inventory, reward.item.id]) : inventory);
-
-      // 1. Immediately update React state so the newly unlocked card is visibly revealed in the collection instantly!
-      setGameProfile(prev => {
-        const base = prev || {
-          uid: user.id,
-          level: 1,
-          xp: 0,
-          role: user.role,
-          gold: newGold,
-          wood: 25,
-          brick: 15,
-          metal: 10,
-          avatar: 'cultist',
-          equippedSkin: 'cultist',
-          equippedWeapon: 'wpn_starter_blaster',
-          equippedPower: 'element_shield',
-          inventory: updatedInventory,
-          unlockedSkins: updatedUnlockedSkins,
-          monthlyCrown: false
-        };
-        return {
-          ...base,
-          gold: newGold,
-          unlockedSkins: updatedUnlockedSkins,
-          inventory: updatedInventory
-        };
+      const txResult = await openBoosterPackTransaction(user.id, {
+        packId: pack.id,
+        packPrice: pack.price,
+        useGiftedPack,
+        unlockedItemId: reward.item.id,
+        unlockedItemType: reward.type,
+        isInstructor
       });
 
-      // 2. Immediately cache to local storage
-      const localKey = `igcse_game_profile_${user.id}`;
-      try {
-        const cached = getLocalGameItem<any>(localKey, {});
-        setLocalGameItem(localKey, {
-          ...cached,
-          gold: newGold,
-          unlockedSkins: updatedUnlockedSkins,
-          inventory: updatedInventory
-        });
-      } catch (cacheErr) {
-        console.warn('Cache write warning:', cacheErr);
+      if (!txResult.success) {
+        setFeedback(txResult.error || 'Could not open booster pack. Please try again.');
+        return;
       }
 
-      // 3. Persist to Firestore with merge
-      try {
-        const userDocRef = doc(db, 'users', user.id);
-        const firestorePayload: Record<string, any> = {
-          gold: newGold,
-          goldCoins: newGold,
-          unlockedSkins: updatedUnlockedSkins,
-          inventory: updatedInventory
-        };
-        await setDoc(userDocRef, firestorePayload, { merge: true });
-      } catch (firestoreErr) {
-        console.warn('Firestore update note (preserved in profile):', firestoreErr);
+      if (txResult.profile) {
+        setGameProfile(txResult.profile);
       }
 
       setPulledReward(reward);
@@ -576,7 +378,7 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
             }`}
           >
             <Package className="w-4 h-4" />
-            <span>Booster Packs</span>
+            <span>Booster Packs{totalGiftedPacks > 0 ? ` (${totalGiftedPacks} Free)` : ''}</span>
           </button>
 
           <button
@@ -607,62 +409,124 @@ export const AvatarShop: React.FC<AvatarShopProps> = ({
 
       {/* TAB 1: BOOSTER PACKS */}
       {activeTab === 'shop' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {BOOSTER_PACKS.map((pack) => {
-            const canAfford = currentGold >= pack.price;
+        <div className="space-y-4">
+          {totalGiftedPacks > 0 && (
+            <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <Sparkles className="w-5 h-5 text-emerald-700 shrink-0" />
+                <div className="text-sm">
+                  <span className="font-bold">
+                    You have {totalGiftedPacks} free Gifted Booster Pack{totalGiftedPacks === 1 ? '' : 's'} awarded by your instructor.
+                  </span>
+                  <span className="text-emerald-800 ml-1.5">Open them below at no Gold cost.</span>
+                </div>
+              </div>
+            </div>
+          )}
 
-            return (
-              <div
-                key={pack.id}
-                className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col justify-between space-y-4 hover:border-slate-400 transition"
-              >
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold px-2 py-0.5 rounded bg-[#EBF3F5] text-slate-800 border border-slate-300">
-                      {pack.badge}
-                    </span>
-                    <span className="text-base font-bold text-slate-800">
-                      {pack.price} Gold
-                    </span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {BOOSTER_PACKS.map((pack) => {
+              const giftedCount = Math.max(0, Number(giftedPacks[pack.id] || 0));
+              const canAfford = currentGold >= pack.price;
+
+              return (
+                <div
+                  key={pack.id}
+                  className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col justify-between space-y-4 hover:border-slate-400 transition"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-slate-600 tabular-nums">
+                        {pack.badge}{giftedCount > 0 ? ` · ${giftedCount} Free Gifted` : ''}
+                      </span>
+                      <span className="text-base font-bold text-slate-800 tabular-nums">
+                        {pack.price} Gold
+                      </span>
+                    </div>
+
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-800">
+                        {pack.name}
+                      </h3>
+                      <p className="text-sm text-slate-600 mt-1">
+                        {pack.description}
+                      </p>
+                    </div>
+
+                    {/* Clean Drop Rates Bullet Points */}
+                    <div className="bg-[#FDFBF7] border border-slate-200 rounded-lg p-3 text-xs text-slate-700">
+                      <p className="font-bold text-slate-800 mb-1">Rarity odds:</p>
+                      <ul className="grid grid-cols-2 gap-1 tabular-nums">
+                        <li>Common: {pack.odds.common}%</li>
+                        <li>Rare: {pack.odds.rare}%</li>
+                        <li>Epic: {pack.odds.epic}%</li>
+                        <li>Legendary: {pack.odds.legendary}%</li>
+                      </ul>
+                    </div>
                   </div>
 
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-800">
-                      {pack.name}
-                    </h3>
-                    <p className="text-sm text-slate-600 mt-1">
-                      {pack.description}
-                    </p>
-                  </div>
+                  {/* Open Pack Action Buttons */}
+                  <div className="space-y-2">
+                    {giftedCount > 0 && (
+                      <button
+                        onClick={() => handleOpenPack(pack, true)}
+                        disabled={isProcessing}
+                        className="w-full py-2.5 rounded-lg text-sm font-bold flex items-center justify-center gap-2 cursor-pointer transition bg-emerald-700 hover:bg-emerald-600 text-white"
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        <span>Open Free Gifted Pack ({giftedCount} left)</span>
+                      </button>
+                    )}
 
-                  {/* Clean Drop Rates Bullet Points */}
-                  <div className="bg-[#FDFBF7] border border-slate-200 rounded-lg p-3 text-xs text-slate-700">
-                    <p className="font-bold text-slate-800 mb-1">Rarity odds:</p>
-                    <ul className="grid grid-cols-2 gap-1">
-                      <li>Common: {pack.odds.common}%</li>
-                      <li>Rare: {pack.odds.rare}%</li>
-                      <li>Epic: {pack.odds.epic}%</li>
-                      <li>Legendary: {pack.odds.legendary}%</li>
-                    </ul>
+                    <button
+                      onClick={() => handleOpenPack(pack, false)}
+                      disabled={(!canAfford && !isInstructor) || isProcessing}
+                      className={`w-full py-2.5 rounded-lg text-sm font-bold flex items-center justify-center gap-2 cursor-pointer transition ${
+                        canAfford || isInstructor
+                          ? giftedCount > 0
+                            ? 'bg-white hover:bg-slate-100 text-slate-800 border border-slate-300'
+                            : 'bg-slate-800 hover:bg-slate-700 text-white'
+                          : 'bg-slate-100 text-slate-400 border border-slate-300 cursor-not-allowed'
+                      }`}
+                    >
+                      <Package className="w-4 h-4" />
+                      <span>{canAfford || isInstructor ? `Open Pack for ${pack.price} Gold` : `Requires ${pack.price} Gold`}</span>
+                    </button>
                   </div>
                 </div>
+              );
+            })}
+          </div>
 
-                {/* Open Pack Action Button */}
-                <button
-                  onClick={() => handleOpenPack(pack)}
-                  disabled={!canAfford || isProcessing}
-                  className={`w-full py-2.5 rounded-lg text-sm font-bold flex items-center justify-center gap-2 cursor-pointer transition ${
-                    canAfford
-                      ? 'bg-slate-800 hover:bg-slate-700 text-white'
-                      : 'bg-slate-100 text-slate-400 border border-slate-300 cursor-not-allowed'
-                  }`}
-                >
-                  <Package className="w-4 h-4" />
-                  <span>{canAfford ? `Open Pack for ${pack.price} Gold` : `Requires ${pack.price} Gold`}</span>
-                </button>
+          {recentRewards.length > 0 && (
+            <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-900">Recent Rewards from Your Instructor</h3>
+                <span className="text-xs text-slate-500 tabular-nums">{recentRewards.length} recent</span>
               </div>
-            );
-          })}
+              <div className="divide-y divide-slate-200">
+                {recentRewards.map((rec) => (
+                  <div key={rec.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-800 truncate">
+                        {rec.rewardType === 'gold'
+                          ? `+${rec.quantity} Gold`
+                          : rec.rewardType === 'booster_pack'
+                          ? `${rec.quantity}× ${rec.itemName}`
+                          : rec.itemName}
+                      </p>
+                      <p className="text-slate-500 truncate">
+                        Awarded by {rec.awardedBy}{rec.note ? ` · "${rec.note}"` : ''}
+                      </p>
+                    </div>
+                    <span className="text-slate-500 tabular-nums shrink-0">
+                      {new Date(rec.awardedAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

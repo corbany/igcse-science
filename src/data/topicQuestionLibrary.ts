@@ -550,30 +550,30 @@ export const TOPIC_QUESTION_LIBRARY: Record<string, QuizQuestion[]> = {
       id: 'lib-b12-1',
       subject: 'biology',
       topicCode: 'B12',
-      question: 'What are the products of anaerobic respiration in human muscle cells during vigorous exercise, and what biological debt is created?',
+      question: 'Which balanced chemical equation correctly represents aerobic respiration inside living cells?',
       options: [
-        'Lactic acid is produced; creates an oxygen debt that requires continued rapid breathing after exercise',
-        'Ethanol and carbon dioxide are produced; creates an alcohol debt',
-        'Water and carbon dioxide are produced with maximum ATP release',
-        'Glucose and oxygen are produced to replenish glycogen stores'
+        'C₆H₁₂O₆ + 6O₂ → 6CO₂ + 6H₂O',
+        '6CO₂ + 6H₂O → C₆H₁₂O₆ + 6O₂',
+        'C₆H₁₂O₆ → 2CO₂ + 2H₂O',
+        'C₆H₁₂O₆ + 3O₂ → 3CO₂ + 3H₂O'
       ],
       correctIndex: 0,
-      explanation: 'In human muscles: Glucose -> Lactic acid. Lactic acid causes muscle fatigue and cramps; post-exercise oxygen is needed to transport it to the liver and break it down aerobically (oxygen debt).',
+      explanation: 'In aerobic respiration, one molecule of glucose reacts with six molecules of oxygen to produce six molecules of carbon dioxide and six molecules of water, releasing energy.',
       syllabusRef: 'B12.1'
     },
     {
       id: 'lib-b12-2',
       subject: 'biology',
       topicCode: 'B12',
-      question: 'Which chemical equation describes anaerobic respiration in yeast during brewing or breadmaking (alcoholic fermentation)?',
+      question: 'Which list correctly identifies cellular and body processes in humans that directly use energy released by aerobic respiration?',
       options: [
-        'Glucose → Ethanol + Carbon dioxide',
-        'Glucose → Lactic acid + Energy',
-        'Glucose + Oxygen → Carbon dioxide + Water',
-        'Ethanol + Carbon dioxide → Glucose + Water'
+        'Muscle contraction, protein synthesis, cell division, active transport, and maintaining a constant body temperature',
+        'Osmosis of water into root hair cells and diffusion of oxygen across alveoli',
+        'Passive evaporation of sweat from skin and diffusion of carbon dioxide out of blood',
+        'Dissolving mineral salts in soil water and passive transpiration pull in xylem'
       ],
       correctIndex: 0,
-      explanation: 'In yeast: C6H12O6 -> 2C2H5OH + 2CO2. Carbon dioxide causes bread dough to rise; ethanol is the alcohol in brewing.',
+      explanation: 'Living organisms use the energy released by respiration for muscle contraction, protein synthesis, cell division, active transport, growth, and maintaining a constant body temperature.',
       syllabusRef: 'B12.1'
     }
   ],
@@ -686,15 +686,15 @@ export const TOPIC_QUESTION_LIBRARY: Record<string, QuizQuestion[]> = {
       id: 'lib-b16-1',
       subject: 'biology',
       topicCode: 'B16',
-      question: 'What ecological crisis is caused when excessive nitrate fertilisers leach from agricultural fields into freshwater lakes (eutrophication)?',
+      question: 'What are the major undesirable ecological effects of widespread deforestation of tropical rainforests?',
       options: [
-        'Algal bloom blocks sunlight → submerged plants die → decomposer bacteria multiply and consume dissolved oxygen → fish die of suffocation',
-        'Nitrates acidify water directly, dissolving fish scales on contact',
-        'Water becomes toxic to plants, causing all algae to vanish immediately',
-        'Aquatic plants produce toxic methane gas that suffocates water birds'
+        'Habitat destruction reducing biodiversity, extinction of species, soil erosion, flooding, and increased atmospheric carbon dioxide',
+        'Permanent increase in biodiversity and lower atmospheric carbon dioxide levels',
+        'Immediate conversion of soil minerals into fossil fuels and thicker topsoil',
+        'Rapid cooling of global oceans due to increased tree transpiration'
       ],
       correctIndex: 0,
-      explanation: 'Eutrophication sequence: fertiliser runoff -> rapid algae growth -> light blocked -> benthic plants die -> aerobic bacteria decompose dead biomass consuming oxygen -> severe hypoxia kills aquatic fauna.',
+      explanation: 'Clearing forests destroys natural habitats (lowering biodiversity and risking extinction), removes roots that bind soil (causing soil erosion and flooding), and increases atmospheric CO₂ as trees no longer absorb it.',
       syllabusRef: 'B16.1'
     },
     {
@@ -837,15 +837,15 @@ export const TOPIC_QUESTION_LIBRARY: Record<string, QuizQuestion[]> = {
       id: 'lib-c3-3',
       subject: 'chemistry',
       topicCode: 'C3',
-      question: 'Calculate the relative formula mass (Mr) of calcium nitrate, Ca(NO₃)₂. (Relative atomic masses: Ca = 40, N = 14, O = 16)',
+      question: 'Deduce the correct ionic formula of the compound formed between aluminium ions (Al³⁺) and sulfate ions (SO₄²⁻).',
       options: [
-        '164',
-        '102',
-        '150',
-        '204'
+        'Al₂(SO₄)₃',
+        'AlSO₄',
+        'Al₃(SO₄)₂',
+        'Al(SO₄)₃'
       ],
       correctIndex: 0,
-      explanation: 'Mr = 40 + 2 × [14 + (3 × 16)] = 40 + 2 × [14 + 48] = 40 + 2 × 62 = 40 + 124 = 164.',
+      explanation: 'Total positive and negative charges must balance to zero: 2 × (+3) + 3 × (-2) = +6 - 6 = 0, giving the formula Al₂(SO₄)₃.',
       syllabusRef: 'C3.1'
     }
   ],
@@ -1095,7 +1095,7 @@ export const TOPIC_QUESTION_LIBRARY: Record<string, QuizQuestion[]> = {
         'It binds irreversibly to haemoglobin in red blood cells, preventing normal oxygen transport to vital organs',
         'It dissolves in cloud droplets to form concentrated sulfuric acid rain',
         'It depletes the stratospheric ozone layer over polar regions',
-        'It causes rapid eutrophication in freshwater lakes and rivers'
+        'It turns limewater milky when bubbled through water at room temperature'
       ],
       correctIndex: 0,
       explanation: 'Carbon monoxide forms carboxyhaemoglobin with higher affinity than oxygen, depriving the brain and heart of essential oxygen (toxic asphyxiant).',
@@ -1328,7 +1328,7 @@ export const TOPIC_QUESTION_LIBRARY: Record<string, QuizQuestion[]> = {
       options: [
         'The ray slows down and bends towards the normal because glass has a higher optical density than air',
         'The ray speeds up and bends away from the normal',
-        'The ray reflects totally because 45° exceeds the critical angle of air',
+        'The ray splits into two rays moving at different speeds in air',
         'The ray continues straight through without any change in direction or speed'
       ],
       correctIndex: 0,
@@ -1416,37 +1416,37 @@ export const TOPIC_QUESTION_LIBRARY: Record<string, QuizQuestion[]> = {
     }
   ],
 
-  // P5 Nuclear & Space Physics
+  // P5 Space Physics
   'P5': [
     {
       id: 'lib-p5-1',
       subject: 'physics',
       topicCode: 'P5',
-      question: 'Compare the penetrating power and ionising capability of alpha (α), beta (β), and gamma (γ) radiation.',
+      question: 'Which statement correctly defines one light-year and gives its approximate value in metres?',
       options: [
-        'Alpha is most ionising and stopped by paper; beta has moderate penetration stopped by aluminium; gamma is most penetrating stopped by thick lead',
-        'Gamma is most ionising and stopped by paper; alpha penetrates thick lead easily',
-        'Beta is a helium nucleus with highest mass; alpha is a fast electron',
-        'All three types have identical penetrating ability in air'
+        'The distance travelled by light in a vacuum in one Earth year (≈ 9.5 × 10¹⁵ m)',
+        'The time taken for light from the Sun to reach Neptune (≈ 4.2 hours)',
+        'The average distance between the Earth and the Moon',
+        'The speed of light in a vacuum multiplied by 100 seconds'
       ],
       correctIndex: 0,
-      explanation: 'Alpha (He nucleus) has charge +2 and large mass: high ionising, low penetration (paper). Beta (fast electron): moderate. Gamma (EM wave): low ionising, high penetration (requires dense lead).',
-      syllabusRef: 'P5.1'
+      explanation: 'A light-year is a unit of distance (not time), equal to the distance light travels in one year at 3.0 × 10⁸ m/s (≈ 9.5 × 10¹⁵ m).',
+      syllabusRef: 'P5.2.1'
     },
     {
       id: 'lib-p5-2',
       subject: 'physics',
       topicCode: 'P5',
-      question: 'A radioactive isotope sample has an initial activity of 800 counts/minute. The half-life is 6.0 hours. What will the activity be after 18 hours?',
+      question: 'What happens at the end of the life cycle of a massive star (much larger than our Sun) after the red supergiant stage?',
       options: [
-        '100 counts/minute',
-        '200 counts/minute',
-        '50 counts/minute',
-        '267 counts/minute'
+        'It explodes as a supernova, leaving behind a neutron star or a black hole',
+        'It cools gently into a rocky terrestrial planet like Mars',
+        'It shrinks directly into a protostar inside a planetary nebula',
+        'It fuses helium back into solid iron inside a comet'
       ],
       correctIndex: 0,
-      explanation: 'Number of half-lives elapsed = 18 hours / 6.0 hours = 3 half-lives. 800 -> 400 (after 1st) -> 200 (after 2nd) -> 100 counts/min (after 3rd).',
-      syllabusRef: 'P5.1'
+      explanation: 'Massive stars evolve from red supergiant to a catastrophic supernova explosion, leaving an ultra-dense neutron star or a black hole.',
+      syllabusRef: 'P5.2.2'
     },
     {
       id: 'lib-p5-3',
@@ -1461,7 +1461,7 @@ export const TOPIC_QUESTION_LIBRARY: Record<string, QuizQuestion[]> = {
       ],
       correctIndex: 0,
       explanation: 'Planets in order from Sun: Mercury, Venus, Earth, Mars (rocky inner planets), Jupiter, Saturn, Uranus, Neptune (gas/ice giants).',
-      syllabusRef: 'P5.2.1'
+      syllabusRef: 'P5.1.1'
     }
   ]
 };
@@ -1597,24 +1597,53 @@ export function generateParametricQuestion(topicCode: string, subtopicCode: stri
     };
   }
 
-  // 6. Physics Half-Life (P5)
+  // 6. Physics Space Physics: Orbital Speed & Light Travel Time (P5)
   if (topicCode === 'P5' || code.startsWith('P5')) {
-    const halfLife = 4 + (seed % 4) * 2;
-    const n = 3;
-    const totalTime = halfLife * n;
-    const initialActivity = 800;
-    const finalActivity = initialActivity / Math.pow(2, n);
-    const correct = `${finalActivity} Bq`;
-    return {
-      id: `param-p5-${seed}`,
-      subject: 'physics',
-      topicCode: 'P5',
-      question: `A radioactive source has an initial activity of ${initialActivity} Bq and a half-life of ${halfLife} hours. What will its activity be after ${totalTime} hours?`,
-      options: [correct, `${finalActivity * 2} Bq`, `${finalActivity / 2} Bq`, `${initialActivity / 3} Bq`],
-      correctIndex: 0,
-      explanation: `Number of half-lives elapsed = ${totalTime} ÷ ${halfLife} = ${n} half-lives. Activity halves ${n} times: ${initialActivity} → ${initialActivity / 2} → ${initialActivity / 4} → ${finalActivity} Bq.`,
-      syllabusRef: code
-    };
+    if (seed % 2 === 0) {
+      const radiiKm = [7000, 8400, 10500, 14000, 21000, 42000];
+      const periodsS = [5600, 7200, 9000, 12000, 18000, 28000];
+      const rKm = radiiKm[seed % radiiKm.length];
+      const T = periodsS[(seed + 1) % periodsS.length];
+      const rMeters = rKm * 1000;
+      const v = Number(((2 * Math.PI * rMeters) / T).toFixed(0));
+      const correct = `${v} m/s`;
+      return {
+        id: `param-p5-orbit-${seed}`,
+        subject: 'physics',
+        topicCode: 'P5',
+        question: `An artificial satellite moves in a circular orbit of average radius ${rKm.toLocaleString()} km (${rMeters.toExponential(1)} m) around a planet with an orbital period of ${T.toLocaleString()} s. Using v = 2πr / T, what is its orbital speed?`,
+        options: [
+          correct,
+          `${Math.round(rMeters / T)} m/s`,
+          `${Math.round(v * 2)} m/s`,
+          `${Math.max(10, Math.round(v / 2))} m/s`
+        ],
+        correctIndex: 0,
+        explanation: `Using orbital speed v = 2πr / T: v = (2 × π × ${rMeters.toLocaleString()} m) ÷ ${T.toLocaleString()} s ≈ ${v} m/s.`,
+        syllabusRef: 'P5.2.1'
+      };
+    } else {
+      const timeSec = [180, 300, 500, 750, 900, 1200][seed % 6];
+      const distanceKm = (3.0e5 * timeSec); // c = 3.0e8 m/s = 3.0e5 km/s
+      const distanceM = distanceKm * 1000;
+      const expStr = distanceM.toExponential(2);
+      const correct = `${timeSec} s`;
+      return {
+        id: `param-p5-light-${seed}`,
+        subject: 'physics',
+        topicCode: 'P5',
+        question: `Light travels through the vacuum of space at 3.0 × 10⁸ m/s. How long does it take light from the Sun to reach a spacecraft orbiting at a distance of ${expStr} m?`,
+        options: [
+          correct,
+          `${timeSec * 2} s`,
+          `${Math.round(timeSec / 2)} s`,
+          `${(timeSec / 60).toFixed(1)} s`
+        ],
+        correctIndex: 0,
+        explanation: `Time t = distance ÷ speed = (${expStr} m) ÷ (3.0 × 10⁸ m/s) = ${timeSec} s.`,
+        syllabusRef: 'P5.2.1'
+      };
+    }
   }
 
   return null;

@@ -262,10 +262,10 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
   ];
 
   const LOOT_PALETTE = [
-    { id: 'shield_cell', name: 'Shield Battery', icon: '🛡️', type: 'shield_cell' },
-    { id: 'ammo_box', name: 'Heavy Ammo Crate', icon: '📦', type: 'ammo_box' },
-    { id: 'speed_flask', name: 'Speed Stim Flask', icon: '⚡', type: 'speed_flask' },
-    { id: 'banana', name: 'Health Fruit', icon: '🍌', type: 'banana' }
+    { id: 'shield_cell', name: 'Shield Battery (+30 🛡️)', icon: '🛡️', type: 'shield_cell', grantShield: 30 },
+    { id: 'ammo_box', name: 'Materials Supply Box (+15🪵 +10🧱 +5⚙️)', icon: '📦', type: 'ammo_box', grantMats: { wood: 15, brick: 10, metal: 5 } },
+    { id: 'speed_flask', name: 'Speed Stim Flask (+15HP/+15🛡️/⚡SPD)', icon: '⚡', type: 'speed_flask', healHp: 15, grantShield: 15 },
+    { id: 'banana', name: 'Heal Banana (+25 HP)', icon: '🍌', type: 'banana', healHp: 25 }
   ];
 
   // --------------------------------------------------------------------------
@@ -801,7 +801,10 @@ export const MapDesignEditor: React.FC<MapDesignEditorProps> = ({
           y: tileCenterY,
           type: lDef.type,
           name: lDef.name,
-          spriteKey: lDef.type,
+          spriteKey: `loot_${lDef.type}`,
+          ...(lDef.healHp !== undefined ? { healHp: lDef.healHp } : {}),
+          ...(lDef.grantShield !== undefined ? { grantShield: lDef.grantShield } : {}),
+          ...(lDef.grantMats !== undefined ? { grantMats: lDef.grantMats } : {}),
           isCollected: false
         };
         setGroundLoot(prev => [...prev, newLoot]);

@@ -337,6 +337,8 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
             const isOverdue = task.isOverdue && !isCompleted;
             const diffDays = Math.ceil((dueDateObj.getTime() - now) / (1000 * 60 * 60 * 24));
             const reqLen = task.requiredQuizLength || submission.requiredQuizLength || 10;
+            const needsSlidesAndTL = task.requireSlidesAndTrafficLight !== false || task.type === 'both' || task.type === 'slides_traffic_light';
+            const needsPracticeQuiz = task.type === 'both' || task.type === 'practice_quiz' || task.type === 'exam_paper';
 
             return (
               <div
@@ -424,38 +426,42 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
                         {isCompleted ? 'All Complete' : submission.slidesCompleted || submission.trafficLightQuizCompleted || submission.practiceQuizScore !== undefined ? 'In Progress' : 'Not Started'}
                       </span>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-                      <div className={`p-2 rounded-xl border flex items-center justify-between ${
-                        submission.slidesCompleted
-                          ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
-                          : 'bg-slate-900 border-slate-800 text-slate-300'
-                      }`}>
-                        <span className="font-semibold truncate">1. All Slides</span>
-                        <span className="text-[11px] font-mono font-bold shrink-0">
-                          {submission.slidesCompleted ? '✓ Read' : submission.slidesTotalCount ? `${submission.slidesReadCount || 0}/${submission.slidesTotalCount}` : 'Pending'}
-                        </span>
-                      </div>
+                    <div className={`grid grid-cols-1 ${needsSlidesAndTL && needsPracticeQuiz ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-2 text-xs`}>
+                      {needsSlidesAndTL && (
+                        <>
+                          <div className={`p-2 rounded-xl border flex items-center justify-between ${
+                            submission.slidesCompleted
+                              ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                              : 'bg-slate-900 border-slate-800 text-slate-300'
+                          }`}>
+                            <span className="font-semibold truncate">1. All Slides</span>
+                            <span className="text-[11px] font-mono font-bold shrink-0">
+                              {submission.slidesCompleted ? '✓ Read' : submission.slidesTotalCount ? `${submission.slidesReadCount || 0}/${submission.slidesTotalCount}` : 'Pending'}
+                            </span>
+                          </div>
 
-                      <div className={`p-2 rounded-xl border flex items-center justify-between ${
-                        submission.trafficLightQuizCompleted
-                          ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
-                          : 'bg-slate-900 border-slate-800 text-slate-300'
-                      }`}>
-                        <span className="font-semibold truncate">2. TL Quiz</span>
-                        <span className="text-[11px] font-mono font-bold shrink-0">
-                          {submission.trafficLightQuizCompleted && submission.trafficLightQuizScore !== undefined
-                            ? `${submission.trafficLightQuizScore}%`
-                            : 'Pending'}
-                        </span>
-                      </div>
+                          <div className={`p-2 rounded-xl border flex items-center justify-between ${
+                            submission.trafficLightQuizCompleted
+                              ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                              : 'bg-slate-900 border-slate-800 text-slate-300'
+                          }`}>
+                            <span className="font-semibold truncate">2. TL Quiz</span>
+                            <span className="text-[11px] font-mono font-bold shrink-0">
+                              {submission.trafficLightQuizCompleted && submission.trafficLightQuizScore !== undefined
+                                ? `${submission.trafficLightQuizScore}%`
+                                : 'Pending'}
+                            </span>
+                          </div>
+                        </>
+                      )}
 
-                      {(task.type === 'both' || task.type === 'practice_quiz' || task.type === 'exam_paper') && (
+                      {needsPracticeQuiz && (
                         <div className={`p-2 rounded-xl border flex items-center justify-between ${
                           submission.practiceQuizScore !== undefined
                             ? 'bg-sky-950/40 border-sky-500/40 text-sky-300'
                             : 'bg-slate-900 border-slate-800 text-slate-300'
                         }`}>
-                          <span className="font-semibold truncate">3. Quiz ({reqLen}Q)</span>
+                          <span className="font-semibold truncate">{needsSlidesAndTL ? '3.' : '1.'} Quiz ({reqLen}Q)</span>
                           <span className="text-[11px] font-bold text-sky-400 shrink-0">
                             {submission.practiceQuizScore !== undefined ? `${submission.practiceQuizScore}%` : `Need ${reqLen}Q`}
                           </span>

@@ -47,7 +47,7 @@ export const ALL_SYLLABUS_TOPICS: SyllabusTopicOption[] = [
   { code: 'P2', subject: 'physics', title: 'Thermal Physics', keyConcepts: 'Conduction, convection, radiation, thermal expansion, evaporation' },
   { code: 'P3', subject: 'physics', title: 'Waves, Light & Sound', keyConcepts: 'v=fλ, reflection, refraction, lenses, EM spectrum, sound echoes' },
   { code: 'P4', subject: 'physics', title: 'Electricity & Magnetism', keyConcepts: 'Charge Q=It, Ohm’s Law V=IR, series vs parallel, power P=IV' },
-  { code: 'P5', subject: 'physics', title: 'Nuclear & Space Physics', keyConcepts: 'Solar system, orbital speed, star life cycle, nuclear fusion' }
+  { code: 'P5', subject: 'physics', title: 'Space Physics', keyConcepts: 'Solar system, orbital speed, star life cycle, nuclear fusion, redshift' }
 ];
 
 import { allSubtopicsData } from '../data/subtopicSlidesData';
@@ -710,7 +710,7 @@ function createQuestionTemplate(
         question: 'Which process powers the Sun and releases vast amounts of energy in stellar cores?',
         options: [
           'Nuclear fusion of hydrogen nuclei into helium nuclei under extreme temperature and pressure',
-          'Nuclear fission of uranium atoms splitting into smaller daughter nuclei',
+          'Thermal convection of solid iron slabs melting in the corona',
           'Exothermic combustion of hydrogen gas reacting with oxygen',
           'Gravitational collapse with friction between solar dust'
         ],

@@ -16,7 +16,7 @@ import { isValidQuizQuestion } from './quizSanitizer';
  * - NO monohybrid crosses, Punnett squares, or genetics (excluded in Cambridge 0653).
  * - NO mole calculations from mass/concentration in C3 (excluded in Cambridge 0653).
  * - Formulas tested: M = I / A, v = d / t, a = (v - u) / t, W = mg (g = 9.8 N/kg),
- *   ρ = m / V, F = ma, v = fλ, V = IR, P = IV, and radioactive half-life steps.
+ *   ρ = m / V, F = ma, v = fλ, V = IR, P = IV, and orbital speed v = 2πr / T.
  * - Every question must have 4 distinct plausible options, realistic distractors, and syllabus explanations.
  */
 

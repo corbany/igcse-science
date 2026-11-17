@@ -198,16 +198,16 @@ export const march2026Paper12Core: PastExamPaper = {
     {
       id: 'm26-12-q11',
       number: 11,
-      questionText: 'What gas is produced during vigorous anaerobic respiration in human muscle cells that causes muscle fatigue?',
+      questionText: 'Which word equation correctly summarises aerobic respiration in living cells?',
       options: [
-        { key: 'A', text: 'carbon dioxide' },
-        { key: 'B', text: 'lactic acid (lactate)' },
-        { key: 'C', text: 'methane' },
-        { key: 'D', text: 'oxygen' }
+        { key: 'A', text: 'carbon dioxide + water → glucose + oxygen' },
+        { key: 'B', text: 'glucose + oxygen → carbon dioxide + water' },
+        { key: 'C', text: 'glucose + carbon dioxide → oxygen + water' },
+        { key: 'D', text: 'oxygen + water → glucose + carbon dioxide' }
       ],
       correctAnswer: 'B',
       marks: 1,
-      explanation: 'In human muscles, anaerobic respiration breaks down glucose without oxygen: glucose → lactic acid. Lactic acid builds up, causing fatigue and an oxygen debt.',
+      explanation: 'Aerobic respiration is the chemical reaction in cells that uses oxygen to break down nutrient molecules (glucose) to release energy, producing carbon dioxide and water.',
       subject: 'biology',
       syllabusCode: 'B12.1',
       questionType: 'mcq'

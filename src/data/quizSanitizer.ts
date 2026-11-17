@@ -1,7 +1,9 @@
 import { QuizQuestion } from '../types';
 
 const GENETICS_REGEX = /\b(monohybrid|punnett|allele|alleles|heterozygous|homozygous|genotypes?|phenotypes?|codominan\w*|pedigree (chart|diagram)|karyotype|dihybrid|mendel\w*|inheritance|inherited traits?|gene pool|genetic variation|genetic engineering|genetic disorder|genetic cross)\b/i;
-const MOLE_CALC_REGEX = /\b(molar mass|avogadro|dm3 of gas at rtp|mol\/dm3|number of moles|how many moles|calculate.*moles?)\b/i;
+const MOLE_CALC_REGEX = /\b(molar mass|avogadro|dm3 of gas at rtp|mol\/dm3|number of moles|how many moles|calculate.*moles?|(calculate|find|what is).{0,25}relative (formula|molecular|atomic) mass)\b/i;
+const ISOTOPE_AND_RADIOACTIVITY_REGEX = /\b(isotop\w*|radioisotop\w*|radioactiv\w*|half[- ]?life|alpha[- ]?(particle|decay|radiation|rays?)|beta[- ]?(particle|decay|radiation|rays?)|(alpha|beta)\s*(?:,|and|or)\s*gamma|geiger|becquerel|background radiation|nuclear fission|fission reactor|uranium|plutonium|radon|carbon-14|cobalt-60|iodine-131)\b/i;
+const OUT_OF_0653_PHYSICS_CHEM_BIO_REGEX = /\b(snell'?s law|critical angle|total internal reflection|sin\s*\(?i\)?\s*\/\s*sin\s*\(?r\)?|sin\s*c\s*=|fleming'?s|step[- ]up transformer|step[- ]down transformer|solenoid electromagnet|anaerobic respiration|lactic acid|oxygen debt|haber process|eutrophication|algal bloom)\b/i;
 
 const NONSENSE_PATTERNS: RegExp[] = [
   /specifically describes/i,
@@ -104,10 +106,12 @@ export function isValidQuizQuestion(q: QuizQuestion | null | undefined): boolean
     }
   }
 
-  // Enforce Cambridge 0653 syllabus exclusions (no genetics / Punnett squares, no mole concentration math)
+  // Enforce Cambridge 0653 syllabus exclusions (no isotopes, radioactivity/half-life, genetics, mole/Mr math, Snell's law/TIR, etc.)
   const fullText = `${combined} ${q.explanation || ''}`;
   if (GENETICS_REGEX.test(fullText)) return false;
   if (MOLE_CALC_REGEX.test(combined)) return false;
+  if (ISOTOPE_AND_RADIOACTIVITY_REGEX.test(fullText)) return false;
+  if (OUT_OF_0653_PHYSICS_CHEM_BIO_REGEX.test(fullText)) return false;
 
   return true;
 }

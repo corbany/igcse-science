@@ -29,6 +29,7 @@ import {
   ClassStudentItem,
   evaluateTaskProgressForStudent,
   fetchTaskSubmissions,
+  reconcileTaskSubmission,
   subscribeToClassStudents,
   subscribeToClassTasks
 } from '../services/firestoreService';
@@ -200,7 +201,7 @@ export const TaskAnalyticsPage: React.FC<TaskAnalyticsPageProps> = ({
     try {
       const entries = await Promise.all(
         tasks.map(async (task) => {
-          const subs = await fetchTaskSubmissions(task.id, activeClass.id);
+          const subs = await fetchTaskSubmissions(task.id, activeClass.id, task);
           const map: Record<string, TaskSubmission> = {};
           subs.forEach((s) => {
             if (s && s.studentId) {
@@ -270,15 +271,7 @@ export const TaskAnalyticsPage: React.FC<TaskAnalyticsPageProps> = ({
 
         if (progressSnap) {
           const evaluated = evaluateTaskProgressForStudent(task, profileStub, progressSnap, existingSub);
-          if (existingSub?.status === 'completed') {
-            effectiveSub = {
-              ...evaluated,
-              ...existingSub,
-              status: 'completed'
-            };
-          } else {
-            effectiveSub = evaluated;
-          }
+          effectiveSub = reconcileTaskSubmission(evaluated, existingSub);
         }
 
         const rawStatus = effectiveSub?.status || 'not_started';
@@ -1417,6 +1410,10 @@ export const TaskAnalyticsPage: React.FC<TaskAnalyticsPageProps> = ({
               const sub = selectedCellModal.cell.submission;
               const status = selectedCellModal.cell.status;
               const reqLen = selectedCellModal.task.requiredQuizLength || 10;
+              const needsSlidesAndTL =
+                selectedCellModal.task.requireSlidesAndTrafficLight !== false ||
+                selectedCellModal.task.type === 'both' ||
+                selectedCellModal.task.type === 'slides_traffic_light';
               const needsPractice =
                 selectedCellModal.task.type === 'both' ||
                 selectedCellModal.task.type === 'practice_quiz' ||
@@ -1453,40 +1450,44 @@ export const TaskAnalyticsPage: React.FC<TaskAnalyticsPageProps> = ({
                   </div>
 
                   {/* Step 1: Lesson Slides */}
-                  <div className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-zinc-800">
-                    <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200 font-medium">
-                      <BookOpen className="w-4 h-4 text-slate-500" />
-                      <span>Assigned Lesson Slides</span>
+                  {needsSlidesAndTL && (
+                    <div className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-zinc-800">
+                      <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200 font-medium">
+                        <BookOpen className="w-4 h-4 text-slate-500" />
+                        <span>Assigned Lesson Slides</span>
+                      </div>
+                      <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">
+                        {sub?.slidesCompleted
+                          ? 'All slides read'
+                          : sub?.slidesTotalCount && sub.slidesTotalCount > 0
+                            ? `${sub.slidesReadCount || 0} / ${sub.slidesTotalCount} slides`
+                            : 'Pending'}
+                      </span>
                     </div>
-                    <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">
-                      {sub?.slidesCompleted
-                        ? 'All slides read'
-                        : sub?.slidesTotalCount && sub.slidesTotalCount > 0
-                          ? `${sub.slidesReadCount || 0} / ${sub.slidesTotalCount} slides`
-                          : 'Pending'}
-                    </span>
-                  </div>
+                  )}
 
                   {/* Step 2: Traffic Light Quiz */}
-                  <div className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-zinc-800">
-                    <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200 font-medium">
-                      <Layers className="w-4 h-4 text-slate-500" />
-                      <span>Traffic Light Mastery Quiz</span>
+                  {needsSlidesAndTL && (
+                    <div className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-zinc-800">
+                      <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200 font-medium">
+                        <Layers className="w-4 h-4 text-slate-500" />
+                        <span>Traffic Light Mastery Quiz</span>
+                      </div>
+                      <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">
+                        {sub?.trafficLightQuizCompleted || sub?.trafficLightQuizScore !== undefined
+                          ? `${sub.trafficLightQuizScore ?? '—'}% (${
+                              sub.trafficLight === 'green'
+                                ? 'Green'
+                                : sub.trafficLight === 'orange'
+                                  ? 'Amber'
+                                  : sub.trafficLight === 'red'
+                                    ? 'Red'
+                                    : 'Recorded'
+                            })`
+                          : 'Pending'}
+                      </span>
                     </div>
-                    <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">
-                      {sub?.trafficLightQuizCompleted || sub?.trafficLightQuizScore !== undefined
-                        ? `${sub.trafficLightQuizScore ?? '—'}% (${
-                            sub.trafficLight === 'green'
-                              ? 'Green'
-                              : sub.trafficLight === 'orange'
-                                ? 'Amber'
-                                : sub.trafficLight === 'red'
-                                  ? 'Red'
-                                  : 'Recorded'
-                          })`
-                        : 'Pending'}
-                    </span>
-                  </div>
+                  )}
 
                   {/* Step 3: Exact-Length Practice Quiz */}
                   {needsPractice && (

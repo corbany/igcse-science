@@ -90,10 +90,27 @@ import {
   onSnapshot, 
   increment,
   getDocs,
-  writeBatch
+  writeBatch,
+  runTransaction
 } from 'firebase/firestore';
 import { db, auth } from './firebaseAuth';
 import { getFantasySkin } from '../data/fantasySkinsData';
+import { notifyServerBattleControl } from './battleRealtimeClient';
+import { getRandomizedPracticeVaultQuestions } from '../data/syllabusQuestionsBank';
+
+export type InstructorRewardType = 'booster_pack' | 'gold' | 'skin' | 'weapon';
+
+export interface InstructorRewardRecord {
+  id: string;
+  rewardType: InstructorRewardType;
+  itemId?: string;
+  itemName: string;
+  quantity: number;
+  note?: string;
+  awardedBy: string;
+  awardedByEmail?: string;
+  awardedAt: string;
+}
 
 export interface UserGameProfile {
   uid: string;
@@ -110,6 +127,8 @@ export interface UserGameProfile {
   equippedPower: string;
   inventory: string[];
   unlockedSkins?: string[];
+  giftedPacks?: Record<string, number>;
+  rewardHistory?: InstructorRewardRecord[];
   monthlyCrown?: boolean;
 }
 
@@ -196,6 +215,7 @@ export interface ArenaPlayer {
   metalShieldActiveUntil?: number;
   brittleGuardUsedAt?: number;
   royalAbsorptionUsedAt?: number;
+  frostSlowUntil?: number;
 }
 
 export interface ArenaStructure {
@@ -512,7 +532,7 @@ export const SHOP_ITEMS: ShopItem[] = [
     name: 'Cryogenic Frost Ray',
     category: 'weapon',
     rarity: 'rare',
-    description: 'Sub-zero liquid nitrogen emitter. Pierces air with frosty beams that slow enemy movement by 35%.',
+    description: 'Sub-zero liquid nitrogen emitter. Fires frosty beams that chill and slow enemy movement by 35% for 3.5s.',
     price: 180,
     icon: '❄️',
     stats: {
@@ -521,13 +541,13 @@ export const SHOP_ITEMS: ShopItem[] = [
       cooldownSeconds: 0.45,
       range: 460,
       beamColor: '#06b6d4',
-      specialEffect: 'Cryo Frost Chill',
+      specialEffect: 'Cryo Frost Chill (-35% Speed 3.5s)',
       altFire: {
         altName: 'Glacial Freeze Blast',
         altCooldownSeconds: 4.5,
         altDamage: 45,
         altType: 'freeze_blast',
-        altDescription: 'Shoots a heavy ice crystal that shatters on impact into high-damage frost spikes.'
+        altDescription: 'Shoots a spread of icy crystals that shatter on impact and slow enemies by 35% for 3.5s.'
       }
     }
   },
@@ -538,7 +558,7 @@ export const SHOP_ITEMS: ShopItem[] = [
     name: 'Prismatic Laser Cannon',
     category: 'weapon',
     rarity: 'rare',
-    description: 'Coherent Ruby photon beam. Extreme range and surgical accuracy with high single-shot impact.',
+    description: 'Coherent Ruby photon beam. Extreme range and piercing photons that penetrate through enemies to hit targets behind them.',
     price: 220,
     icon: '🔦',
     stats: {
@@ -547,13 +567,13 @@ export const SHOP_ITEMS: ShopItem[] = [
       cooldownSeconds: 0.55,
       range: 640,
       beamColor: '#ef4444',
-      specialEffect: 'Photon Precision',
+      specialEffect: 'Piercing Photon Beam',
       altFire: {
         altName: 'Prismatic Tri-Splitter',
         altCooldownSeconds: 4.0,
         altDamage: 32,
         altType: 'spread_beam',
-        altDescription: 'Splits ruby beam through optical crystal to fire 3 spread lasers across a 40° fan.'
+        altDescription: 'Splits ruby beam through optical crystal to fire 3 enemy-piercing lasers across a 40° fan.'
       }
     }
   },
@@ -841,6 +861,44 @@ export const CRATE_SCIENCE_QUESTIONS: ScienceQuestion[] = [
   }
 ];
 
+export const LEVEL_UP_GOLD_REWARD = 50;
+export const MAX_PRACTICE_QUIZ_QUESTIONS = 40;
+export const MAX_PRACTICE_QUIZ_GOLD = 200;
+
+/**
+ * Calculates Gold earned for completing a Practice Quiz or Traffic Light Quiz.
+ * Gold scales up monotonically with the number of questions completed,
+ * with a maximum of 200 Gold for a 40-question quiz.
+ */
+export const calculateQuizGoldReward = (totalQuestions: number, score?: number): number => {
+  const safeTotal = Math.max(0, Math.min(MAX_PRACTICE_QUIZ_QUESTIONS, Math.round(totalQuestions || 0)));
+  if (safeTotal <= 0) return 0;
+
+  const maxGoldForLength = Math.min(
+    MAX_PRACTICE_QUIZ_GOLD,
+    Math.round((safeTotal / MAX_PRACTICE_QUIZ_QUESTIONS) * MAX_PRACTICE_QUIZ_GOLD)
+  );
+
+  if (typeof score === 'number' && !isNaN(score)) {
+    const safeScore = Math.max(0, Math.min(safeTotal, score));
+    const accuracy = safeScore / safeTotal;
+    // 75% completion base + 25% accuracy bonus so larger quizzes always earn more up to 200 Gold at 40 Qs
+    const weighted = Math.round(maxGoldForLength * (0.75 + 0.25 * accuracy));
+    return Math.max(1, Math.min(MAX_PRACTICE_QUIZ_GOLD, Math.min(maxGoldForLength, weighted)));
+  }
+
+  return Math.max(1, maxGoldForLength);
+};
+
+/**
+ * Calculates XP earned alongside a completed Practice Quiz or Traffic Light Quiz.
+ */
+export const calculateQuizXPReward = (totalQuestions: number, score?: number): number => {
+  const goldEarned = calculateQuizGoldReward(totalQuestions, score);
+  if (goldEarned <= 0) return 0;
+  return Math.max(10, Math.round(goldEarned * 0.5));
+};
+
 // Helper to calculate student level from XP
 export const calculateLevelFromXP = (xp: number = 0): { level: number; currentLevelXp: number; nextLevelXp: number; progressPct: number } => {
   const safeXp = Math.max(0, xp);
@@ -864,16 +922,25 @@ export const LOCAL_ARENA_PLAYERS_KEY = 'igcse_battle_players_fallback';
 export const LOCAL_STRUCTURES_KEY = 'igcse_battle_structures_fallback';
 export const LOCAL_CRATES_KEY = 'igcse_battle_crates_fallback';
 
+const memoryGameCache = new Map<string, any>();
+const pendingPersistTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 export function getLocalGameItem<T>(key: string, defaultVal: T): T {
+  if (memoryGameCache.has(key)) {
+    return memoryGameCache.get(key) as T;
+  }
   try {
     const raw = typeof window !== 'undefined' ? localStorage.getItem(key) : null;
-    return raw ? JSON.parse(raw) : defaultVal;
+    const parsed = raw ? JSON.parse(raw) : defaultVal;
+    memoryGameCache.set(key, parsed);
+    return parsed;
   } catch {
     return defaultVal;
   }
 }
 
 export function setLocalGameItem(key: string, value: any): void {
+  memoryGameCache.set(key, value);
   try {
     if (typeof window !== 'undefined') {
       localStorage.setItem(key, JSON.stringify(value));
@@ -883,14 +950,41 @@ export function setLocalGameItem(key: string, value: any): void {
   }
 }
 
+/**
+ * Updates fast in-memory cache immediately and debounces expensive JSON.stringify
+ * localStorage writes so high-frequency 30-player Firestore snapshots never freeze the UI thread.
+ */
+export function scheduleLocalGameItem(key: string, value: any, delayMs: number = 2500): void {
+  memoryGameCache.set(key, value);
+  if (typeof window === 'undefined') return;
+  if (pendingPersistTimers.has(key)) return;
+  const timer = setTimeout(() => {
+    pendingPersistTimers.delete(key);
+    try {
+      const latest = memoryGameCache.get(key);
+      if (latest !== undefined) {
+        localStorage.setItem(key, JSON.stringify(latest));
+      }
+    } catch {
+      // ignore storage quota errors
+    }
+  }, delayMs);
+  pendingPersistTimers.set(key, timer);
+}
+
 let isFirestoreQuotaExhausted = false;
 let quotaExhaustedTimestamp = 0;
-const QUOTA_BACKOFF_MS = 60000; // 60s cooldown
+const QUOTA_BACKOFF_MS = 20000; // 20s cooldown for noisy position updates only
+
+export const resetFirestoreQuotaState = (): void => {
+  isFirestoreQuotaExhausted = false;
+  quotaExhaustedTimestamp = 0;
+};
 
 export const handleFirestoreError = (err: any, context?: string): void => {
   if (err?.code === 'resource-exhausted' || (err?.message && err.message.toLowerCase().includes('quota exceeded'))) {
     if (!isFirestoreQuotaExhausted) {
-      console.warn(`[Firestore Quota Exceeded] ${context || 'Listener'}: Switching seamlessly to local offline fallback mode.`);
+      console.warn(`[Firestore Quota Exceeded] ${context || 'Listener'}: Throttling non-critical position syncs briefly.`);
     }
     isFirestoreQuotaExhausted = true;
     quotaExhaustedTimestamp = Date.now();
@@ -908,6 +1002,19 @@ export const canPerformFirestoreWrite = (): boolean => {
   return false;
 };
 
+export const ALL_FANTASY_SKIN_IDS = [
+  'cultist', 'skeleton_warrior', 'goblin', 'slime', 'archer_hero', 'rogue',
+  'necromancer', 'discoverer', 'bat', 'white_mage', 'paladin', 'dark_knight',
+  'warlock', 'elitearcher', 'knight_hero', 'dragon_slayer', 'shadow_assassin',
+  'slime_king', 'overlord'
+];
+
+export const ALL_CANONICAL_WEAPON_IDS = [
+  'wpn_starter_blaster', 'bunsen_burner', 'acid_pipette', 'wpn_heavy_cannon',
+  'wpn_rapid_repeater', 'wpn_sniper_railgun', 'wpn_freezer_lance', 'wpn_solar_disintegrator',
+  'quantum_displacer', 'wpn_antimatter_rifle'
+];
+
 const DEFAULT_GAME_PROFILE: UserGameProfile = {
   uid: '',
   level: 1,
@@ -922,7 +1029,116 @@ const DEFAULT_GAME_PROFILE: UserGameProfile = {
   equippedPower: 'element_shield',
   inventory: ['cultist', 'wpn_starter_blaster', 'bunsen_burner', 'element_shield'],
   unlockedSkins: ['cultist'],
+  giftedPacks: {},
+  rewardHistory: [],
   monthlyCrown: false
+};
+
+export const normalizeUserGameProfile = (
+  uid: string,
+  data?: Record<string, any> | null
+): UserGameProfile => {
+  if (!data) {
+    return { ...DEFAULT_GAME_PROFILE, uid, giftedPacks: {}, rewardHistory: [] };
+  }
+
+  const xp = Number(data.xp || 0);
+  const level = Math.max(Number(data.level || 1), calculateLevelFromXP(xp).level);
+  const isInstructor = data.role === 'instructor';
+  const allPowerIds = ['element_shield', 'damage_boost', 'quantum_dash', 'matter_synthesizer'];
+
+  const inv = isInstructor
+    ? Array.from(new Set([...ALL_FANTASY_SKIN_IDS, ...ALL_CANONICAL_WEAPON_IDS, ...allPowerIds]))
+    : (Array.isArray(data.inventory) ? [...data.inventory] : [...DEFAULT_GAME_PROFILE.inventory]);
+
+  if (!inv.includes('cultist')) inv.push('cultist');
+  if (!inv.includes('wpn_starter_blaster')) inv.push('wpn_starter_blaster');
+  if (!inv.includes('bunsen_burner')) inv.push('bunsen_burner');
+
+  const skins = isInstructor
+    ? [...ALL_FANTASY_SKIN_IDS]
+    : (Array.isArray(data.unlockedSkins)
+        ? [...data.unlockedSkins]
+        : inv.filter(id => ALL_FANTASY_SKIN_IDS.includes(id)));
+
+  if (!skins.includes('cultist')) {
+    skins.unshift('cultist');
+  }
+
+  const rawPacks = data.giftedPacks && typeof data.giftedPacks === 'object' ? data.giftedPacks : {};
+  const giftedPacks: Record<string, number> = {};
+  Object.entries(rawPacks).forEach(([packId, count]) => {
+    const num = Math.max(0, Math.floor(Number(count) || 0));
+    if (num > 0) giftedPacks[packId] = num;
+  });
+
+  const rewardHistory: InstructorRewardRecord[] = Array.isArray(data.rewardHistory)
+    ? data.rewardHistory.slice(-25)
+    : [];
+
+  return {
+    uid,
+    level: isInstructor ? 99 : level,
+    xp,
+    role: data.role,
+    gold: isInstructor ? 999999 : Math.max(0, Number(data.gold ?? data.goldCoins ?? DEFAULT_GAME_PROFILE.gold)),
+    wood: isInstructor ? 9999 : Number(data.wood ?? DEFAULT_GAME_PROFILE.wood),
+    brick: isInstructor ? 9999 : Number(data.brick ?? DEFAULT_GAME_PROFILE.brick),
+    metal: isInstructor ? 9999 : Number(data.metal ?? DEFAULT_GAME_PROFILE.metal),
+    avatar: data.equippedSkin || data.avatar || DEFAULT_GAME_PROFILE.avatar,
+    equippedSkin: data.equippedSkin || data.avatar || DEFAULT_GAME_PROFILE.avatar,
+    equippedWeapon: data.equippedWeapon || DEFAULT_GAME_PROFILE.equippedWeapon,
+    equippedPower: data.equippedPower || DEFAULT_GAME_PROFILE.equippedPower,
+    inventory: inv,
+    unlockedSkins: skins,
+    giftedPacks,
+    rewardHistory,
+    monthlyCrown: isInstructor ? true : Boolean(data.monthlyCrown)
+  };
+};
+
+/**
+ * Fetch a single student's RPG profile snapshot from Firestore (/users/{uid})
+ */
+export const fetchStudentGameProfile = async (uid: string): Promise<UserGameProfile> => {
+  if (!uid) return { ...DEFAULT_GAME_PROFILE, uid: '' };
+  const localKey = `igcse_game_profile_${uid}`;
+  try {
+    const userDocRef = doc(db, 'users', uid);
+    const snap = await getDoc(userDocRef);
+    const profile = normalizeUserGameProfile(uid, snap.exists() ? snap.data() : null);
+    setLocalGameItem(localKey, profile);
+    return profile;
+  } catch (err) {
+    handleFirestoreError(err, 'fetchStudentGameProfile');
+    return getLocalGameItem<UserGameProfile>(localKey, { ...DEFAULT_GAME_PROFILE, uid });
+  }
+};
+
+/**
+ * Batch fetch RPG profiles for all students in a class (for Instructor Dashboard)
+ */
+export const fetchStudentsGameProfilesMap = async (
+  studentIds: string[]
+): Promise<Record<string, UserGameProfile>> => {
+  const uniqueIds = Array.from(new Set(studentIds.filter(Boolean)));
+  const result: Record<string, UserGameProfile> = {};
+  if (uniqueIds.length === 0) return result;
+
+  const CHUNK_SIZE = 20;
+  for (let i = 0; i < uniqueIds.length; i += CHUNK_SIZE) {
+    const chunk = uniqueIds.slice(i, i + CHUNK_SIZE);
+    const settled = await Promise.all(
+      chunk.map(async (uid) => {
+        const profile = await fetchStudentGameProfile(uid);
+        return { uid, profile };
+      })
+    );
+    settled.forEach(({ uid, profile }) => {
+      result[uid] = profile;
+    });
+  }
+  return result;
 };
 
 /**
@@ -940,70 +1156,26 @@ export const subscribeToGameProfile = (
     callback(localCached);
   }
 
+  const handleLocalProfileEvent = (e: Event) => {
+    const customEvent = e as CustomEvent<{ uid?: string; profile?: UserGameProfile }>;
+    if (customEvent.detail?.uid === uid && customEvent.detail?.profile) {
+      callback(customEvent.detail.profile);
+    } else {
+      const updatedLocal = getLocalGameItem<UserGameProfile | null>(localKey, null);
+      if (updatedLocal) callback(updatedLocal);
+    }
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('igcse_game_profile_updated', handleLocalProfileEvent);
+  }
+
+  let unsubSnapshot: () => void = () => {};
   try {
     const userDocRef = doc(db, 'users', uid);
-    return onSnapshot(userDocRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        const xp = Number(data.xp || 0);
-        const level = Number(data.level || calculateLevelFromXP(xp).level);
-        
-        const isInstructor = data.role === 'instructor';
-        const ALL_FANTASY_SKIN_IDS = [
-          'cultist', 'skeleton_warrior', 'goblin', 'slime', 'archer_hero', 'rogue',
-          'necromancer', 'discoverer', 'bat', 'white_mage', 'paladin', 'dark_knight',
-          'warlock', 'elitearcher', 'knight_hero', 'dragon_slayer', 'shadow_assassin',
-          'slime_king', 'overlord'
-        ];
-        const ALL_WEAPON_IDS = [
-          'wpn_starter_blaster', 'bunsen_burner', 'acid_pipette', 'wpn_heavy_cannon',
-          'wpn_rapid_repeater', 'wpn_sniper_railgun', 'wpn_freezer_lance', 'wpn_solar_disintegrator',
-          'wpn_quantum_rifle', 'wpn_antimatter_rifle'
-        ];
-        const allPowerIds = ['element_shield', 'damage_boost', 'quantum_dash', 'matter_synthesizer'];
-
-        const inv = isInstructor 
-          ? Array.from(new Set([...ALL_FANTASY_SKIN_IDS, ...ALL_WEAPON_IDS, ...allPowerIds]))
-          : (Array.isArray(data.inventory) ? [...data.inventory] : [...DEFAULT_GAME_PROFILE.inventory]);
-        
-        if (!inv.includes('cultist')) inv.push('cultist');
-        if (!inv.includes('wpn_starter_blaster')) inv.push('wpn_starter_blaster');
-        if (!inv.includes('bunsen_burner')) inv.push('bunsen_burner');
-
-        const skins = isInstructor 
-          ? ALL_FANTASY_SKIN_IDS 
-          : (Array.isArray(data.unlockedSkins) 
-              ? [...data.unlockedSkins] 
-              : inv.filter(id => ALL_FANTASY_SKIN_IDS.includes(id)));
-        
-        if (!skins.includes('cultist')) {
-          skins.unshift('cultist');
-        }
-
-        const profile: UserGameProfile = {
-          uid,
-          level: isInstructor ? 99 : level,
-          xp,
-          role: data.role,
-          gold: isInstructor ? 999999 : Math.max(0, Number(data.gold ?? data.goldCoins ?? DEFAULT_GAME_PROFILE.gold)),
-          wood: isInstructor ? 9999 : Number(data.wood ?? DEFAULT_GAME_PROFILE.wood),
-          brick: isInstructor ? 9999 : Number(data.brick ?? DEFAULT_GAME_PROFILE.brick),
-          metal: isInstructor ? 9999 : Number(data.metal ?? DEFAULT_GAME_PROFILE.metal),
-          avatar: data.equippedSkin || data.avatar || DEFAULT_GAME_PROFILE.avatar,
-          equippedSkin: data.equippedSkin || data.avatar || DEFAULT_GAME_PROFILE.avatar,
-          equippedWeapon: data.equippedWeapon || DEFAULT_GAME_PROFILE.equippedWeapon,
-          equippedPower: data.equippedPower || DEFAULT_GAME_PROFILE.equippedPower,
-          inventory: inv,
-          unlockedSkins: skins,
-          monthlyCrown: isInstructor ? true : Boolean(data.monthlyCrown)
-        };
-        setLocalGameItem(localKey, profile);
-        callback(profile);
-      } else {
-        const fallback = { ...DEFAULT_GAME_PROFILE, uid };
-        setLocalGameItem(localKey, fallback);
-        callback(fallback);
-      }
+    unsubSnapshot = onSnapshot(userDocRef, (snap) => {
+      const profile = normalizeUserGameProfile(uid, snap.exists() ? snap.data() : null);
+      setLocalGameItem(localKey, profile);
+      callback(profile);
     }, (err) => {
       handleFirestoreError(err, 'subscribeToGameProfile');
       const fallback = getLocalGameItem<UserGameProfile>(localKey, { ...DEFAULT_GAME_PROFILE, uid });
@@ -1013,8 +1185,14 @@ export const subscribeToGameProfile = (
     handleFirestoreError(err, 'subscribeToGameProfile');
     const fallback = getLocalGameItem<UserGameProfile>(localKey, { ...DEFAULT_GAME_PROFILE, uid });
     callback(fallback);
-    return () => {};
   }
+
+  return () => {
+    unsubSnapshot();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('igcse_game_profile_updated', handleLocalProfileEvent);
+    }
+  };
 };
 
 /**
@@ -1128,6 +1306,7 @@ export const resetAllStudentsGameProfiles = async (
         equippedWeapon: 'bunsen_burner',
         equippedPower: 'element_shield',
         inventory: ['cultist', 'bunsen_burner', 'element_shield'],
+        giftedPacks: {},
         monthlyCrown: false
       });
       count++;
@@ -1150,6 +1329,281 @@ export const resetAllStudentsGameProfiles = async (
       message: `Failed to reset student profiles: ${err?.message || 'Firestore error'}`
     };
   }
+};
+
+/**
+ * Atomically open a booster pack using either a free gifted pack or Gold coins.
+ */
+export const openBoosterPackTransaction = async (
+  uid: string,
+  options: {
+    packId: string;
+    packPrice: number;
+    useGiftedPack: boolean;
+    unlockedItemId: string;
+    unlockedItemType: 'skin' | 'weapon';
+    isInstructor?: boolean;
+  }
+): Promise<{ success: boolean; profile?: UserGameProfile; error?: string }> => {
+  if (!uid) return { success: false, error: 'Missing user ID.' };
+  const localKey = `igcse_game_profile_${uid}`;
+
+  try {
+    const userRef = doc(db, 'users', uid);
+    const updatedProfile = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(userRef);
+      const data = snap.exists() ? snap.data() : {};
+      const current = normalizeUserGameProfile(uid, data);
+
+      const giftedMap: Record<string, number> = { ...(current.giftedPacks || {}) };
+      const availableGifted = Math.max(0, Number(giftedMap[options.packId] || 0));
+
+      let nextGold = current.gold;
+      if (options.useGiftedPack) {
+        if (availableGifted <= 0) {
+          throw new Error('No gifted packs of this tier remaining.');
+        }
+        const remaining = availableGifted - 1;
+        if (remaining > 0) {
+          giftedMap[options.packId] = remaining;
+        } else {
+          delete giftedMap[options.packId];
+        }
+      } else if (!options.isInstructor) {
+        if (current.gold < options.packPrice) {
+          throw new Error(`Insufficient Gold! You need ${options.packPrice} Gold.`);
+        }
+        nextGold = Math.max(0, current.gold - options.packPrice);
+      }
+
+      const nextUnlockedSkins =
+        options.unlockedItemType === 'skin' && !(current.unlockedSkins || []).includes(options.unlockedItemId)
+          ? [...(current.unlockedSkins || ['cultist']), options.unlockedItemId]
+          : [...(current.unlockedSkins || ['cultist'])];
+
+      const nextInventory = current.inventory.includes(options.unlockedItemId)
+        ? [...current.inventory]
+        : [...current.inventory, options.unlockedItemId];
+
+      const writePayload: Record<string, any> = {
+        giftedPacks: giftedMap,
+        unlockedSkins: nextUnlockedSkins,
+        inventory: nextInventory
+      };
+
+      if (!options.isInstructor) {
+        writePayload.gold = nextGold;
+        writePayload.goldCoins = nextGold;
+      }
+
+      tx.set(userRef, writePayload, { merge: true });
+
+      return normalizeUserGameProfile(uid, {
+        ...data,
+        ...writePayload
+      });
+    });
+
+    setLocalGameItem(localKey, updatedProfile);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('igcse_game_profile_updated', { detail: { uid, profile: updatedProfile } }));
+    }
+    return { success: true, profile: updatedProfile };
+  } catch (err: any) {
+    handleFirestoreError(err, 'openBoosterPackTransaction');
+    return { success: false, error: err?.message || 'Failed to open booster pack.' };
+  }
+};
+
+export interface AwardRewardParams {
+  targetStudents: { studentId: string; name?: string; email?: string }[];
+  rewardType: InstructorRewardType;
+  packId?: string;
+  quantity?: number;
+  goldAmount?: number;
+  skinId?: string;
+  weaponId?: string;
+  itemName: string;
+  note?: string;
+  instructor: { id: string; name: string; email?: string };
+}
+
+/**
+ * Instructor Reward System:
+ * Grant Booster Packs, Gold, Skins, or Weapons to one or multiple students.
+ * Persists atomically to /users/{studentId} and dispatches an in-app notification.
+ */
+export const awardInstructorReward = async (
+  params: AwardRewardParams
+): Promise<{
+  success: boolean;
+  updatedCount: number;
+  message: string;
+  updatedProfiles: Record<string, UserGameProfile>;
+}> => {
+  const { targetStudents, rewardType, packId, skinId, weaponId, itemName, note, instructor } = params;
+  const quantity = Math.max(1, Math.floor(Number(params.quantity) || 1));
+  const goldAmount = Math.max(1, Math.floor(Number(params.goldAmount) || 0));
+
+  if (!targetStudents || targetStudents.length === 0) {
+    return { success: false, updatedCount: 0, message: 'No recipient students selected.', updatedProfiles: {} };
+  }
+
+  const nowIso = new Date().toISOString();
+  const baseRewardId = `rew_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const updatedProfiles: Record<string, UserGameProfile> = {};
+  let updatedCount = 0;
+
+  for (const target of targetStudents) {
+    const uid = target.studentId;
+    if (!uid) continue;
+
+    const rewardRecord: InstructorRewardRecord = {
+      id: `${baseRewardId}_${uid.slice(0, 6)}`,
+      rewardType,
+      itemId:
+        rewardType === 'booster_pack'
+          ? packId
+          : rewardType === 'skin'
+          ? skinId
+          : rewardType === 'weapon'
+          ? weaponId
+          : 'gold',
+      itemName,
+      quantity: rewardType === 'gold' ? goldAmount : quantity,
+      note: note?.trim() || undefined,
+      awardedBy: instructor.name || 'Instructor',
+      awardedByEmail: instructor.email,
+      awardedAt: nowIso
+    };
+
+    try {
+      const userRef = doc(db, 'users', uid);
+      const updated = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(userRef);
+        const existingData = snap.exists() ? snap.data() : {
+          uid,
+          name: target.name || 'Student',
+          email: target.email || '',
+          role: 'student'
+        };
+        const current = normalizeUserGameProfile(uid, existingData);
+
+        const nextHistory = [...(current.rewardHistory || []), rewardRecord].slice(-25);
+        const updateFields: Record<string, any> = {
+          rewardHistory: nextHistory
+        };
+
+        if (!snap.exists()) {
+          updateFields.uid = uid;
+          updateFields.name = target.name || 'Student';
+          updateFields.email = target.email || '';
+          updateFields.role = 'student';
+          updateFields.gold = current.gold;
+          updateFields.inventory = current.inventory;
+          updateFields.unlockedSkins = current.unlockedSkins;
+          updateFields.equippedSkin = current.equippedSkin;
+          updateFields.equippedWeapon = current.equippedWeapon;
+          updateFields.equippedPower = current.equippedPower;
+          updateFields.level = current.level;
+          updateFields.xp = current.xp;
+        }
+
+        if (rewardType === 'booster_pack' && packId) {
+          const nextGifted = { ...(current.giftedPacks || {}) };
+          nextGifted[packId] = Math.max(0, Number(nextGifted[packId] || 0)) + quantity;
+          updateFields.giftedPacks = nextGifted;
+        } else if (rewardType === 'gold') {
+          const nextGold = Math.max(0, current.gold + goldAmount);
+          updateFields.gold = nextGold;
+          updateFields.goldCoins = nextGold;
+        } else if (rewardType === 'skin' && skinId) {
+          const nextSkins = (current.unlockedSkins || ['cultist']).includes(skinId)
+            ? [...(current.unlockedSkins || ['cultist'])]
+            : [...(current.unlockedSkins || ['cultist']), skinId];
+          const nextInv = current.inventory.includes(skinId)
+            ? [...current.inventory]
+            : [...current.inventory, skinId];
+          updateFields.unlockedSkins = nextSkins;
+          updateFields.inventory = nextInv;
+        } else if (rewardType === 'weapon' && weaponId) {
+          const nextInv = current.inventory.includes(weaponId)
+            ? [...current.inventory]
+            : [...current.inventory, weaponId];
+          updateFields.inventory = nextInv;
+        }
+
+        tx.set(userRef, updateFields, { merge: true });
+
+        return normalizeUserGameProfile(uid, {
+          ...existingData,
+          ...updateFields
+        });
+      });
+
+      updatedProfiles[uid] = updated;
+      setLocalGameItem(`igcse_game_profile_${uid}`, updated);
+
+      // Write an in-app notification so the student sees a celebratory alert
+      const rewardLabel =
+        rewardType === 'gold'
+          ? `+${goldAmount} Gold`
+          : rewardType === 'booster_pack'
+          ? `${quantity}x ${itemName}`
+          : itemName;
+
+      const notifId = `reward_${baseRewardId}_${uid}`;
+      await setDoc(doc(db, 'notifications', notifId), {
+        id: notifId,
+        type: 'instructor_reward',
+        rewardType,
+        itemName: rewardLabel,
+        title: `Reward Received: ${rewardLabel}`,
+        message: note?.trim()
+          ? `${instructor.name || 'Your instructor'} awarded you ${rewardLabel}: "${note.trim()}"`
+          : `${instructor.name || 'Your instructor'} awarded you ${rewardLabel}.`,
+        awardedBy: instructor.name || 'Instructor',
+        createdAt: nowIso,
+        targetStudentIds: [uid]
+      }).catch(() => {});
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('igcse_game_profile_updated', { detail: { uid, profile: updated } }));
+      }
+
+      updatedCount++;
+    } catch (err) {
+      handleFirestoreError(err, 'awardInstructorReward');
+    }
+  }
+
+  if (updatedCount === 0) {
+    return {
+      success: false,
+      updatedCount: 0,
+      message: 'Failed to deliver reward. Please check your connection and try again.',
+      updatedProfiles
+    };
+  }
+
+  const recipientSummary =
+    targetStudents.length === 1
+      ? targetStudents[0].name || 'student'
+      : `${updatedCount} students`;
+
+  const summaryItem =
+    rewardType === 'gold'
+      ? `${goldAmount} Gold`
+      : rewardType === 'booster_pack'
+      ? `${quantity}× ${itemName}`
+      : itemName;
+
+  return {
+    success: true,
+    updatedCount,
+    message: `Awarded ${summaryItem} to ${recipientSummary}.`,
+    updatedProfiles
+  };
 };
 
 // ============================================================================
@@ -1214,6 +1668,198 @@ export const checkModuleClaimed = async (uid: string, moduleId: string): Promise
   }
 };
 
+export interface QuizAndLevelRewardResult {
+  quizGold: number;
+  levelUpGold: number;
+  totalGoldAdded: number;
+  xpAdded: number;
+  levelsGained: number;
+  newGameLevel: number;
+  newScholarLevel: number;
+}
+
+const REWARDED_LEVELS_PREFIX = 'igcse_rewarded_levels_';
+
+interface RewardedLevelsRecord {
+  gameLevel: number;
+  scholarLevel: number;
+}
+
+function getLocalRewardedLevels(uid: string): RewardedLevelsRecord | null {
+  return getLocalGameItem<RewardedLevelsRecord | null>(`${REWARDED_LEVELS_PREFIX}${uid}`, null);
+}
+
+function setLocalRewardedLevels(uid: string, record: RewardedLevelsRecord): void {
+  setLocalGameItem(`${REWARDED_LEVELS_PREFIX}${uid}`, record);
+}
+
+function dispatchGameProfileUpdated(uid: string, profile: UserGameProfile): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('igcse_game_profile_updated', { detail: { uid, profile } }));
+  }
+}
+
+/**
+ * Initializes the local baseline of rewarded levels on sign-in / boot
+ * so historical levels are never retroactively double-paid, while all new level-ups earn Gold.
+ */
+export const ensureRewardedLevelBaseline = (
+  uid: string,
+  currentScholarLevel: number,
+  currentGameLevel?: number
+): void => {
+  if (!uid) return;
+  const existing = getLocalRewardedLevels(uid);
+  const localProfile = getLocalGameItem<UserGameProfile | null>(`igcse_game_profile_${uid}`, null);
+  const detectedGameLevel = currentGameLevel ?? calculateLevelFromXP(localProfile?.xp || 0).level;
+  if (!existing) {
+    setLocalRewardedLevels(uid, {
+      gameLevel: Math.max(1, detectedGameLevel),
+      scholarLevel: Math.max(1, currentScholarLevel)
+    });
+  }
+};
+
+/**
+ * Awards Gold and XP when a student completes a Practice Quiz or Traffic Light Quiz,
+ * and awards bonus Level-Up Gold whenever their Game XP Level OR Scholar Rank Level increases.
+ */
+export const awardQuizAndLevelGold = async (params: {
+  uid: string;
+  quizQuestionsCompleted?: number;
+  quizScore?: number;
+  prevScholarLevel: number;
+  newScholarLevel: number;
+  isInstructorPreview?: boolean;
+}): Promise<QuizAndLevelRewardResult> => {
+  const {
+    uid,
+    quizQuestionsCompleted = 0,
+    quizScore,
+    prevScholarLevel,
+    newScholarLevel,
+    isInstructorPreview = false
+  } = params;
+
+  const quizGold = quizQuestionsCompleted > 0
+    ? calculateQuizGoldReward(quizQuestionsCompleted, quizScore)
+    : 0;
+  const xpAdded = quizQuestionsCompleted > 0
+    ? calculateQuizXPReward(quizQuestionsCompleted, quizScore)
+    : 0;
+
+  if (!uid) {
+    return {
+      quizGold,
+      levelUpGold: 0,
+      totalGoldAdded: quizGold,
+      xpAdded,
+      levelsGained: 0,
+      newGameLevel: 1,
+      newScholarLevel: Math.max(1, newScholarLevel)
+    };
+  }
+
+  const localKey = `igcse_game_profile_${uid}`;
+  const localProfile = getLocalGameItem<UserGameProfile>(localKey, { ...DEFAULT_GAME_PROFILE, uid });
+  const localRewarded = getLocalRewardedLevels(uid);
+
+  let remoteData: Record<string, any> = {};
+  if (!isInstructorPreview && canPerformFirestoreWrite()) {
+    try {
+      const snap = await getDoc(doc(db, 'users', uid));
+      if (snap.exists()) {
+        remoteData = snap.data() || {};
+      }
+    } catch (e) {
+      handleFirestoreError(e, 'awardQuizAndLevelGold:read');
+    }
+  }
+
+  const isActualInstructor = remoteData.role === 'instructor' || localProfile.role === 'instructor';
+  const prevXp = Math.max(Number(remoteData.xp || 0), localProfile.xp || 0);
+  const newXp = prevXp + xpAdded;
+
+  const prevComputedGameLevel = calculateLevelFromXP(prevXp).level;
+  const newComputedGameLevel = calculateLevelFromXP(newXp).level;
+  const baselineGameLevel = Math.max(
+    1,
+    Number(remoteData.rewardedGameLevel || 0),
+    localRewarded?.gameLevel || 0,
+    prevComputedGameLevel
+  );
+  const gameLevelsGained = Math.max(0, newComputedGameLevel - baselineGameLevel);
+
+  const baselineScholarLevel = Math.max(
+    1,
+    Number(remoteData.rewardedScholarLevel || 0),
+    localRewarded?.scholarLevel || 0,
+    prevScholarLevel
+  );
+  const scholarLevelsGained = Math.max(0, newScholarLevel - baselineScholarLevel);
+
+  const levelsGained = gameLevelsGained + scholarLevelsGained;
+  const levelUpGold = levelsGained * LEVEL_UP_GOLD_REWARD;
+  const totalGoldAdded = quizGold + levelUpGold;
+
+  if (isInstructorPreview || isActualInstructor) {
+    return {
+      quizGold,
+      levelUpGold,
+      totalGoldAdded,
+      xpAdded,
+      levelsGained,
+      newGameLevel: newComputedGameLevel,
+      newScholarLevel: Math.max(baselineScholarLevel, newScholarLevel)
+    };
+  }
+
+  const nextRewardedGameLevel = Math.max(baselineGameLevel, newComputedGameLevel);
+  const nextRewardedScholarLevel = Math.max(baselineScholarLevel, newScholarLevel);
+  setLocalRewardedLevels(uid, {
+    gameLevel: nextRewardedGameLevel,
+    scholarLevel: nextRewardedScholarLevel
+  });
+
+  const baseGold = Math.max(Number(remoteData.gold ?? remoteData.goldCoins ?? localProfile.gold ?? DEFAULT_GAME_PROFILE.gold), 0);
+  const updatedLocalProfile: UserGameProfile = {
+    ...localProfile,
+    uid,
+    xp: newXp,
+    level: Math.max(localProfile.level || 1, newComputedGameLevel),
+    gold: baseGold + totalGoldAdded
+  };
+  setLocalGameItem(localKey, updatedLocalProfile);
+  dispatchGameProfileUpdated(uid, updatedLocalProfile);
+
+  if ((totalGoldAdded > 0 || xpAdded > 0 || levelsGained > 0 || newScholarLevel > (Number(remoteData.rewardedScholarLevel) || 0)) && canPerformFirestoreWrite()) {
+    try {
+      const userDocRef = doc(db, 'users', uid);
+      const writePayload: Record<string, any> = {
+        level: nextRewardedGameLevel,
+        rewardedGameLevel: nextRewardedGameLevel,
+        rewardedScholarLevel: nextRewardedScholarLevel,
+        lastActive: new Date().toISOString()
+      };
+      if (xpAdded > 0) writePayload.xp = increment(xpAdded);
+      if (totalGoldAdded > 0) writePayload.gold = increment(totalGoldAdded);
+      await setDoc(userDocRef, writePayload, { merge: true });
+    } catch (e) {
+      handleFirestoreError(e, 'awardQuizAndLevelGold:write');
+    }
+  }
+
+  return {
+    quizGold,
+    levelUpGold,
+    totalGoldAdded,
+    xpAdded,
+    levelsGained,
+    newGameLevel: nextRewardedGameLevel,
+    newScholarLevel: nextRewardedScholarLevel
+  };
+};
+
 /**
  * Disburse genuine revision rewards to student's Firestore profile
  * Guaranteed anti-farming check: verifies /users/{uid}/completedModules/{moduleId}
@@ -1247,30 +1893,47 @@ export const claimModuleRevisionReward = async (
     };
   }
 
-  // Genuine first-time reward: +20 Wood, +10 Brick, +5 Metal, +50 XP, +20 Gold
+  // Check for level-up from +50 XP
+  const localProfile = getLocalGameItem<UserGameProfile | null>(`igcse_game_profile_${uid}`, null);
+  const localRewarded = getLocalRewardedLevels(uid);
+  const prevXp = localProfile?.xp || 0;
+  const newXp = prevXp + 50;
+  const prevLevel = Math.max(calculateLevelFromXP(prevXp).level, localRewarded?.gameLevel || 1);
+  const newLevel = calculateLevelFromXP(newXp).level;
+  const levelsGained = Math.max(0, newLevel - prevLevel);
+  const levelUpGold = levelsGained * LEVEL_UP_GOLD_REWARD;
+
+  // Genuine first-time reward: +20 Wood, +10 Brick, +5 Metal, +50 XP, +20 Gold (+ levelUpGold if leveled up)
   const rewards = {
     wood: 20,
     brick: 10,
     metal: 5,
     xp: 50,
-    gold: 20
+    gold: 20 + levelUpGold
   };
 
   // Mark claimed locally immediately
   saveClaimedModuleLocally(uid, moduleId);
 
   // Update local profile immediately
-  const localProfile = getLocalGameItem<UserGameProfile | null>(`igcse_game_profile_${uid}`, null);
   if (localProfile) {
-    const updated = {
+    const updated: UserGameProfile = {
       ...localProfile,
       wood: (localProfile.wood || 0) + rewards.wood,
       brick: (localProfile.brick || 0) + rewards.brick,
       metal: (localProfile.metal || 0) + rewards.metal,
       xp: (localProfile.xp || 0) + rewards.xp,
+      level: Math.max(localProfile.level || 1, newLevel),
       gold: (localProfile.gold || 0) + rewards.gold
     };
     setLocalGameItem(`igcse_game_profile_${uid}`, updated);
+    if (levelsGained > 0) {
+      setLocalRewardedLevels(uid, {
+        gameLevel: newLevel,
+        scholarLevel: localRewarded?.scholarLevel || 1
+      });
+    }
+    dispatchGameProfileUpdated(uid, updated);
   }
 
   if (canPerformFirestoreWrite()) {
@@ -1300,7 +1963,9 @@ export const claimModuleRevisionReward = async (
         brick: increment(rewards.brick),
         metal: increment(rewards.metal),
         xp: increment(rewards.xp),
-        gold: increment(rewards.gold)
+        gold: increment(rewards.gold),
+        level: newLevel,
+        rewardedGameLevel: Math.max(prevLevel, newLevel)
       }, { merge: true });
     } catch (e: any) {
       handleFirestoreError(e, 'claimModuleRevisionReward');
@@ -1310,7 +1975,9 @@ export const claimModuleRevisionReward = async (
   return {
     success: true,
     alreadyClaimed: false,
-    message: 'Genuine revision verified! +20 Wood, +10 Brick, +5 Metal, +50 XP, and +20 Gold added to your loadout.',
+    message: levelUpGold > 0
+      ? `Genuine revision verified! +20 Wood, +10 Brick, +5 Metal, +50 XP, and +${rewards.gold} Gold (including +${levelUpGold} Level-Up Bonus!) added to your loadout.`
+      : 'Genuine revision verified! +20 Wood, +10 Brick, +5 Metal, +50 XP, and +20 Gold added to your loadout.',
     rewards
   };
 };
@@ -1438,9 +2105,14 @@ export const subscribeToLobby = (
   try {
     const lobbyColl = collection(db, 'battleEvent', 'lobby', 'members');
     return onSnapshot(lobbyColl, (snap) => {
+      const seenUids = new Set<string>();
       const list: LobbyPlayer[] = [];
       snap.forEach((docSnap) => {
-        list.push(docSnap.data() as LobbyPlayer);
+        const data = docSnap.data() as Partial<LobbyPlayer>;
+        const resolvedUid = (data.uid || docSnap.id || '').trim();
+        if (!resolvedUid || seenUids.has(resolvedUid)) return;
+        seenUids.add(resolvedUid);
+        list.push({ ...(data as LobbyPlayer), uid: resolvedUid });
       });
       setLocalGameItem(LOCAL_LOBBY_PLAYERS_KEY, list);
       callback(list);
@@ -1509,39 +2181,58 @@ export const setLobbyReady = async (uid: string, isReady: boolean): Promise<void
 // MODULE 4: TEACHER BATTLE CONTROLS
 // ============================================================================
 
+type BatchOp =
+  | { type: 'set'; ref: ReturnType<typeof doc>; data: any }
+  | { type: 'delete'; ref: ReturnType<typeof doc> };
+
+const commitBatchOpsInChunks = async (ops: BatchOp[], chunkSize: number = 400): Promise<void> => {
+  for (let i = 0; i < ops.length; i += chunkSize) {
+    const slice = ops.slice(i, i + chunkSize);
+    const batch = writeBatch(db);
+    for (const op of slice) {
+      if (op.type === 'set') {
+        batch.set(op.ref, op.data);
+      } else {
+        batch.delete(op.ref);
+      }
+    }
+    await batch.commit();
+  }
+};
+
 /**
  * Teacher host action: START BATTLE ROYALE
  * Sets status to "IN_PROGRESS", initializes arena players from lobby,
  * clears old map structures, and spawns randomized science supply crates.
  */
 export const startBattleRoyale = async (): Promise<void> => {
+  resetFirestoreQuotaState();
   const stateDoc = doc(db, 'battleEvent', 'state');
-  
-  // 1. Fetch connected lobby players
+
+  // 1. Fetch connected lobby players and old arena entities in parallel (4x faster startup)
   const lobbyColl = collection(db, 'battleEvent', 'lobby', 'members');
-  const lobbySnap = await getDocs(lobbyColl);
-
-  const batch = writeBatch(db);
-
-  // 2. Clear old structures and crates
   const structuresColl = collection(db, 'battleEvent', 'structures', 'items');
-  const structSnap = await getDocs(structuresColl);
-  structSnap.forEach(s => batch.delete(s.ref));
-
   const cratesColl = collection(db, 'battleEvent', 'crates', 'items');
-  const cratesSnap = await getDocs(cratesColl);
-  cratesSnap.forEach(c => batch.delete(c.ref));
-
-  // 3. Clear old arena players
   const playersColl = collection(db, 'battleEvent', 'players', 'items');
-  const playersSnap = await getDocs(playersColl);
-  playersSnap.forEach(p => batch.delete(p.ref));
 
-  // 4. Initialize Arena Players with circular spawn distribution
+  const [lobbySnap, structSnap, cratesSnap, playersSnap] = await Promise.all([
+    getDocs(lobbyColl),
+    getDocs(structuresColl),
+    getDocs(cratesColl),
+    getDocs(playersColl)
+  ]);
+
+  const ops: BatchOp[] = [];
+  structSnap.forEach(s => ops.push({ type: 'delete', ref: s.ref }));
+  cratesSnap.forEach(c => ops.push({ type: 'delete', ref: c.ref }));
+  playersSnap.forEach(p => ops.push({ type: 'delete', ref: p.ref }));
+
+  // 2. Initialize Arena Players with circular spawn distribution
   const count = lobbySnap.size || 1;
   let idx = 0;
   const arenaCenter = 2500;
   const spawnRadius = 1400;
+  const initializedPlayers: ArenaPlayer[] = [];
 
   lobbySnap.forEach((docSnap) => {
     const l = docSnap.data() as LobbyPlayer;
@@ -1570,15 +2261,18 @@ export const startBattleRoyale = async (): Promise<void> => {
       kills: 0
     };
 
+    initializedPlayers.push(arenaPlayer);
     const targetDoc = doc(db, 'battleEvent', 'players', 'items', l.uid);
-    batch.set(targetDoc, arenaPlayer);
+    ops.push({ type: 'set', ref: targetDoc, data: arenaPlayer });
     idx++;
   });
 
-  // 5. Spawn 10 initial Science Supply Crates randomly within the opening Eye of the Storm
+  // 3. Spawn 10 initial Science Supply Crates randomly within the opening Eye of the Storm
+  // Questions come directly from the randomized Practice Quiz Question Vault
+  const initialVaultQuestions = getRandomizedPracticeVaultQuestions(10);
   const initialCrates: SupplyCrate[] = [];
   for (let c = 0; c < 10; c++) {
-    const q = CRATE_SCIENCE_QUESTIONS[c % CRATE_SCIENCE_QUESTIONS.length];
+    const q = initialVaultQuestions[c] || CRATE_SCIENCE_QUESTIONS[c % CRATE_SCIENCE_QUESTIONS.length];
     const pt = samplePointWithinStormEye({ x: arenaCenter, y: arenaCenter }, 3600);
 
     const crateId = `crate_${Date.now()}_${c}`;
@@ -1592,10 +2286,10 @@ export const startBattleRoyale = async (): Promise<void> => {
     };
     initialCrates.push(crateData);
     const crateRef = doc(db, 'battleEvent', 'crates', 'items', crateId);
-    batch.set(crateRef, crateData);
+    ops.push({ type: 'set', ref: crateRef, data: crateData });
   }
 
-  // 6. Set state to IN_PROGRESS with 3600px border radius and randomized finish center
+  // 4. Set state to IN_PROGRESS with 3600px border radius and randomized finish center
   const randomFinalX = Math.round(1300 + Math.random() * 2400);
   const randomFinalY = Math.round(1300 + Math.random() * 2400);
 
@@ -1609,104 +2303,170 @@ export const startBattleRoyale = async (): Promise<void> => {
     currentWinner: null
   };
   setLocalGameItem(LOCAL_BATTLE_STATE_KEY, liveState);
+  setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, initializedPlayers);
   setLocalGameItem(LOCAL_STRUCTURES_KEY, []);
   setLocalGameItem(LOCAL_CRATES_KEY, initialCrates);
-  batch.set(stateDoc, liveState);
+  ops.push({ type: 'set', ref: stateDoc, data: liveState });
 
-  await batch.commit();
+  // Notify live WS server room immediately alongside batched Firestore commit
+  await Promise.all([
+    notifyServerBattleControl({
+      action: 'start',
+      state: liveState,
+      players: initializedPlayers,
+      crates: initialCrates
+    }),
+    commitBatchOpsInChunks(ops)
+  ]);
 };
 
 /**
  * Teacher host action: Reset match and clear arena
  */
 export const resetBattleEvent = async (): Promise<void> => {
+  resetFirestoreQuotaState();
   setLocalGameItem(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE);
   setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, []);
   setLocalGameItem(LOCAL_STRUCTURES_KEY, []);
   setLocalGameItem(LOCAL_CRATES_KEY, []);
 
-  if (!canPerformFirestoreWrite()) return;
-
-  const batch = writeBatch(db);
-
-  // Clear players
+  const ops: BatchOp[] = [];
   const playersColl = collection(db, 'battleEvent', 'players', 'items');
-  const playersSnap = await getDocs(playersColl);
-  playersSnap.forEach(p => batch.delete(p.ref));
-
-  // Clear structures
   const structuresColl = collection(db, 'battleEvent', 'structures', 'items');
-  const structSnap = await getDocs(structuresColl);
-  structSnap.forEach(s => batch.delete(s.ref));
-
-  // Clear crates
   const cratesColl = collection(db, 'battleEvent', 'crates', 'items');
-  const cratesSnap = await getDocs(cratesColl);
-  cratesSnap.forEach(c => batch.delete(c.ref));
 
-  // Reset state to LOBBY (closed by default)
+  const [playersSnap, structSnap, cratesSnap] = await Promise.all([
+    getDocs(playersColl),
+    getDocs(structuresColl),
+    getDocs(cratesColl)
+  ]);
+
+  playersSnap.forEach(p => ops.push({ type: 'delete', ref: p.ref }));
+  structSnap.forEach(s => ops.push({ type: 'delete', ref: s.ref }));
+  cratesSnap.forEach(c => ops.push({ type: 'delete', ref: c.ref }));
+
   const stateDoc = doc(db, 'battleEvent', 'state');
-  batch.set(stateDoc, DEFAULT_EVENT_STATE);
+  ops.push({ type: 'set', ref: stateDoc, data: DEFAULT_EVENT_STATE });
 
-  await batch.commit();
+  await Promise.all([
+    notifyServerBattleControl({
+      action: 'reset',
+      state: DEFAULT_EVENT_STATE
+    }),
+    commitBatchOpsInChunks(ops)
+  ]);
 };
 
-/**
- * Win condition: Declare match winner
- */
-export const declareBattleWinner = async (winner: { uid: string; name: string; avatar: string }): Promise<void> => {
-  const stateDoc = doc(db, 'battleEvent', 'state');
+const awardWinnerRewardsOnce = async (winnerUid: string): Promise<void> => {
+  if (!winnerUid || winnerUid.startsWith('dummy_')) return;
   try {
-    await setDoc(stateDoc, {
-      status: 'ENDED',
-      currentWinner: winner
-    }, { merge: true });
-  } catch (err) {
-    console.warn('Error updating battle winner state:', err);
-  }
-
-  // Award Monthly Victory Crown badge and +200 XP, +100 Gold to the victor
-  if (winner.uid) {
-    const userDoc = doc(db, 'users', winner.uid);
+    const userDoc = doc(db, 'users', winnerUid);
+    const snap = await getDoc(userDoc);
+    const prevXp = snap.exists() ? Number(snap.data()?.xp || 0) : 0;
+    const prevLevel = Math.max(calculateLevelFromXP(prevXp).level, snap.exists() ? Number(snap.data()?.rewardedGameLevel || 1) : 1);
+    const newLevel = calculateLevelFromXP(prevXp + 200).level;
+    const levelUpGold = Math.max(0, newLevel - prevLevel) * LEVEL_UP_GOLD_REWARD;
     await setDoc(userDoc, {
       monthlyCrown: true,
       xp: increment(200),
-      gold: increment(100)
+      gold: increment(100 + levelUpGold),
+      level: Math.max(prevLevel, newLevel),
+      rewardedGameLevel: Math.max(prevLevel, newLevel)
     }, { merge: true });
+  } catch {
+    try {
+      const userDoc = doc(db, 'users', winnerUid);
+      await setDoc(userDoc, {
+        monthlyCrown: true,
+        xp: increment(200),
+        gold: increment(100)
+      }, { merge: true });
+    } catch {}
   }
 };
 
 /**
- * Teacher host action: End the current active match immediately
+ * Win condition: Declare match winner (transactional so 30 clients cannot double-award XP/Gold)
+ */
+export const declareBattleWinner = async (winner: { uid: string; name: string; avatar: string }): Promise<void> => {
+  const stateDoc = doc(db, 'battleEvent', 'state');
+  let transitionedToEnded = false;
+  try {
+    transitionedToEnded = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(stateDoc);
+      const current = snap.exists() ? (snap.data() as BattleEventState) : DEFAULT_EVENT_STATE;
+      if (current.status === 'ENDED') {
+        return false;
+      }
+      tx.set(stateDoc, {
+        status: 'ENDED',
+        isLobbyOpen: false,
+        currentWinner: winner
+      }, { merge: true });
+      return true;
+    });
+  } catch (err) {
+    console.warn('Transaction fallback in declareBattleWinner:', err);
+    try {
+      await setDoc(stateDoc, {
+        status: 'ENDED',
+        isLobbyOpen: false,
+        currentWinner: winner
+      }, { merge: true });
+      transitionedToEnded = true;
+    } catch {}
+  }
+
+  if (transitionedToEnded && winner.uid) {
+    notifyServerBattleControl({
+      action: 'end',
+      state: { status: 'ENDED', isLobbyOpen: false, currentWinner: winner }
+    }).catch(() => {});
+    await awardWinnerRewardsOnce(winner.uid);
+  }
+};
+
+/**
+ * Teacher host action: End the current active match immediately.
+ * NEVER blocked by quota backoff — instructor controls take top priority.
+ * Passing `customWinner = null` explicitly ends as a draw with no winner;
+ * passing `undefined` auto-selects the top surviving student.
  */
 export const endBattleRoyale = async (
   customWinner?: { uid: string; name: string; avatar: string } | null,
-  reason?: string
+  _reason?: string
 ): Promise<void> => {
-  let winner = customWinner || null;
+  resetFirestoreQuotaState();
 
-  // If no custom winner specified, attempt to determine top surviving student
-  if (!winner) {
+  let winner: { uid: string; name: string; avatar: string } | null = customWinner === undefined ? null : customWinner;
+
+  if (customWinner === undefined) {
     try {
-      const localPlayers = getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []);
-      const alivePlayers = localPlayers.filter(p => p.isAlive);
-      const sorted = [...alivePlayers].sort((a, b) => (b.kills * 100 + b.hp) - (a.kills * 100 + a.hp));
+      let candidates = getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []);
+      if (candidates.length === 0) {
+        const playersSnap = await getDocs(collection(db, 'battleEvent', 'players', 'items'));
+        const remoteList: ArenaPlayer[] = [];
+        playersSnap.forEach(d => remoteList.push(d.data() as ArenaPlayer));
+        candidates = remoteList;
+      }
+      const realPlayers = candidates.filter(p => !p.uid.startsWith('dummy_'));
+      const pool = realPlayers.length > 0 ? realPlayers : candidates;
+      const alivePlayers = pool.filter(p => p.isAlive);
+      const sorted = [...(alivePlayers.length > 0 ? alivePlayers : pool)].sort(
+        (a, b) => (b.kills * 100 + b.hp) - (a.kills * 100 + a.hp)
+      );
       if (sorted.length > 0) {
         winner = {
           uid: sorted[0].uid,
           name: sorted[0].name,
           avatar: sorted[0].avatar
         };
-      } else if (localPlayers.length > 0) {
-        const top = [...localPlayers].sort((a, b) => (b.kills * 100 + b.hp) - (a.kills * 100 + a.hp))[0];
-        winner = {
-          uid: top.uid,
-          name: top.name,
-          avatar: top.avatar
-        };
       }
     } catch {}
   }
+
+  const prevState = getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE);
+  const wasAlreadyEnded = prevState?.status === 'ENDED';
 
   const endedState: Partial<BattleEventState> = {
     status: 'ENDED',
@@ -1714,29 +2474,38 @@ export const endBattleRoyale = async (
     currentWinner: winner
   };
 
-  const prevState = getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE);
-  const updatedState = { ...prevState, ...endedState };
-  setLocalGameItem(LOCAL_BATTLE_STATE_KEY, updatedState);
+  setLocalGameItem(LOCAL_BATTLE_STATE_KEY, { ...prevState, ...endedState });
 
-  if (canPerformFirestoreWrite()) {
+  // Immediately push end state through WebSocket server room so all 32 live players transition at once
+  notifyServerBattleControl({
+    action: 'end',
+    state: endedState
+  }).catch(() => {});
+
+  const stateDoc = doc(db, 'battleEvent', 'state');
+  let writeSucceeded = false;
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt < 2 && !writeSucceeded; attempt++) {
     try {
-      const stateDoc = doc(db, 'battleEvent', 'state');
       await setDoc(stateDoc, endedState, { merge: true });
+      writeSucceeded = true;
     } catch (e) {
-      console.warn('Error setting match ended state in Firestore:', e);
+      lastError = e;
+      if (attempt === 0) {
+        await new Promise(resolve => setTimeout(resolve, 350));
+      }
     }
   }
 
-  // If winner has a UID, award crown and bonus XP/gold
-  if (winner && winner.uid) {
-    try {
-      const userDoc = doc(db, 'users', winner.uid);
-      await setDoc(userDoc, {
-        monthlyCrown: true,
-        xp: increment(200),
-        gold: increment(100)
-      }, { merge: true });
-    } catch {}
+  if (!writeSucceeded && lastError) {
+    handleFirestoreError(lastError, 'endBattleRoyale');
+    throw lastError;
+  }
+
+  // Award crown and bonus XP/gold once if transitioning out of active match
+  if (winner && winner.uid && !wasAlreadyEnded) {
+    await awardWinnerRewardsOnce(winner.uid);
   }
 };
 
@@ -1756,11 +2525,16 @@ export const subscribeToArenaPlayers = (
   try {
     const playersColl = collection(db, 'battleEvent', 'players', 'items');
     return onSnapshot(playersColl, (snap) => {
+      const seenUids = new Set<string>();
       const list: ArenaPlayer[] = [];
       snap.forEach((docSnap) => {
-        list.push(docSnap.data() as ArenaPlayer);
+        const data = docSnap.data() as Partial<ArenaPlayer>;
+        const resolvedUid = (data.uid || docSnap.id || '').trim();
+        if (!resolvedUid || seenUids.has(resolvedUid)) return;
+        seenUids.add(resolvedUid);
+        list.push({ ...(data as ArenaPlayer), uid: resolvedUid });
       });
-      setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, list);
+      scheduleLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, list, 3000);
       callback(list);
     }, (err) => {
       handleFirestoreError(err, 'subscribeToArenaPlayers');
@@ -1789,18 +2563,6 @@ export const ensureArenaPlayer = async (player: ArenaPlayer): Promise<void> => {
     const snap = await getDoc(playerDoc);
     if (!snap.exists()) {
       await setDoc(playerDoc, player);
-    } else {
-      const data = snap.data();
-      const updates: Partial<ArenaPlayer> = {};
-      if (player.avatar && data.avatar !== player.avatar) {
-        updates.avatar = player.avatar;
-      }
-      if (player.equippedWeapon && data.equippedWeapon !== player.equippedWeapon) {
-        updates.equippedWeapon = player.equippedWeapon;
-      }
-      if (Object.keys(updates).length > 0) {
-        await setDoc(playerDoc, updates, { merge: true });
-      }
     }
   } catch (err) {
     handleFirestoreError(err, 'ensureArenaPlayer');
@@ -1816,7 +2578,6 @@ export const updatePlayerPosition = async (
   data: Partial<ArenaPlayer>
 ): Promise<void> => {
   if (!uid) return;
-  // Always update local cache so other components on this device/tab have latest position
   const currentPlayers = getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []);
   const idx = currentPlayers.findIndex(p => p.uid === uid);
   if (idx >= 0) {
@@ -1824,7 +2585,7 @@ export const updatePlayerPosition = async (
   } else {
     currentPlayers.push({ ...data, uid } as ArenaPlayer);
   }
-  setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, currentPlayers);
+  scheduleLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, currentPlayers, 2500);
 
   if (!canPerformFirestoreWrite()) return;
   const playerDoc = doc(db, 'battleEvent', 'players', 'items', uid);
@@ -1857,26 +2618,21 @@ const computePlayerDamageOutcome = (
   let brittleGuardUsedAt = target.brittleGuardUsedAt;
 
   if (isStormDamage) {
-    // Dark Knight — Heavy Armor: Reduces incoming damage from the storm boundary by 50%
     if (skinDef.id === 'dark_knight') {
       actualDamage = Math.max(1, Math.round(actualDamage * 0.5));
     }
   } else {
-    // Metal Bunker active shield (-50% dmg)
     if (target.metalShieldActiveUntil && target.metalShieldActiveUntil > nowMs) {
       actualDamage = Math.round(actualDamage * 0.5);
     }
 
-    // Skin Defense Stat mitigation (up to 25% damage reduction for armored skins)
     const defReduction = Math.min(0.25, Math.max(0, ((skinDef.defense - 18) / 80) * 0.25));
     actualDamage = Math.max(1, Math.round(actualDamage * (1 - defReduction)));
 
-    // Slime — Viscous Form: 15% physical combat impact dampening
     if (skinDef.id === 'slime') {
       actualDamage = Math.max(1, Math.round(actualDamage * 0.85));
     }
 
-    // Slime King — Royal Absorption: Absorbs 50% of first shot (recharges every 10s) and turns into bricks
     if (skinDef.id === 'slime_king' && (!target.royalAbsorptionUsedAt || nowMs - target.royalAbsorptionUsedAt >= 10000)) {
       const absorbed = Math.max(1, Math.round(actualDamage * 0.5));
       actualDamage = Math.max(1, actualDamage - absorbed);
@@ -1885,8 +2641,8 @@ const computePlayerDamageOutcome = (
     }
   }
 
-  let newShield = target.shield;
-  let newHp = target.hp;
+  let newShield = target.shield || 0;
+  let newHp = target.hp ?? 100;
 
   if (isStormDamage) {
     newHp = Math.max(0, newHp - actualDamage);
@@ -1902,7 +2658,6 @@ const computePlayerDamageOutcome = (
     }
     newHp = Math.max(0, newHp - actualDamage);
 
-    // Skeleton — Brittle Guard: Absorbs single fatal physical strike with bone plating (25s recharge)
     if (
       newHp <= 0 &&
       skinDef.id === 'skeleton_warrior' &&
@@ -1926,17 +2681,21 @@ const computePlayerDamageOutcome = (
 };
 
 /**
- * Deal damage to a player (absorbs shield first, applies skin defense & special abilities)
+ * Deal damage to a player (absorbs shield first, applies skin defense & special abilities).
+ * Combat damage is critical state — NEVER skipped silently during position-sync throttling;
+ * uses Firestore transaction to prevent concurrent hit overwrites and invincible player states.
  */
 export const damageArenaPlayer = async (
   targetUid: string,
   damageAmount: number,
   attackerUid?: string,
-  isStormDamage: boolean = false
+  isStormDamage: boolean = false,
+  chillMs: number = 0
 ): Promise<{ killed: boolean; bricksGained?: number; brittleGuardTriggered?: boolean }> => {
   if (!targetUid) return { killed: false };
 
   const nowMs = Date.now();
+  const clampedChillMs = !isStormDamage && chillMs > 0 ? Math.min(6000, Math.round(chillMs)) : 0;
   const currentPlayers = getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []);
   const targetLocal = currentPlayers.find(p => p.uid === targetUid);
   let localKilled = false;
@@ -1960,51 +2719,63 @@ export const damageArenaPlayer = async (
     if (outcome.brittleGuardUsedAt !== undefined) {
       targetLocal.brittleGuardUsedAt = outcome.brittleGuardUsedAt;
     }
-    setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, currentPlayers);
-  }
-
-  if (!canPerformFirestoreWrite()) {
-    return {
-      killed: localKilled,
-      bricksGained: localBricksGained,
-      brittleGuardTriggered: localBrittleTriggered
-    };
+    if (clampedChillMs > 0 && !outcome.isKilled) {
+      targetLocal.frostSlowUntil = Math.max(targetLocal.frostSlowUntil || 0, nowMs + clampedChillMs);
+    }
+    scheduleLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, currentPlayers, 1500);
   }
 
   const targetDoc = doc(db, 'battleEvent', 'players', 'items', targetUid);
   try {
-    const snap = await getDoc(targetDoc);
-    if (!snap.exists()) {
-      return {
-        killed: localKilled,
-        bricksGained: localBricksGained,
-        brittleGuardTriggered: localBrittleTriggered
+    const result = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(targetDoc);
+      if (!snap.exists()) {
+        return {
+          killed: localKilled,
+          bricksGained: localBricksGained,
+          brittleGuardTriggered: localBrittleTriggered,
+          shouldCreditKill: false
+        };
+      }
+
+      const current = snap.data() as ArenaPlayer;
+      if (!current.isAlive || (current.hp ?? 0) <= 0) {
+        if (current.isAlive) {
+          tx.set(targetDoc, { hp: 0, isAlive: false }, { merge: true });
+        }
+        return { killed: false, bricksGained: 0, brittleGuardTriggered: false, shouldCreditKill: false };
+      }
+
+      const outcome = computePlayerDamageOutcome(current, damageAmount, isStormDamage, nowMs);
+      const updatePayload: Record<string, any> = {
+        shield: outcome.newShield,
+        hp: outcome.newHp,
+        isAlive: !outcome.isKilled
       };
-    }
+      if (outcome.bricksGained > 0) {
+        updatePayload.brick = increment(outcome.bricksGained);
+      }
+      if (outcome.royalAbsorptionUsedAt !== undefined) {
+        updatePayload.royalAbsorptionUsedAt = outcome.royalAbsorptionUsedAt;
+      }
+      if (outcome.brittleGuardUsedAt !== undefined) {
+        updatePayload.brittleGuardUsedAt = outcome.brittleGuardUsedAt;
+      }
+      if (clampedChillMs > 0 && !outcome.isKilled) {
+        updatePayload.frostSlowUntil = Math.max(current.frostSlowUntil || 0, nowMs + clampedChillMs);
+      }
 
-    const current = snap.data() as ArenaPlayer;
-    if (!current.isAlive) return { killed: false };
+      tx.set(targetDoc, updatePayload, { merge: true });
 
-    const outcome = computePlayerDamageOutcome(current, damageAmount, isStormDamage, nowMs);
-    const updatePayload: Record<string, any> = {
-      shield: outcome.newShield,
-      hp: outcome.newHp,
-      isAlive: !outcome.isKilled
-    };
-    if (outcome.bricksGained > 0) {
-      updatePayload.brick = increment(outcome.bricksGained);
-    }
-    if (outcome.royalAbsorptionUsedAt !== undefined) {
-      updatePayload.royalAbsorptionUsedAt = outcome.royalAbsorptionUsedAt;
-    }
-    if (outcome.brittleGuardUsedAt !== undefined) {
-      updatePayload.brittleGuardUsedAt = outcome.brittleGuardUsedAt;
-    }
+      return {
+        killed: outcome.isKilled,
+        bricksGained: outcome.bricksGained,
+        brittleGuardTriggered: outcome.brittleGuardTriggered,
+        shouldCreditKill: Boolean(outcome.isKilled && attackerUid && attackerUid !== targetUid && !isStormDamage)
+      };
+    });
 
-    await setDoc(targetDoc, updatePayload, { merge: true });
-
-    // Credit kill to attacker (if not environmental storm damage)
-    if (outcome.isKilled && attackerUid && attackerUid !== targetUid && !isStormDamage) {
+    if (result.shouldCreditKill && attackerUid) {
       const attackerDoc = doc(db, 'battleEvent', 'players', 'items', attackerUid);
       await setDoc(attackerDoc, {
         kills: increment(1)
@@ -2012,9 +2783,9 @@ export const damageArenaPlayer = async (
     }
 
     return {
-      killed: outcome.isKilled,
-      bricksGained: outcome.bricksGained,
-      brittleGuardTriggered: outcome.brittleGuardTriggered
+      killed: result.killed,
+      bricksGained: result.bricksGained,
+      brittleGuardTriggered: result.brittleGuardTriggered
     };
   } catch (err) {
     handleFirestoreError(err, 'damageArenaPlayer');
@@ -2042,7 +2813,7 @@ export const subscribeToStructures = (
       snap.forEach((docSnap) => {
         list.push(docSnap.data() as ArenaStructure);
       });
-      setLocalGameItem(LOCAL_STRUCTURES_KEY, list);
+      scheduleLocalGameItem(LOCAL_STRUCTURES_KEY, list, 2500);
       callback(list);
     }, (err) => {
       handleFirestoreError(err, 'subscribeToStructures');
@@ -2171,7 +2942,7 @@ export const subscribeToSupplyCrates = (
       snap.forEach((docSnap) => {
         list.push(docSnap.data() as SupplyCrate);
       });
-      setLocalGameItem(LOCAL_CRATES_KEY, list);
+      scheduleLocalGameItem(LOCAL_CRATES_KEY, list, 2500);
       callback(list);
     }, (err) => {
       handleFirestoreError(err, 'subscribeToSupplyCrates');
@@ -2244,7 +3015,8 @@ export const dropMidGameSupplyCrate = async (options?: SupplyCrateDropOptions): 
   }
 
   const crateId = `crate_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-  const q = CRATE_SCIENCE_QUESTIONS[Math.floor(Math.random() * CRATE_SCIENCE_QUESTIONS.length)];
+  const [vaultQ] = getRandomizedPracticeVaultQuestions(1);
+  const q = vaultQ || CRATE_SCIENCE_QUESTIONS[Math.floor(Math.random() * CRATE_SCIENCE_QUESTIONS.length)];
   const newCrate: SupplyCrate = {
     id: crateId,
     x: Math.round(x),
@@ -2257,6 +3029,9 @@ export const dropMidGameSupplyCrate = async (options?: SupplyCrateDropOptions): 
   // Always update local fallback immediately so offline/solo testing works instantaneously
   const existingCrates = getLocalGameItem<SupplyCrate[]>(LOCAL_CRATES_KEY, []);
   setLocalGameItem(LOCAL_CRATES_KEY, [...existingCrates, newCrate]);
+
+  // Also broadcast into the live 20Hz WebSocket battle room
+  notifyServerBattleControl({ action: 'crate_drop', crate: newCrate }).catch(() => {});
 
   if (!canPerformFirestoreWrite()) {
     return newCrate;
@@ -2297,7 +3072,12 @@ export const claimSupplyCrate = async (
     isGoblin = skinDef.id === 'goblin';
     maxShieldCap = skinDef.id === 'knight_hero' ? 120 : (p.maxShield || 100);
     if (rewardType === 'shield') {
-      p.shield = Math.min(maxShieldCap, (p.shield || 0) + 50);
+      const prevSh = p.shield || 0;
+      p.shield = Math.min(maxShieldCap, prevSh + 50);
+      const overflow = Math.max(0, prevSh + 50 - maxShieldCap);
+      if (overflow > 0) {
+        p.hp = Math.min(100, (p.hp || 0) + overflow);
+      }
     } else {
       p.wood = (p.wood || 0) + (isGoblin ? 30 : 20);
       p.brick = (p.brick || 0) + (isGoblin ? 23 : 15);
@@ -2317,9 +3097,12 @@ export const claimSupplyCrate = async (
     if (rewardType === 'shield') {
       const pSnap = await getDoc(playerDoc);
       const currentShield = pSnap.exists() ? Number(pSnap.data()?.shield || 0) : 0;
+      const currentHp = pSnap.exists() ? Number(pSnap.data()?.hp ?? 100) : 100;
       const cap = pSnap.exists() && getFantasySkin(pSnap.data()?.avatar || 'cultist').id === 'knight_hero' ? 120 : maxShieldCap;
+      const overflow = Math.max(0, currentShield + 50 - cap);
       await setDoc(playerDoc, {
-        shield: Math.min(cap, currentShield + 50)
+        shield: Math.min(cap, currentShield + 50),
+        ...(overflow > 0 ? { hp: Math.min(100, currentHp + overflow) } : {})
       }, { merge: true });
     } else {
       await setDoc(playerDoc, {

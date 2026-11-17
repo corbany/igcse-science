@@ -545,16 +545,16 @@ export const SUBTOPIC_QUESTION_DATABASE: Record<string, QuizQuestion[]> = {
       topicCode: 'C2',
       topicTitle: 'Atoms, Elements & Compounds',
       syllabusRef: 'C2.2',
-      tier: 'Extended',
-      question: 'Chlorine exists naturally as two isotopes: chlorine-35 and chlorine-37. In what way do atoms of these two isotopes differ?',
+      tier: 'Core',
+      question: 'Why is an isolated atom of magnesium (atomic number 12, mass number 24) electrically neutral overall?',
       options: [
-        'Chlorine-37 has 2 more neutrons in its nucleus than chlorine-35, but identical chemical properties',
-        'Chlorine-37 has 2 more protons and 2 more electrons than chlorine-35',
-        'Chlorine-37 has different electronic configurations and different chemical reactions',
-        'Chlorine-37 has a negative charge while chlorine-35 is neutral'
+        'It contains an equal number of positively charged protons (12) and negatively charged electrons (12), whose charges cancel out',
+        'It contains an equal number of protons (12) and neutrons (12) in its outer shell',
+        'Its neutrons carry a negative charge that neutralises the positive electrons',
+        'All 24 nucleons are completely uncharged particles'
       ],
       correctIndex: 0,
-      explanation: 'Isotopes are atoms of the same element with the same number of protons (17) and electrons (17), but different numbers of neutrons (18 vs 20). Chemical properties are identical because they have identical electron configurations.',
+      explanation: 'Protons have a relative charge of +1 and electrons have −1, while neutrons are neutral (0). In any neutral atom, number of protons = number of electrons, so total charge is zero.',
     }
   ],
 

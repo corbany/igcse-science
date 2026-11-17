@@ -13,10 +13,11 @@ import {
   UserGameProfile, 
   subscribeToGameProfile, 
   calculateLevelFromXP, 
-  SHOP_ITEMS,
   BattleEventState
 } from '../services/firebaseGameService';
 import { SCIENCE_SKIN_SVGS, SKIN_ALIASES } from '../data/spriteAtlasData';
+import { getFantasySkin } from '../data/fantasySkinsData';
+import { resolveWeaponItem } from '../data/gameCatalogData';
 
 interface UserProfileHeaderProps {
   user: UserProfile;
@@ -49,18 +50,20 @@ export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
   }, [user?.id]);
 
   const levelInfo = calculateLevelFromXP(gameProfile?.xp ?? user?.xp ?? 0);
-  const currentSkinId = gameProfile?.equippedSkin || gameProfile?.avatar || 'classic_chemist';
+  const currentSkinId = gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist';
   const resolvedSkinId = SKIN_ALIASES[currentSkinId] || currentSkinId;
-  const avatarSvg = SCIENCE_SKIN_SVGS[resolvedSkinId] || SCIENCE_SKIN_SVGS[currentSkinId];
-  const equippedSkin = SHOP_ITEMS.find(i => i.id === currentSkinId || i.id === resolvedSkinId) || 
-                       SHOP_ITEMS.find(i => i.id === 'classic_chemist') || 
-                       SHOP_ITEMS[0];
-  const equippedWp = SHOP_ITEMS.find(i => i.id === gameProfile?.equippedWeapon) || SHOP_ITEMS[6];
+  const fantasySkin = getFantasySkin(currentSkinId);
+  const avatarSvg = fantasySkin?.portraitPath || SCIENCE_SKIN_SVGS[resolvedSkinId] || SCIENCE_SKIN_SVGS[currentSkinId];
+  const equippedWp = resolveWeaponItem(gameProfile?.equippedWeapon);
 
   const gold = gameProfile?.gold ?? 100;
   const wood = gameProfile?.wood ?? 20;
   const brick = gameProfile?.brick ?? 10;
   const metal = gameProfile?.metal ?? 5;
+  const totalGiftedPacks = Object.values(gameProfile?.giftedPacks || {}).reduce(
+    (sum, n) => sum + Math.max(0, Number(n) || 0),
+    0
+  );
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-4 shadow-xs font-sans text-slate-800">
@@ -74,7 +77,7 @@ export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
               {avatarSvg ? (
                 <img 
                   src={avatarSvg} 
-                  alt={equippedSkin.name} 
+                  alt={fantasySkin.name} 
                   className="w-10 h-10 object-contain pixelated" 
                   onError={(e) => {
                     (e.currentTarget as HTMLElement).style.display = 'none';
@@ -89,7 +92,7 @@ export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
                 aria-label="avatar"
                 style={{ display: avatarSvg ? 'none' : 'inline' }}
               >
-                {equippedSkin.icon}
+                {fantasySkin.icon}
               </span>
             </div>
             {/* Level Badge */}
@@ -105,7 +108,7 @@ export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
                 {user.name || 'Science Scholar'}
               </h2>
               <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 border border-slate-300 text-slate-700">
-                {equippedSkin.name}
+                {fantasySkin.name}
               </span>
               <span className="text-xs font-semibold px-2 py-0.5 rounded bg-[#EBF3F5] border border-slate-300 text-slate-800 flex items-center gap-1">
                 <span>{equippedWp.icon}</span>
@@ -163,11 +166,15 @@ export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
             {onOpenShop && (
               <button
                 onClick={onOpenShop}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold transition cursor-pointer"
-                title="Open Avatar Shop"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer ${
+                  totalGiftedPacks > 0
+                    ? 'bg-emerald-700 hover:bg-emerald-600 text-white border-emerald-700'
+                    : 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300'
+                }`}
+                title="Open Avatar & Booster Pack Shop"
               >
-                <ShoppingBag className="w-3.5 h-3.5 text-slate-700" />
-                <span>Shop</span>
+                <ShoppingBag className={`w-3.5 h-3.5 ${totalGiftedPacks > 0 ? 'text-white' : 'text-slate-700'}`} />
+                <span>Shop{totalGiftedPacks > 0 ? ` · ${totalGiftedPacks} Gift${totalGiftedPacks === 1 ? '' : 's'}` : ''}</span>
               </button>
             )}
 

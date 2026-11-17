@@ -10,8 +10,17 @@ import {
   BookOpen,
   Award
 } from 'lucide-react';
-import { TaskWithSubmission, UserProfile, StudentProgress } from '../types';
+import { ClassTask, TaskWithSubmission, UserProfile, StudentProgress } from '../types';
 import { fetchTasksForStudent, fetchClassTasks } from '../services/firestoreService';
+import { db } from '../services/firebaseAuth';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+
+interface RewardNotificationItem {
+  id: string;
+  title: string;
+  message: string;
+  createdAt: string;
+}
 
 interface TaskNotificationBellProps {
   user: UserProfile;
@@ -19,8 +28,8 @@ interface TaskNotificationBellProps {
   enrolledClassIds: string[];
   theme: 'dark' | 'light';
   onNavigateToTasks?: () => void;
-  onNavigateToLessons?: (subtopicCode?: string) => void;
-  onNavigateToQuizzes?: (topicCode?: string) => void;
+  onNavigateToLessons?: (subtopicCode?: string, task?: ClassTask | TaskWithSubmission) => void;
+  onNavigateToQuizzes?: (topicCode?: string, task?: ClassTask | TaskWithSubmission) => void;
 }
 
 export const TaskNotificationBell: React.FC<TaskNotificationBellProps> = ({
@@ -33,16 +42,56 @@ export const TaskNotificationBell: React.FC<TaskNotificationBellProps> = ({
   onNavigateToQuizzes
 }) => {
   const [tasks, setTasks] = useState<TaskWithSubmission[]>([]);
+  const [rewardNotifs, setRewardNotifs] = useState<RewardNotificationItem[]>([]);
   const [open, setOpen] = useState<boolean>(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const dismissedStorageKey = `igcse_dismissed_reward_notifs_${user.id}`;
+  const getDismissedIds = (): Set<string> => {
+    try {
+      const raw = localStorage.getItem(dismissedStorageKey);
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch {
+      return new Set();
+    }
+  };
+
+  const dismissRewardNotif = (notifId: string) => {
+    const next = getDismissedIds();
+    next.add(notifId);
+    try {
+      localStorage.setItem(dismissedStorageKey, JSON.stringify(Array.from(next)));
+    } catch {}
+    setRewardNotifs(prev => prev.filter(n => n.id !== notifId));
+  };
 
   useEffect(() => {
     let isMounted = true;
     async function check() {
       try {
         if (user.role === 'student') {
-          const studentTasks = await fetchTasksForStudent(user, enrolledClassIds, progress);
+          const [studentTasks, rewardSnap] = await Promise.all([
+            fetchTasksForStudent(user, enrolledClassIds, progress),
+            getDocs(query(collection(db, 'notifications'), where('targetStudentIds', 'array-contains', user.id))).catch(() => null)
+          ]);
           if (isMounted) setTasks(studentTasks);
+          if (isMounted && rewardSnap) {
+            const dismissed = getDismissedIds();
+            const rewards: RewardNotificationItem[] = [];
+            rewardSnap.forEach((docSnap) => {
+              const d = docSnap.data();
+              if (d?.type === 'instructor_reward' && !dismissed.has(docSnap.id)) {
+                rewards.push({
+                  id: docSnap.id,
+                  title: d.title || 'Instructor Reward',
+                  message: d.message || 'You received a reward!',
+                  createdAt: d.createdAt || new Date().toISOString()
+                });
+              }
+            });
+            rewards.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            setRewardNotifs(rewards.slice(0, 5));
+          }
         } else {
           // Instructor
           const classTasks = await fetchClassTasks(undefined, user.id);
@@ -59,11 +108,20 @@ export const TaskNotificationBell: React.FC<TaskNotificationBellProps> = ({
 
     check();
     const interval = setInterval(check, 60000); // Check every minute
+    const onSubUpdate = () => { check(); };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('igcse_task_submission_updated', onSubUpdate);
+      window.addEventListener('igcse_game_profile_updated', onSubUpdate);
+    }
     return () => {
       isMounted = false;
       clearInterval(interval);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('igcse_task_submission_updated', onSubUpdate);
+        window.removeEventListener('igcse_game_profile_updated', onSubUpdate);
+      }
     };
-  }, [user.id, user.role, enrolledClassIds.length]);
+  }, [user.id, user.role, enrolledClassIds.length, progress]);
 
   // Click outside to close
   useEffect(() => {
@@ -79,7 +137,9 @@ export const TaskNotificationBell: React.FC<TaskNotificationBellProps> = ({
   const now = Date.now();
   const overdueTasks = tasks.filter(t => t.isOverdue && t.submission?.status !== 'completed');
   const pendingTasks = tasks.filter(t => t.submission?.status !== 'completed');
-  const alertCount = user.role === 'student' ? (overdueTasks.length > 0 ? overdueTasks.length : pendingTasks.length) : tasks.length;
+  const alertCount = user.role === 'student'
+    ? (overdueTasks.length > 0 ? overdueTasks.length : pendingTasks.length) + rewardNotifs.length
+    : tasks.length;
   const hasUrgent = overdueTasks.length > 0;
 
   return (
@@ -131,8 +191,35 @@ export const TaskNotificationBell: React.FC<TaskNotificationBellProps> = ({
           </div>
 
           {/* Body */}
-          <div className="py-3 max-h-72 overflow-y-auto space-y-2.5">
-            {tasks.length === 0 ? (
+          <div className="py-3 max-h-80 overflow-y-auto space-y-2.5">
+            {rewardNotifs.length > 0 && (
+              <div className="space-y-2">
+                {rewardNotifs.map(notif => (
+                  <div key={notif.id} className="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-2.5 text-xs text-emerald-100 flex items-start justify-between gap-2">
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="font-bold flex items-center gap-1.5 text-emerald-300">
+                        <Award className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span className="truncate">{notif.title}</span>
+                      </div>
+                      <p className="text-[11px] text-emerald-100/90 leading-snug">{notif.message}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dismissRewardNotif(notif.id);
+                      }}
+                      className="p-0.5 text-emerald-300 hover:text-white shrink-0"
+                      title="Dismiss"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {tasks.length === 0 && rewardNotifs.length === 0 ? (
               <div className="py-6 text-center text-xs text-slate-400 space-y-1">
                 <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
                 <p className="font-semibold text-slate-300">No active tasks right now</p>
@@ -167,11 +254,11 @@ export const TaskNotificationBell: React.FC<TaskNotificationBellProps> = ({
                         setOpen(false);
                         if (task.type === 'both') {
                           if (onNavigateToTasks) onNavigateToTasks();
-                          else if (onNavigateToLessons) onNavigateToLessons(task.targetSubtopics[0]);
+                          else if (onNavigateToLessons) onNavigateToLessons(task.targetSubtopics[0], task);
                         } else if (task.type === 'slides_traffic_light' && onNavigateToLessons) {
-                          onNavigateToLessons(task.targetSubtopics[0]);
+                          onNavigateToLessons(task.targetSubtopics[0], task);
                         } else if (task.type === 'practice_quiz' && onNavigateToQuizzes) {
-                          onNavigateToQuizzes(task.targetSubtopics[0]);
+                          onNavigateToQuizzes(task.targetSubtopics[0], task);
                         } else if (onNavigateToTasks) {
                           onNavigateToTasks();
                         }

@@ -336,6 +336,48 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
     }
   }, [newClassId]);
 
+  // Preload reconciled submission summaries for all loaded tasks so cards show accurate counts immediately
+  useEffect(() => {
+    if (tasks.length === 0) return;
+    let active = true;
+
+    const refreshAllSummaries = async () => {
+      try {
+        const entries = await Promise.all(
+          tasks.map(async (t) => {
+            const subs = await fetchTaskSubmissions(t.id, t.classId, t);
+            return [t.id, subs] as const;
+          })
+        );
+        if (!active) return;
+        setTaskSubmissions(prev => {
+          const next = { ...prev };
+          entries.forEach(([id, subs]) => {
+            next[id] = subs;
+          });
+          return next;
+        });
+      } catch {
+        // ignore offline
+      }
+    };
+
+    refreshAllSummaries();
+
+    const onUpdated = () => { refreshAllSummaries(); };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('igcse_task_submission_updated', onUpdated);
+      window.addEventListener('igcse_student_progress_synced', onUpdated);
+    }
+    return () => {
+      active = false;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('igcse_task_submission_updated', onUpdated);
+        window.removeEventListener('igcse_student_progress_synced', onUpdated);
+      }
+    };
+  }, [tasks]);
+
   // Live real-time subscription for expanded task submissions
   useEffect(() => {
     if (!expandedTaskId) return;
@@ -346,7 +388,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
     const unsubscribe = subscribeToTaskSubmissions(expandedTaskId, classId, (subs) => {
       setTaskSubmissions(prev => ({ ...prev, [expandedTaskId]: subs }));
       setLoadingSubmissions(prev => ({ ...prev, [expandedTaskId]: false }));
-    });
+    }, task);
 
     return () => unsubscribe();
   }, [expandedTaskId, tasks]);

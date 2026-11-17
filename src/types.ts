@@ -206,6 +206,7 @@ export interface QuizLengthRecord {
   total: number;
   percentage: number;
   quizLength: number;
+  requestedLength?: number;
   topics?: string[];
   subtopics?: string[];
   taskId?: string;

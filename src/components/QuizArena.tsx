@@ -26,18 +26,25 @@ import {
   RefreshCw, 
   GraduationCap,
   Flame,
-  FileQuestion
+  FileQuestion,
+  Coins
 } from 'lucide-react';
 import { QuizQuestion, ScienceSubject } from '../types';
 import { 
   ALL_SYLLABUS_TOPICS, 
   SyllabusTopicOption, 
   generateAIQuiz, 
+  generateClientFallbackQuiz,
   estimateCambridgeGrade,
   isGeneticsQuestion,
   deduplicateQuestionsList,
   ALL_SUBTOPIC_OPTIONS
 } from '../services/quizService';
+import {
+  calculateQuizGoldReward,
+  calculateQuizXPReward,
+  QuizAndLevelRewardResult
+} from '../services/firebaseGameService';
 
 export interface ActiveQuizTaskContext {
   taskId: string;
@@ -53,12 +60,14 @@ interface QuizArenaProps {
     subject: string,
     score: number,
     total: number,
-    meta?: { topics?: string[]; subtopics?: string[]; taskId?: string }
+    meta?: { topics?: string[]; subtopics?: string[]; taskId?: string; answeredCount?: number; requestedLength?: number }
   ) => void;
   weakTopics?: string[];
   onOpenLesson?: (topicCode: string) => void;
   taskContext?: ActiveQuizTaskContext | null;
   onClearTaskContext?: () => void;
+  lastQuizReward?: QuizAndLevelRewardResult | null;
+  onClearQuizReward?: () => void;
 }
 
 type QuizPhase = 'config' | 'generating' | 'active' | 'completed';
@@ -68,7 +77,9 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
   weakTopics = [],
   onOpenLesson,
   taskContext = null,
-  onClearTaskContext
+  onClearTaskContext,
+  lastQuizReward = null,
+  onClearQuizReward
 }) => {
   // Phase state
   const [phase, setPhase] = useState<QuizPhase>('config');
@@ -99,6 +110,7 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
   const [generationSource, setGenerationSource] = useState<string>('gemini-3.8-flash');
   const [isNavDrawerOpen, setIsNavDrawerOpen] = useState<boolean>(false);
   const [reviewFilter, setReviewFilter] = useState<'all' | 'incorrect' | 'correct'>('all');
+  const [completedAnsweredCount, setCompletedAnsweredCount] = useState<number>(0);
 
   const timerRef = useRef<any>(null);
 
@@ -243,6 +255,8 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
     setTimerSeconds(0);
     setCurrentIdx(0);
     setScore(0);
+    setCompletedAnsweredCount(0);
+    onClearQuizReward?.();
     setSelectedOption(null);
     setIsAnswerSubmitted(false);
 
@@ -258,7 +272,14 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
         subtopics: selectedSubtopics
       });
 
-      const finalQuestions = deduplicateQuestionsList(result.questions);
+      let finalQuestions = deduplicateQuestionsList(result.questions);
+
+      // If narrow subtopic selection couldn't supply enough unique questions for the requested length,
+      // top up seamlessly from parent topic(s) so exact-length tasks receive the full question count.
+      if (finalQuestions.length < numQuestions && selectedTopics.length > 0 && selectedSubtopics.length > 0) {
+        const parentPool = generateClientFallbackQuiz(selectedTopics, numQuestions * 2, tier);
+        finalQuestions = deduplicateQuestionsList([...finalQuestions, ...parentPool]).slice(0, numQuestions);
+      }
 
       setQuestions(finalQuestions);
       setUserAnswers(new Array(finalQuestions.length).fill(null));
@@ -323,6 +344,9 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
     setIsTimerRunning(false);
     setPhase('completed');
 
+    const answeredCount = userAnswers.filter(a => a !== null && a !== undefined).length;
+    setCompletedAnsweredCount(answeredCount);
+
     let primarySubject = 'all';
     if (activeSubjectTab !== 'all') {
       primarySubject = activeSubjectTab;
@@ -334,7 +358,9 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
     onQuizCompleted(primarySubject, score, questions.length, {
       topics: selectedTopics,
       subtopics: selectedSubtopics,
-      taskId: taskContext?.taskId
+      taskId: taskContext?.taskId,
+      answeredCount,
+      requestedLength: numQuestions
     });
   };
 
@@ -523,6 +549,13 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
                       {cnt === 40 ? '40 Mock' : `${cnt} Qs`}
                     </button>
                   ))}
+                </div>
+
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-300 rounded-lg px-3 py-1.5">
+                  <Coins className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span>
+                    Reward: up to <strong>{calculateQuizGoldReward(numQuestions, numQuestions)} Gold</strong> (scales with quiz size • max 200 Gold for 40 questions)
+                  </span>
                 </div>
               </div>
 
@@ -1072,6 +1105,33 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
                 <span className="px-3 py-1 rounded-lg bg-[#EBF3F5] border border-slate-300 text-xs font-bold text-slate-800">
                   Recorded {gradeInfo.percentage}% for {questions.length}-Question Quiz Length
                 </span>
+                {(() => {
+                  const effectiveCompleted = completedAnsweredCount > 0 ? completedAnsweredCount : 0;
+                  const earnedQuizGold = lastQuizReward?.quizGold ?? calculateQuizGoldReward(effectiveCompleted, score);
+                  const earnedLevelGold = lastQuizReward?.levelUpGold ?? 0;
+                  const earnedXp = lastQuizReward?.xpAdded ?? calculateQuizXPReward(effectiveCompleted, score);
+                  if (earnedQuizGold <= 0 && earnedLevelGold <= 0) return null;
+                  return (
+                    <>
+                      <span className="px-3 py-1 rounded-lg bg-amber-50 border border-amber-400 text-xs font-bold text-amber-900 inline-flex items-center gap-1.5">
+                        <Coins className="w-3.5 h-3.5 text-amber-600" />
+                        <span>+{earnedQuizGold} Quiz Gold</span>
+                      </span>
+                      {earnedXp > 0 && (
+                        <span className="px-3 py-1 rounded-lg bg-slate-100 border border-slate-300 text-xs font-bold text-slate-800 inline-flex items-center gap-1">
+                          <Zap className="w-3.5 h-3.5 text-slate-700" />
+                          <span>+{earnedXp} XP</span>
+                        </span>
+                      )}
+                      {earnedLevelGold > 0 && (
+                        <span className="px-3 py-1 rounded-lg bg-emerald-50 border border-emerald-500 text-xs font-bold text-emerald-900 inline-flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
+                          <span>Level Up! +{earnedLevelGold} Bonus Gold</span>
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
                 {taskContext && (
                   <span className={`px-3 py-1 rounded-lg border text-xs font-bold ${
                     questions.length === taskContext.requiredQuizLength

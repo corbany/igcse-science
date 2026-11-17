@@ -1,4 +1,5 @@
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -8,6 +9,7 @@ import nodemailer from 'nodemailer';
 import { getRevisionTasksForTopic, TOPIC_REVISION_CONFIGS } from './src/data/revisionScheduleTasks.ts';
 import { generateDynamicSyllabusQuestions } from './src/data/syllabusQuestionsBank.ts';
 import { isValidQuizQuestion } from './src/data/quizSanitizer.ts';
+import { attachBattleWebSocketServer, applyServerBattleControl } from './battleRoom.ts';
 
 dotenv.config();
 
@@ -101,6 +103,19 @@ async function callGeminiWithFallback(
 // API Routes
 app.get(['/healthz', '/api/health'], (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.post('/api/battle/control', (req, res) => {
+  try {
+    const { action, state, players, crates, crate } = req.body || {};
+    if (action !== 'start' && action !== 'end' && action !== 'reset' && action !== 'crate_drop') {
+      return res.status(400).json({ error: 'Invalid battle control action' });
+    }
+    applyServerBattleControl({ action, state, players, crates, crate });
+    return res.json({ ok: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Battle control sync failed' });
+  }
 });
 
 // Email notification endpoint when a student joins an instructor's class
@@ -1060,11 +1075,11 @@ SYLLABUS GROUNDING & CORE PRINCIPLES:
 - B9 Transport in animals: Double circulatory system (pulmonary & systemic). Heart chambers (atria, ventricles, septum, valves, coronary arteries). Blood vessels: arteries (thick muscular/elastic wall, small lumen, high pressure), veins (thinner wall, large lumen, valves), capillaries (one cell thick). Blood: red blood cells (hemoglobin, no nucleus, biconcave), white blood cells (phagocytes engulf pathogens, lymphocytes produce antibodies), platelets (clotting), plasma.
 - B10 Diseases and immunity: Pathogens (bacteria, viruses, fungi). Viruses have protein coat & genetic material, lack cells. Defenses: physical/chemical barriers, phagocytosis, antibody production. Active immunity (vaccines, memory cells).
 - B11 Gas exchange: Alveoli adaptations (huge surface area, one-cell thin, moist, dense capillary network, steep gradient). Ventilation mechanics (diaphragm and intercostal muscles).
-- B12 Respiration: Aerobic: C6H12O6 + 6O2 -> 6CO2 + 6H2O. 5 uses of energy: muscle contraction, protein synthesis, cell division, active transport, body temperature maintenance. Anaerobic respiration in muscles (lactic acid) and yeast (ethanol + CO2).
+- B12 Respiration: Aerobic: C6H12O6 + 6O2 -> 6CO2 + 6H2O. Uses of energy in living organisms: muscle contraction, protein synthesis, cell division, active transport, growth, maintenance of body temperature. (Anaerobic respiration / lactic acid / oxygen debt are excluded from 0653.)
 - B13 Drugs: Definition of a drug (substance modifying chemical reactions in body). Antibiotics destroy bacterial cell walls/metabolism, ineffective against viruses. Antibiotic resistance (MRSA, natural selection). Prudent antibiotic usage.
 - B14 Reproduction: Asexual vs sexual. Insect vs wind pollination. Seed germination requirements: WOW (Water, Oxygen, Warmth). Menstrual cycle: ovulation ~day 14, lining repair and maintenance.
 - B15 Organisms & environment: Energy from Sun, food chains & webs, trophic levels, 10% energy transfer rule, pyramids of numbers/biomass, carbon cycle.
-- B16 Human influences on ecosystems: Deforestation, greenhouse effect and global warming, eutrophication, conservation.
+- B16 Human influences on ecosystems: Deforestation, greenhouse effect and global warming, conservation of habitats and biodiversity.
 
 2. CHEMISTRY (C1-C12):
 - C1 States of matter: Particle arrangement in solids, liquids, gases. Kinetic particle theory. Diffusion rates related to molecular mass (lower Mr diffuses faster).
@@ -1087,7 +1102,7 @@ SYLLABUS GROUNDING & CORE PRINCIPLES:
 3. PHYSICS (P1-P5):
 - P1 Motion, forces, energy: Speed v = s/t. Acceleration a = (v - u)/t. Distance-time graph gradient = speed. Speed-time graph gradient = acceleration, area under graph = distance. Weight W = mg (g = 9.8 N/kg). Density ρ = m / V. Resultant force F = ma. Hooke's law F = kΔx. Moment = F * d. Work W = F * d = ΔE. Kinetic energy Ek = 0.5 * m * v². Gravitational potential energy ΔEp = m * g * Δh. Power P = W / t = E / t. Efficiency = (useful / total) * 100%. Pressure p = F / A.
 - P2 Thermal physics: Conduction (lattice vibrations, free electrons in metals), Convection (density currents in fluids), Radiation (infrared, dark matt surfaces best emitters/absorbers, shiny light surfaces best reflectors). Evaporation cooling (most energetic particles escape).
-- P3 Waves: Transverse vs longitudinal. Wave equation v = f * λ. Period T = 1/f. Reflection (i = r). Refraction (bending towards normal when slowing down, n = sin i / sin r). Total internal reflection (sin c = 1/n). Converging lenses. EM spectrum (Radio, Micro, Infrared, Visible ROYGBIV, UV, X-ray, Gamma; speed 3.0 x 10^8 m/s). Sound audible range 20 Hz – 20 kHz, ultrasound >20 kHz, speed in air ~330-340 m/s.
+- P3 Waves: Transverse vs longitudinal. Wave equation v = f * λ. Period T = 1/f. Reflection (i = r). Refraction (qualitative bending towards normal when slowing down and entering a denser medium; Snell's law n = sin i / sin r and total internal reflection / critical angle are excluded from 0653). Thin converging lenses. EM spectrum (Radio, Micro, Infrared, Visible ROYGBIV, UV, X-ray, Gamma; speed 3.0 x 10^8 m/s). Sound audible range 20 Hz – 20 kHz, ultrasound >20 kHz, speed in air ~330-340 m/s.
 - P4 Electricity: Charge Q = I * t. Current (amperes), Voltage (volts), Resistance (ohms). Ohm's law R = V / I. Series circuits (I same, V splits, R_total = R1 + R2). Parallel circuits (V same across branches, I splits, 1/R_total = 1/R1 + 1/R2). Power P = V * I = I² * R. Energy E = V * I * t = P * t. Electrical safety: fuses (melt on high current), circuit breakers, earthing, double insulation.
 - P5 Space physics: Solar system planetary order (Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune). Orbital speed v = 2πr / T. Nuclear fusion in stars (H -> He). Star life cycles. Redshift and Big Bang evidence.
 
@@ -1465,7 +1480,13 @@ Quality Rules:
 - Only ONE option must be indisputably correct. Distractors should target classic Cambridge examiner report errors.
 - Tier focus: ${tier || 'Extended'}.
 - Include relevant formulas (e.g. Magnification M = I/A, speed = d/t, weight = mg with g=9.8 N/kg, V = IR, wave speed v = fλ) where appropriate.
-- Quality & Syllabus Constraints: Do NOT generate any questions on genetics, inheritance, monohybrid crosses, Punnett squares, or alleles, as genetics is NOT part of the Cambridge IGCSE Combined Science (0653) syllabus.
+- Quality & Syllabus Constraints (STRICT Cambridge IGCSE Combined Science 0653 2025–2027 ONLY — do NOT include 0654 Co-ordinated Sciences or separate 0610/0620/0625 content):
+  * Do NOT generate questions on isotopes, radioactive isotopes, radioactivity, half-life, alpha/beta/gamma decay or ionising/penetrating power, or nuclear fission reactors (P5 in 0653 is Space Physics only; C2.2 does NOT include isotopes).
+  * Do NOT generate questions on mole calculations (n = m/Mr), molar gas volume (24 dm³), concentration (c = n/V), or relative atomic/molecular/formula mass (Ar/Mr) calculations.
+  * Do NOT generate questions on genetics, inheritance, monohybrid crosses, Punnett squares, or alleles.
+  * Do NOT generate questions on Snell's law (n = sin i / sin r), refractive index calculations, critical angle, or total internal reflection.
+  * Do NOT generate questions on Fleming's left-hand rule, solenoid electromagnets, or transformers.
+  * Do NOT generate questions on anaerobic respiration, lactic acid, oxygen debt, yeast fermentation, Haber process, or eutrophication.
 - UNIQUE SESSION SEED: ${batchSeed}. You MUST generate distinct, novel questions with varied scenarios, experimental apparatus, and numerical values.`;
 
         const prompt = `Generate ${count} brand-new, unique Cambridge IGCSE Combined Science 0653 multiple choice questions for these syllabus topics: ${topicsSubset.join(', ')}.
@@ -2261,19 +2282,19 @@ const SERVER_SYLLABUS_BANK: Record<string, {
   },
   'P5': {
     subject: 'physics',
-    title: 'Nuclear & Space Physics',
-    ref: 'P5.1',
+    title: 'Space Physics',
+    ref: 'P5.2.1',
     questions: [
       {
-        stem: 'Which nuclear reaction powers the core of the Sun and main sequence stars, releasing vast amounts of energy?',
+        stem: 'Which process powers the core of the Sun and main sequence stars, releasing vast amounts of energy?',
         correct: 'Nuclear fusion of light hydrogen nuclei into helium nuclei',
         distractors: [
-          'Nuclear fission of heavy uranium nuclei',
-          'Combustion of liquid hydrogen with oxygen',
-          'Spontaneous alpha decay of carbon-14'
+          'Electrostatic repulsion between solar dust clouds',
+          'Combustion of liquid hydrogen with oxygen gas',
+          'Tidal heating from the four inner rocky planets'
         ],
-        explanation: 'In the core of stars, intense gravity and temperature fuse hydrogen nuclei into helium, converting mass into energy via E = mc².',
-        ref: 'P5.1'
+        explanation: 'In the core of stable main sequence stars like the Sun, intense gravity and extreme temperature fuse hydrogen nuclei into helium, releasing large amounts of energy.',
+        ref: 'P5.2.1'
       }
     ]
   }
@@ -2489,8 +2510,7 @@ function generateSmartOfflineResponse(query: string, topic?: string, tier?: stri
 - **Electromagnetic Spectrum (Order of increasing frequency / decreasing wavelength):**
   - Radio waves ➔ Microwaves ➔ Infrared ➔ Visible light (ROYGBIV) ➔ Ultraviolet ➔ X-rays ➔ Gamma rays.
   - All travel at the speed of light in vacuum (\`3.0 × 10⁸ m/s\`).
-- **Refraction:** Bending of light when passing into denser medium (slows down, bends towards the normal: \`n = sin i / sin r\`).
-- **Total Internal Reflection:** Occurs when light travels from denser to less dense medium at an angle of incidence greater than the critical angle (\`sin c = 1/n\`).`;
+- **Refraction:** Bending of light towards the normal when passing from a less dense medium (air) into a denser medium (glass/water) because the wave slows down, and bending away from the normal when speeding up.`;
   }
 
   // Motion, Forces, Energy (P1)
@@ -2579,15 +2599,15 @@ function generateFallbackSchedule(
     'B9': { subject: 'biology', title: 'Transport in Animals', tasks: ['Label heart chambers, valves, pulmonary/systemic vessels', 'Explain why left ventricular wall is thicker than right ventricular wall', 'Compare structural adaptations of arteries, veins, and capillaries'] },
     'B10': { subject: 'biology', title: 'Diseases & Immunity', tasks: ['Distinguish pathogens (viruses, bacteria, fungi) and modes of transmission', 'Explain mechanical/chemical body defences and antibody-antigen response', 'Understand active immunity via vaccination and memory cell persistence'] },
     'B11': { subject: 'biology', title: 'Gas Exchange in Humans', tasks: ['Identify alveoli adaptations for rapid gas exchange (thin, moist, large surface, capillaries)', 'Explain intercostal muscles and diaphragm movements during inspiration/expiration', 'Compare inspired vs expired air composition percentages'] },
-    'B12': { subject: 'biology', title: 'Respiration', tasks: ['Write word and balanced chemical equation for aerobic respiration', 'Link cellular respiration to ATP generation in mitochondria', 'Distinguish aerobic from anaerobic respiration in muscles and yeast'] },
+    'B12': { subject: 'biology', title: 'Respiration', tasks: ['Write word and balanced chemical equation for aerobic respiration', 'Link cellular respiration to energy release in mitochondria', 'List uses of energy in living organisms: muscle contraction, protein synthesis, cell division, growth, active transport'] },
     'B13': { subject: 'biology', title: 'Drugs', tasks: ['Define a drug as any substance taken into the body that modifies or affects chemical reactions in the body', 'Describe how antibiotics treat bacterial infections and explain why they do not affect viruses', 'Explain how antibiotic resistance (such as MRSA) develops through natural selection and why prudent usage is essential'] },
     'B14': { subject: 'biology', title: 'Reproduction', tasks: ['Compare asexual (clones, 1 parent) vs sexual reproduction (gametes, genetic variation)', 'Label insect-pollinated vs wind-pollinated flower adaptations', 'Outline human menstrual cycle hormones: FSH, LH, oestrogen, progesterone'] },
     'B15': { subject: 'biology', title: 'Organisms & Environment', tasks: ['Trace sunlight as ultimate energy input in food chains and webs', 'Explain why only ~10% of energy transfers between trophic levels', 'Construct and interpret pyramids of numbers and pyramids of biomass'] },
-    'B16': { subject: 'biology', title: 'Ecosystems & Human Influences', tasks: ['Diagram the carbon cycle: photosynthesis, respiration, combustion, decomposition', 'Explain causes and impacts of deforestation on biodiversity and soil erosion', 'Review greenhouse effect and eutrophication caused by fertilizer leaching'] },
+    'B16': { subject: 'biology', title: 'Ecosystems & Human Influences', tasks: ['Diagram the carbon cycle: photosynthesis, respiration, combustion, decomposition', 'Explain causes and impacts of deforestation on biodiversity and soil erosion', 'Review greenhouse effect (CO2 and CH4) and conservation of habitats'] },
 
-    'C1': { subject: 'chemistry', title: 'States of Matter', tasks: ['Compare solid, liquid, gas particle arrangements, movements, and forces', 'Interpret heating and cooling curves and plateau melting/boiling points', 'Explain diffusion in terms of kinetic energy and molecular mass (rate ∝ 1/√Mr)'] },
-    'C2': { subject: 'chemistry', title: 'Atoms, Elements & Compounds', tasks: ['Determine protons, neutrons, electrons from atomic and mass numbers', 'Draw dot-and-cross diagrams for ionic bonding (NaCl, MgO) and covalent molecules (H2O, CH4)', 'Compare high melting ionic lattices with low melting simple covalent structures'] },
-    'C3': { subject: 'chemistry', title: 'Stoichiometry & Equations', tasks: ['Balance 10 chemical equations with state symbols (s, l, g, aq)', 'Calculate relative formula mass (Mr) from atomic masses (Ar)', 'Deduce ionic formulae from ion charges and verify the Law of Conservation of Mass'] },
+    'C1': { subject: 'chemistry', title: 'States of Matter', tasks: ['Compare solid, liquid, gas particle arrangements, movements, and forces', 'Interpret heating and cooling curves and plateau melting/boiling points', 'Explain diffusion in terms of kinetic energy and particle mass'] },
+    'C2': { subject: 'chemistry', title: 'Atoms, Elements & Compounds', tasks: ['Determine protons, neutrons, electrons from proton and nucleon numbers', 'Draw dot-and-cross diagrams for ionic bonding (NaCl, MgO) and covalent molecules (H2O, CH4)', 'Compare high melting ionic lattices with low melting simple covalent structures'] },
+    'C3': { subject: 'chemistry', title: 'Stoichiometry & Equations', tasks: ['Balance 10 chemical equations with state symbols (s, l, g, aq)', 'Write word and symbol equations for common reactions', 'Deduce ionic formulae from ion charges and verify the Law of Conservation of Mass'] },
     'C4': { subject: 'chemistry', title: 'Electrochemistry & Electrolysis', tasks: ['State anode (+) and cathode (-) products for molten PbBr2', 'Predict products for concentrated NaCl(aq) and dilute H2SO4(aq)', 'Write ionic half-equations with electrons: 2Cl⁻ ➔ Cl2 + 2e⁻ and 2H⁺ + 2e⁻ ➔ H2'] },
     'C5': { subject: 'chemistry', title: 'Chemical Energetics', tasks: ['Distinguish exothermic (temperature rises, ΔH negative) vs endothermic reactions', 'Draw and label reaction profile diagrams with activation energy (Ea)', 'Calculate net energy change using bond energies: ΔH = bonds broken - bonds made'] },
     'C6': { subject: 'chemistry', title: 'Chemical Reactions & Rates', tasks: ['Explain collision theory: activation energy and collision frequency', 'Investigate effect of surface area, concentration, temperature, and catalysts', 'Interpret reaction rate volume/mass loss vs time curves'] },
@@ -2600,9 +2620,9 @@ function generateFallbackSchedule(
 
     'P1': { subject: 'physics', title: 'Motion, Forces & Energy', tasks: ['Calculate speed v = s/t and acceleration a = Δv/t from speed-time gradients', 'Calculate distance travelled as area under speed-time graph', 'Apply W = mg (using g = 9.8 N/kg), F = ma, density ρ = m/V, and Ek / GPE equations'] },
     'P2': { subject: 'physics', title: 'Thermal Physics', tasks: ['Explain thermal conduction in solids (free electron diffusion in metals)', 'Explain convection currents in fluids based on density changes', 'Compare radiation absorption/emission on matt black vs shiny silver surfaces'] },
-    'P3': { subject: 'physics', title: 'Waves, Light & Sound', tasks: ['Use wave speed formula v = f × λ and relate frequency to pitch and amplitude to loudness', 'Apply law of reflection and refraction index n = sin i / sin r', 'Order electromagnetic spectrum: Radio, Micro, IR, Visible, UV, X-ray, Gamma'] },
+    'P3': { subject: 'physics', title: 'Waves, Light & Sound', tasks: ['Use wave speed formula v = f × λ and relate frequency to pitch and amplitude to loudness', 'Apply law of reflection (i = r) and qualitative refraction towards/away from the normal', 'Order electromagnetic spectrum: Radio, Micro, IR, Visible, UV, X-ray, Gamma'] },
     'P4': { subject: 'physics', title: 'Electricity & Magnetism', tasks: ['Use Ohm\'s law V = I × R and electrical charge equation Q = I × t', 'Calculate total resistance in series (R1 + R2) and parallel (1/R = 1/R1 + 1/R2)', 'Calculate electrical power P = I × V = I²R and electrical energy E = P × t'] },
-    'P5': { subject: 'physics', title: 'Nuclear & Space Physics', tasks: ['Explain nuclear fusion in Sun\'s core converting hydrogen into helium', 'Calculate orbital speed v = 2πr / T for satellites and planets', 'Outline star life cycle: nebula ➔ protostar ➔ main sequence ➔ red giant ➔ white dwarf'] }
+    'P5': { subject: 'physics', title: 'Space Physics', tasks: ['Explain nuclear fusion in Sun\'s core converting hydrogen into helium', 'Calculate orbital speed v = 2πr / T for satellites and planets', 'Outline star life cycle: nebula ➔ protostar ➔ main sequence ➔ red giant ➔ white dwarf'] }
   };
 
   // Structured thematic progression across weeks
@@ -2822,7 +2842,10 @@ async function startServer() {
     }
   });
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = http.createServer(app);
+  attachBattleWebSocketServer(httpServer);
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on 0.0.0.0:${PORT} (${isDev ? 'development (Vite middleware)' : 'production (Static dist)'})`);
   });
 }

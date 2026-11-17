@@ -43,7 +43,9 @@ import {
   Key,
   XCircle,
   CheckCircle2,
-  ChevronUp
+  ChevronUp,
+  Coins,
+  Zap
 } from 'lucide-react';
 import { ScienceSubject, TrafficLightStatus, SubtopicQuizResult, StudentProgress, SubtopicSlideProgress } from '../types';
 import { 
@@ -76,7 +78,13 @@ import {
 } from '../services/firestoreService';
 import { formatGoogleSlidesUrl } from '../data/googleSlidesRegistry';
 import { signInWithGoogle, signInWithDriveScope, getCachedDriveToken, clearCachedDriveToken, auth } from '../services/firebaseAuth';
-import { claimModuleRevisionReward, checkModuleClaimed } from '../services/firebaseGameService';
+import {
+  claimModuleRevisionReward,
+  checkModuleClaimed,
+  calculateQuizGoldReward,
+  calculateQuizXPReward,
+  QuizAndLevelRewardResult
+} from '../services/firebaseGameService';
 import { UserProfile } from '../types';
 
 export interface ActiveLessonTaskContext {
@@ -108,6 +116,8 @@ interface LessonSlidesViewerProps {
   onNavigateToTaskQuiz?: () => void;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
+  lastQuizReward?: QuizAndLevelRewardResult | null;
+  onClearQuizReward?: () => void;
 }
 
 export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
@@ -129,7 +139,9 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   onSaveNoteFromSlide,
   onNavigateToTaskQuiz,
   theme,
-  onToggleTheme
+  onToggleTheme,
+  lastQuizReward = null,
+  onClearQuizReward
 }) => {
   // Active subject tab within Lesson Slides: biology | chemistry | physics | all
   const [activeSubjectTab, setActiveSubjectTab] = useState<ScienceSubject | 'all'>(() => {
@@ -486,16 +498,50 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     }
   }, [isInstructor, user?.email]);
 
+  const getMapEntryCI = <T,>(map: Record<string, T> | undefined, code?: string): T | undefined => {
+    if (!map || !code) return undefined;
+    if (map[code] !== undefined) return map[code];
+    const upper = code.trim().toUpperCase();
+    for (const [k, v] of Object.entries(map)) {
+      if (k.trim().toUpperCase() === upper) return v;
+    }
+    return undefined;
+  };
+
+  const hasCompletedLessonCI = (list: string[], code?: string): boolean => {
+    if (!code || !Array.isArray(list)) return false;
+    const upper = code.trim().toUpperCase();
+    return list.some(c => String(c).trim().toUpperCase() === upper);
+  };
+
+  const extractSlidesIdentityKey = (embedOrDirectUrl?: string, fallbackId?: string): string => {
+    if (embedOrDirectUrl) {
+      const m = embedOrDirectUrl.match(/\/d\/(?:e\/)?([a-zA-Z0-9_-]+)/);
+      if (m && m[1]) return m[1];
+      return embedOrDirectUrl.split('?')[0].toLowerCase().trim();
+    }
+    return (fallbackId || '').toLowerCase().trim();
+  };
+
   // Find exact unaltered drive slides for currentSubtopic across all Biology, Chemistry, and Physics topics
   const driveSlidesForCurrentSubtopic = useMemo(() => {
     if (!currentSubtopic) return [];
     const list: Array<{ id: string; name: string; embedUrl: string; directUrl: string; source: 'drive' | 'manual' }> = [];
+    const seenKeys = new Set<string>();
     const targetCode = currentSubtopic.subtopicCode.toUpperCase(); // e.g. "B9.2", "C2.3", "P1.5.1"
+
+    const pushIfUnique = (item: { id: string; name: string; embedUrl: string; directUrl: string; source: 'drive' | 'manual' }) => {
+      const urlKey = extractSlidesIdentityKey(item.embedUrl || item.directUrl, item.id);
+      if (list.some(existing => existing.id === item.id || existing.embedUrl === item.embedUrl)) return;
+      if (urlKey && seenKeys.has(urlKey)) return;
+      if (urlKey) seenKeys.add(urlKey);
+      list.push(item);
+    };
     
     // 1. Check manual override for this subtopic code (case-insensitive check)
-    const override = manualOverrides[currentSubtopic.subtopicCode] || manualOverrides[targetCode];
+    const override = getMapEntryCI(manualOverrides, currentSubtopic.subtopicCode);
     if (override) {
-      list.push({
+      pushIfUnique({
         id: override.presentationId,
         name: override.title || `${currentSubtopic.subtopicCode} Google Slides Presentation`,
         embedUrl: override.embedUrl,
@@ -507,8 +553,8 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     // 2. Check if subtopic data has a linked Google Slides presentation
     if (currentSubtopic.googleSlidesEmbedUrl || currentSubtopic.googleSlidesUrl) {
       const parsed = formatGoogleSlidesUrl(currentSubtopic.googleSlidesEmbedUrl || currentSubtopic.googleSlidesUrl || '');
-      if (parsed.isValid && !list.some(item => item.embedUrl === parsed.embedUrl)) {
-        list.push({
+      if (parsed.isValid) {
+        pushIfUnique({
           id: `syllabus-slide-${currentSubtopic.subtopicCode}`,
           name: `${currentSubtopic.subtopicCode} - ${currentSubtopic.title} (Teacher Slide Deck)`,
           embedUrl: parsed.embedUrl,
@@ -519,8 +565,6 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     }
 
     // 3. Check synced slides from Drive folder
-    const targetTopic = currentSubtopic.topicCode.toUpperCase();   // e.g. "B9"
-
     for (const slide of syncedSlides) {
       // Resolve exact Cambridge subtopic code using slide name as primary source of truth
       const resolvedCode = (
@@ -557,15 +601,13 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
       }
 
       if (exactCodeMatch || nameStartsWithCode || bracketMatch) {
-        if (!list.some(item => item.id === slide.id)) {
-          list.push({
-            id: slide.id,
-            name: slide.name, // EXACT unaltered title from Google Drive
-            embedUrl: slide.googleSlidesEmbedUrl,
-            directUrl: slide.googleSlidesDirectUrl,
-            source: 'drive'
-          });
-        }
+        pushIfUnique({
+          id: slide.id,
+          name: slide.name, // EXACT unaltered title from Google Drive
+          embedUrl: slide.googleSlidesEmbedUrl,
+          directUrl: slide.googleSlidesDirectUrl,
+          source: 'drive'
+        });
       }
     }
 
@@ -583,8 +625,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   // Persistent cumulative slide reading progress for current subtopic (across all decks or Drive parts)
   const currentSubtopicSavedSlides: SubtopicSlideProgress | undefined = useMemo(() => {
     if (!currentSubtopic) return undefined;
-    return slidesReadBySubtopic[currentSubtopic.subtopicCode] ||
-      slidesReadBySubtopic[currentSubtopic.subtopicCode.toUpperCase()];
+    return getMapEntryCI(slidesReadBySubtopic, currentSubtopic.subtopicCode);
   }, [slidesReadBySubtopic, currentSubtopic]);
 
   const totalInteractiveSlidesForSubtopic = useMemo(() => {
@@ -597,6 +638,9 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     : totalInteractiveSlidesForSubtopic;
 
   const isCurrentSubtopicAllSlidesRead = useMemo(() => {
+    if (currentSubtopic && hasCompletedLessonCI(completedLessons, currentSubtopic.subtopicCode)) {
+      return true;
+    }
     if (!currentSubtopicSavedSlides) return false;
     if (currentSubtopicSavedSlides.allSlidesRead) return true;
     const keys = currentSubtopicSavedSlides.visitedKeys || [];
@@ -606,7 +650,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     }
     const interactiveKeys = keys.filter(k => k.startsWith('d'));
     return interactiveKeys.length >= currentSubtopicTotalSlides;
-  }, [currentSubtopicSavedSlides, hasMatchingDriveSlide, currentSubtopicTotalSlides]);
+  }, [currentSubtopicSavedSlides, hasMatchingDriveSlide, currentSubtopicTotalSlides, completedLessons, currentSubtopic]);
 
   const currentSubtopicReadCount = useMemo(() => {
     const keys = currentSubtopicSavedSlides?.visitedKeys || [];
@@ -625,17 +669,18 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   useEffect(() => {
     if (!currentSubtopic || !onUpdateSlidesRead) return;
     const code = currentSubtopic.subtopicCode;
-    const existing = slidesReadBySubtopic[code] || slidesReadBySubtopic[code.toUpperCase()];
+    const existing = getMapEntryCI(slidesReadBySubtopic, code);
     const existingKeys = new Set(existing?.visitedKeys || []);
+    const alreadyCompleted = existing?.allSlidesRead === true || hasCompletedLessonCI(completedLessons, code);
 
     if (hasMatchingDriveSlide) {
       const key = `drive-part-${activeDriveSlideIdx}`;
       const hadKey = existingKeys.has(key);
-      if (hadKey && existing?.totalSlides === currentSubtopicTotalSlides) return;
+      if (hadKey && existing?.totalSlides === currentSubtopicTotalSlides && existing?.allSlidesRead === alreadyCompleted) return;
       existingKeys.add(key);
       const nextKeys = Array.from(existingKeys);
       const partCount = nextKeys.filter(k => k.startsWith('drive-part-')).length;
-      const allRead = existing?.allSlidesRead === true || (partCount >= currentSubtopicTotalSlides && existingKeys.has('drive-confirmed'));
+      const allRead = alreadyCompleted || (partCount >= currentSubtopicTotalSlides && existingKeys.has('drive-confirmed'));
       onUpdateSlidesRead(code, {
         visitedKeys: nextKeys,
         totalSlides: currentSubtopicTotalSlides,
@@ -648,7 +693,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
       existingKeys.add(key);
       const nextKeys = Array.from(existingKeys);
       const interactiveCount = nextKeys.filter(k => k.startsWith('d')).length;
-      const allRead = existing?.allSlidesRead === true || interactiveCount >= currentSubtopicTotalSlides;
+      const allRead = alreadyCompleted || interactiveCount >= currentSubtopicTotalSlides;
       if (hadKey && existing?.totalSlides === currentSubtopicTotalSlides && existing?.allSlidesRead === allRead) return;
       onUpdateSlidesRead(code, {
         visitedKeys: nextKeys,
@@ -669,7 +714,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
   const handleConfirmDriveSlidesRead = () => {
     if (!currentSubtopic || !onUpdateSlidesRead) return;
     const code = currentSubtopic.subtopicCode;
-    const existing = slidesReadBySubtopic[code] || slidesReadBySubtopic[code.toUpperCase()];
+    const existing = getMapEntryCI(slidesReadBySubtopic, code);
     const existingKeys = new Set(existing?.visitedKeys || []);
     existingKeys.add(`drive-part-${activeDriveSlideIdx}`);
     existingKeys.add('drive-confirmed');
@@ -682,7 +727,44 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
       allSlidesRead: allRead,
       updatedAt: new Date().toISOString()
     });
-    if (allRead && !completedLessons.includes(code)) {
+    if (allRead && !hasCompletedLessonCI(completedLessons, code)) {
+      onToggleCompleteLesson(code);
+    }
+  };
+
+  // Automatically confirm Drive slide decks once all parts are opened & 20s study dwell threshold is met
+  useEffect(() => {
+    if (!currentSubtopic || !hasMatchingDriveSlide || isCurrentSubtopicAllSlidesRead) return;
+    if (deckDwellSeconds >= 20 && currentSubtopicReadCount >= currentSubtopicTotalSlides) {
+      handleConfirmDriveSlidesRead();
+    }
+  }, [
+    hasMatchingDriveSlide,
+    isCurrentSubtopicAllSlidesRead,
+    deckDwellSeconds,
+    currentSubtopicReadCount,
+    currentSubtopicTotalSlides,
+    currentSubtopic?.subtopicCode
+  ]);
+
+  const handleOpenDriveSlideExternal = () => {
+    if (!currentSubtopic || !onUpdateSlidesRead) return;
+    const code = currentSubtopic.subtopicCode;
+    const existing = getMapEntryCI(slidesReadBySubtopic, code);
+    const existingKeys = new Set(existing?.visitedKeys || []);
+    existingKeys.add(`drive-part-${activeDriveSlideIdx}`);
+    const partCount = Array.from(existingKeys).filter(k => k.startsWith('drive-part-')).length;
+    if (partCount >= currentSubtopicTotalSlides) {
+      existingKeys.add('drive-confirmed');
+    }
+    const allRead = partCount >= currentSubtopicTotalSlides && existingKeys.has('drive-confirmed');
+    onUpdateSlidesRead(code, {
+      visitedKeys: Array.from(existingKeys),
+      totalSlides: currentSubtopicTotalSlides,
+      allSlidesRead: Boolean(existing?.allSlidesRead || allRead),
+      updatedAt: new Date().toISOString()
+    });
+    if (allRead && !hasCompletedLessonCI(completedLessons, code)) {
       onToggleCompleteLesson(code);
     }
   };
@@ -944,6 +1026,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
 
   // Launch subtopic quiz with guaranteed fresh questions
   const startQuizForSubtopic = (code: string, isRetake: boolean = false) => {
+    onClearQuizReward?.();
     const nextAttempt = (subtopicAttemptCounts[code] || 0) + (isRetake ? 1 : 1);
     setSubtopicAttemptCounts(prev => ({ ...prev, [code]: nextAttempt }));
     const questions = getQuizForSubtopic(code, { attemptNumber: nextAttempt, resetHistory: isRetake });
@@ -994,8 +1077,16 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
     const trafficStatus: TrafficLightStatus = percentage >= 80 ? 'green' : percentage >= 50 ? 'orange' : 'red';
     onUpdateTrafficLight(quizSubtopicCode, trafficStatus);
 
-    // Automatically mark the slide deck completed ONLY when all slides in this subtopic have been genuinely read
-    if (isCurrentSubtopicAllSlidesRead && !completedLessons.includes(quizSubtopicCode)) {
+    // Automatically mark Drive slides confirmed if all parts were opened when finishing the Traffic Light quiz
+    if (
+      hasMatchingDriveSlide &&
+      currentSubtopic &&
+      quizSubtopicCode.trim().toUpperCase() === currentSubtopic.subtopicCode.trim().toUpperCase() &&
+      currentSubtopicReadCount >= currentSubtopicTotalSlides &&
+      !isCurrentSubtopicAllSlidesRead
+    ) {
+      handleConfirmDriveSlidesRead();
+    } else if (isCurrentSubtopicAllSlidesRead && !hasCompletedLessonCI(completedLessons, quizSubtopicCode)) {
       onToggleCompleteLesson(quizSubtopicCode);
     }
   };
@@ -1486,18 +1577,23 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                     {isCurrentSubtopicAllSlidesRead ? '✓ Done' : `${currentSubtopicReadCount}/${currentSubtopicTotalSlides}`}
                   </span>
                 </div>
-                <div className={`p-2.5 rounded-xl border flex items-center justify-between ${
-                  subtopicQuizScores[currentSubtopic.subtopicCode]
-                    ? 'bg-emerald-50 border-emerald-400 text-emerald-900 font-bold'
-                    : 'bg-white border-slate-300 text-slate-700'
-                }`}>
-                  <span>2. Traffic Light Quiz</span>
-                  <span className="font-mono">
-                    {subtopicQuizScores[currentSubtopic.subtopicCode]
-                      ? `✓ ${subtopicQuizScores[currentSubtopic.subtopicCode].percentage}%`
-                      : 'Pending'}
-                  </span>
-                </div>
+                {(() => {
+                  const subScore = getMapEntryCI(subtopicQuizScores, currentSubtopic.subtopicCode);
+                  return (
+                    <div className={`p-2.5 rounded-xl border flex items-center justify-between ${
+                      subScore
+                        ? 'bg-emerald-50 border-emerald-400 text-emerald-900 font-bold'
+                        : 'bg-white border-slate-300 text-slate-700'
+                    }`}>
+                      <span>2. Traffic Light Quiz</span>
+                      <span className="font-mono">
+                        {subScore
+                          ? `✓ ${subScore.percentage}%`
+                          : 'Pending'}
+                      </span>
+                    </div>
+                  );
+                })()}
                 {(activeTaskContext.type === 'both' || activeTaskContext.type === 'practice_quiz') && (
                   <div className="p-2.5 rounded-xl border bg-white border-slate-300 text-slate-800 flex items-center justify-between gap-2">
                     <span className="font-semibold">3. Practice Quiz ({activeTaskContext.requiredQuizLength} Qs)</span>
@@ -1754,6 +1850,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                     href={activeDriveSlide.directUrl}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={handleOpenDriveSlideExternal}
                     className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white transition shadow-2xs cursor-pointer"
                     title="Open full Google Slides presentation in a new tab"
                   >
@@ -2649,7 +2746,7 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                     </p>
                   </div>
 
-                  {/* Cambridge Grade Prediction Pill */}
+                  {/* Cambridge Grade Prediction & Gold Rewards */}
                   <div className="flex items-center justify-center gap-2 flex-wrap pt-1">
                     <span className={`text-xs font-mono font-bold px-3 py-1 rounded-xl border ${getCambridgeGrade(quizPct).color}`}>
                       {getCambridgeGrade(quizPct).label}
@@ -2657,6 +2754,32 @@ export const LessonSlidesViewer: React.FC<LessonSlidesViewerProps> = ({
                     <span className="text-xs font-mono px-3 py-1 rounded-xl bg-white border border-slate-300 text-slate-700">
                       ⏱ Time: {formatQuizTimer(quizTimerSeconds)}
                     </span>
+                    {(() => {
+                      const qCount = quizQuestions.length || 10;
+                      const earnedQuizGold = lastQuizReward?.quizGold ?? calculateQuizGoldReward(qCount, quizScore);
+                      const earnedLevelGold = lastQuizReward?.levelUpGold ?? 0;
+                      const earnedXp = lastQuizReward?.xpAdded ?? calculateQuizXPReward(qCount, quizScore);
+                      return (
+                        <>
+                          <span className="text-xs font-bold px-3 py-1 rounded-xl bg-amber-50 border border-amber-400 text-amber-900 inline-flex items-center gap-1.5">
+                            <Coins className="w-3.5 h-3.5 text-amber-600" />
+                            <span>+{earnedQuizGold} Gold</span>
+                          </span>
+                          {earnedXp > 0 && (
+                            <span className="text-xs font-bold px-3 py-1 rounded-xl bg-slate-100 border border-slate-300 text-slate-800 inline-flex items-center gap-1">
+                              <Zap className="w-3.5 h-3.5 text-slate-700" />
+                              <span>+{earnedXp} XP</span>
+                            </span>
+                          )}
+                          {earnedLevelGold > 0 && (
+                            <span className="text-xs font-bold px-3 py-1 rounded-xl bg-emerald-50 border border-emerald-500 text-emerald-900 inline-flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
+                              <span>Level Up! +{earnedLevelGold} Bonus Gold</span>
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
 

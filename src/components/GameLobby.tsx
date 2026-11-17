@@ -371,14 +371,14 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {lobbyPlayers.map((player) => {
+              {lobbyPlayers.map((player, idx) => {
                 const skin = SHOP_ITEMS.find(i => i.id === player.avatar) || SHOP_ITEMS[0];
                 const weapon = SHOP_ITEMS.find(i => i.id === player.equippedWeapon) || SHOP_ITEMS[6];
                 const isMe = player.uid === user.id;
 
                 return (
                   <div
-                    key={player.uid}
+                    key={player.uid ? `${player.uid}_${idx}` : `lobby_${idx}`}
                     className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 transition ${
                       isMe 
                         ? 'bg-[#EBF3F5] border-2 border-teal-400 shadow-xs' 
