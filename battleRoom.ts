@@ -18,6 +18,7 @@ export interface RoomPlayer {
   brick: number;
   metal: number;
   isAlive: boolean;
+  isSpectator?: boolean;
   kills: number;
   highGroundActive?: boolean;
   metalShieldActiveUntil?: number;
@@ -174,7 +175,7 @@ function broadcastJson(payload: unknown, excludeSocket?: AttachedSocket) {
 function maybeCheckLastStandingWinner() {
   if (roomState.status !== 'IN_PROGRESS') return;
   const realPlayers = Array.from(roomPlayers.values()).filter(
-    p => p.uid && !p.uid.startsWith('dummy_')
+    p => p.uid && !p.uid.startsWith('dummy_') && !p.isSpectator
   );
   if (realPlayers.length < 2) return;
   const alivePlayers = realPlayers.filter(p => p.isAlive && p.hp > 0);
@@ -236,8 +237,15 @@ export function applyServerBattleControl(input: {
     roomCrates.clear();
     if (Array.isArray(players)) {
       for (const p of players) {
-        if (p && p.uid) {
-          roomPlayers.set(p.uid, { ...p, dirty: false, lastUpdateAt: Date.now() });
+        if (p && p.uid && !p.isSpectator) {
+          roomPlayers.set(p.uid, {
+            ...p,
+            isAlive: true,
+            isSpectator: false,
+            hp: Math.max(1, p.hp || 100),
+            dirty: false,
+            lastUpdateAt: Date.now()
+          });
         }
       }
     }
@@ -390,10 +398,22 @@ export function createBattleWebSocketServer() {
             }
           }
 
-          // Seed players/crates only if room doesn't have them yet for this match
+          const isSpectator = Boolean(msg.isSpectator || msg.player?.isSpectator);
+          if (isSpectator && incomingUid) {
+            roomPlayers.delete(incomingUid);
+          }
+
+          // Seed players/crates only if room doesn't have them yet for this match (never seed dead ghosts or spectators)
           if (Array.isArray(msg.seedPlayers)) {
             for (const sp of msg.seedPlayers) {
-              if (sp && sp.uid && !roomPlayers.has(sp.uid)) {
+              if (
+                sp &&
+                sp.uid &&
+                !sp.isSpectator &&
+                sp.isAlive &&
+                (sp.hp === undefined || sp.hp > 0) &&
+                !roomPlayers.has(sp.uid)
+              ) {
                 roomPlayers.set(sp.uid, { ...sp, dirty: false, lastUpdateAt: now });
               }
             }
@@ -409,11 +429,18 @@ export function createBattleWebSocketServer() {
             }
           }
 
-          if (msg.player && msg.player.uid) {
+          if (!isSpectator && msg.player && msg.player.uid) {
             const p = msg.player as RoomPlayer;
             const existing = roomPlayers.get(p.uid);
             if (!existing) {
-              const created: RoomPlayer = { ...p, dirty: true, lastUpdateAt: now };
+              const created: RoomPlayer = {
+                ...p,
+                isAlive: true,
+                isSpectator: false,
+                hp: Math.max(1, p.hp || 100),
+                dirty: true,
+                lastUpdateAt: now
+              };
               roomPlayers.set(p.uid, created);
             } else {
               // Preserve authoritative combat stats (hp, shield, isAlive, kills), allow skin/weapon/name sync
@@ -488,7 +515,7 @@ export function createBattleWebSocketServer() {
           const targetUid = typeof msg.targetUid === 'string' ? msg.targetUid : '';
           if (!targetUid || targetUid.startsWith('dummy_')) return;
           const target = roomPlayers.get(targetUid);
-          if (!target || !target.isAlive || target.hp <= 0) return;
+          if (!target || target.isSpectator || !target.isAlive || target.hp <= 0) return;
 
           const attackerUid = typeof msg.attackerUid === 'string' ? msg.attackerUid : ws.uid;
           const isStorm = Boolean(msg.isStorm);

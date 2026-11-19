@@ -3303,6 +3303,12 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   onOpenShop
 }) => {
   const handleExit = onExit || onExitArena;
+  const isOwnerTester = user?.email?.toLowerCase() === 'corbanb@gisboyshigh.net';
+  const [gameProfile, setGameProfile] = useState<UserGameProfile | null>(null);
+  const isInstructor = user?.role === 'instructor' || gameProfile?.role === 'instructor' || isOwnerTester;
+  const isInstructorRef = useRef<boolean>(isInstructor);
+  isInstructorRef.current = isInstructor;
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [confirmEndMatch, setConfirmEndMatch] = useState<boolean>(false);
   const [isEndingMatch, setIsEndingMatch] = useState<boolean>(false);
@@ -3406,9 +3412,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const [structures, setStructures] = useState<ArenaStructure[]>([]);
   const [crates, setCrates] = useState<SupplyCrate[]>([]);
   const [battleState, setBattleState] = useState<BattleEventState | null>(null);
-  const [gameProfile, setGameProfile] = useState<UserGameProfile | null>(null);
 
-  // Local Player State
+  // Local Player State (Instructors start as invisible spectators watching students play)
   const [localX, setLocalX] = useState<number>(2500);
   const [localY, setLocalY] = useState<number>(2500);
   const [localHp, setLocalHp] = useState<number>(100);
@@ -3416,12 +3421,13 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const [localWood, setLocalWood] = useState<number>(30);
   const [localBrick, setLocalBrick] = useState<number>(20);
   const [localMetal, setLocalMetal] = useState<number>(15);
-  const [isAlive, setIsAlive] = useState<boolean>(true);
+  const [isAlive, setIsAlive] = useState<boolean>(() => !isInstructor);
   const [kills, setKills] = useState<number>(0);
   const [showEliminationToast, setShowEliminationToast] = useState<boolean>(false);
   const [spectateTargetName, setSpectateTargetName] = useState<string | null>(null);
   const spectateCycleIndexRef = useRef<number>(0);
   const hasSpawnSynced = useRef<boolean>(false);
+  const hasSpectatorFocusedRef = useRef<boolean>(false);
 
   // Fullscreen, Audio & Minimap UI state
   const containerRef = useRef<HTMLDivElement>(null);
@@ -3496,7 +3502,6 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   }, [mapRevision]);
 
   // Instructor Test & Map Design States (corbanb@gisboyshigh.net only)
-  const isOwnerTester = user?.email?.toLowerCase() === 'corbanb@gisboyshigh.net';
   const [showMapEditor, setShowMapEditor] = useState<boolean>(false);
   const [showTestControls, setShowTestControls] = useState<boolean>(false);
   const [isVictoryMinimized, setIsVictoryMinimized] = useState<boolean>(false);
@@ -3528,7 +3533,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const facingAngleRef = useRef<number>(0);
   const walkCycleRef = useRef<number>(0);
   const isLocallyMovingRef = useRef<boolean>(false);
-  const isAliveRef = useRef<boolean>(true);
+  const isAliveRef = useRef<boolean>(!isInstructor);
   const hpRef = useRef<number>(100);
   const shieldRef = useRef<number>(50);
   const woodRef = useRef<number>(30);
@@ -4162,6 +4167,58 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       }
     };
 
+    const getDistributedStudentSpawn = (uidStr: string): { x: number; y: number; angle: number } => {
+      const h = hashSeedString(`${uidStr}_${battleStateRef.current?.startedAt || 'live'}`);
+      const ang = ((h % 360) / 180) * Math.PI;
+      const rad = 1050 + (h % 350);
+      return {
+        x: Math.round(2500 + Math.cos(ang) * rad),
+        y: Math.round(2500 + Math.sin(ang) * rad),
+        angle: ang + Math.PI
+      };
+    };
+
+    const focusSpectatorOnAliveStudent = (playersList: ArenaPlayer[]) => {
+      if (!isInstructorRef.current || hasSpectatorFocusedRef.current) return;
+      const firstAlive = playersList.find(
+        p => p.uid !== user.id && !p.isSpectator && p.isAlive && (p.hp === undefined || p.hp > 0)
+      );
+      if (firstAlive) {
+        hasSpectatorFocusedRef.current = true;
+        setPlayerCoords(firstAlive.x, firstAlive.y);
+        const vd = viewDimsRef.current;
+        cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, firstAlive.x - vd.width / 2));
+        cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, firstAlive.y - vd.height / 2));
+        setSpectateTargetName(firstAlive.name);
+      }
+    };
+
+    const buildStudentJoinPlayer = (spawnPt?: { x: number; y: number; angle: number }): ArenaPlayer => {
+      const initSkin = activeSkinId || gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist';
+      const initWeapon = activeWeaponId || gameProfile?.equippedWeapon || 'bunsen_burner';
+      const isKnight = getFantasySkin(initSkin).id === 'knight_hero';
+      const pt = spawnPt || getDistributedStudentSpawn(user.id);
+      return {
+        uid: user.id,
+        name: user.name || 'Hero',
+        avatar: initSkin,
+        equippedWeapon: initWeapon,
+        x: pt.x,
+        y: pt.y,
+        angle: pt.angle,
+        hp: 100,
+        maxHp: 100,
+        shield: isKnight ? 70 : 50,
+        maxShield: isKnight ? 120 : 100,
+        wood: Math.max(10, gameProfile?.wood ?? 20),
+        brick: Math.max(10, gameProfile?.brick ?? 10),
+        metal: Math.max(5, gameProfile?.metal ?? 5),
+        isAlive: true,
+        isSpectator: false,
+        kills: 0
+      };
+    };
+
     const applyMatchStateTransition = (st: Partial<BattleEventState>, forceResetSpawn: boolean = false) => {
       const prevSt = battleStateRef.current;
       const merged: BattleEventState = {
@@ -4183,10 +4240,15 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           localDeathTimeRef.current = 0;
           hasDeclaredWinnerRef.current = false;
           hasSpawnSynced.current = false;
+          hasSpectatorFocusedRef.current = false;
           setShowEliminationToast(false);
           setSpectateTargetName(null);
-          isAliveRef.current = true;
-          setIsAlive(true);
+
+          // Instructor MUST stay an invisible spectator watching students play; students MUST start alive!
+          const nextAlive = !isInstructorRef.current;
+          isAliveRef.current = nextAlive;
+          setIsAlive(nextAlive);
+
           worldDataRef.current = generateSuperAnimalStyleMap(hashSeedString(merged.startedAt));
           structuresRef.current = [];
           setStructures([]);
@@ -4194,6 +4256,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             clearArenaStructures().catch(() => {});
           }
           setMapRevision(r => r + 1);
+        } else if (isInstructorRef.current && isAliveRef.current) {
+          isAliveRef.current = false;
+          setIsAlive(false);
         }
         const startMs = new Date(merged.startedAt).getTime();
         if (Date.now() - startMs < 600 * 1000) {
@@ -4211,17 +4276,28 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           structuresRef.current = [];
           setStructures([]);
         }
+        const nextAlive = !isInstructorRef.current;
+        isAliveRef.current = nextAlive;
+        setIsAlive(nextAlive);
         matchStartTimeRef.current = Date.now();
       }
-      if (merged.status === 'ENDED' && merged.currentWinner && !isOwnerTester) {
+      if (merged.status === 'ENDED' && merged.currentWinner) {
         setWinnerCelebration(merged.currentWinner);
         soundEngine.playVictory();
-      } else if (isOwnerTester || merged.status !== 'ENDED') {
+      } else if (merged.status !== 'ENDED') {
         setWinnerCelebration(null);
       }
     };
 
     const syncLocalVitalsFromMe = (me: ArenaPlayer) => {
+      if (isInstructorRef.current) {
+        if (battleStateRef.current?.status === 'IN_PROGRESS' && isAliveRef.current) {
+          isAliveRef.current = false;
+          setIsAlive(false);
+        }
+        return false;
+      }
+
       if (me.hp < prevLocalHpRef.current) {
         lastDamageTimeRef.current = Date.now();
       }
@@ -4239,8 +4315,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         flashSkinAbility('Royal Absorption +Bricks!');
       }
 
-      const testerExempt = isOwnerTester && localDeathTimeRef.current === 0;
-      const snapshotEliminated = !testerExempt && (!me.isAlive || (me.hp !== undefined && me.hp <= 0));
+      const matchIsInProgress = battleStateRef.current?.status === 'IN_PROGRESS';
+      const snapshotEliminated = matchIsInProgress && (!me.isAlive || (me.hp !== undefined && me.hp <= 0));
       if (snapshotEliminated && !localEliminatedRef.current) {
         localEliminatedRef.current = true;
         localDeathTimeRef.current = Date.now();
@@ -4258,8 +4334,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       }
 
       prevLocalHpRef.current = me.hp;
-      const resolvedAlive = testerExempt ? true : (localEliminatedRef.current ? false : me.isAlive);
-      const resolvedHp = testerExempt && !me.isAlive ? 100 : (resolvedAlive ? me.hp : 0);
+      const resolvedAlive = !matchIsInProgress ? true : (localEliminatedRef.current ? false : me.isAlive);
+      const resolvedHp = resolvedAlive ? me.hp : 0;
       const changedAlive = resolvedAlive !== isAliveRef.current;
 
       if (hpRef.current !== resolvedHp) {
@@ -4305,27 +4381,36 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     wsClientRef.current = wsClient;
     wsClient.connect(
       () => {
-        const initSkin = activeSkinId || gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist';
-        const initWeapon = activeWeaponId || gameProfile?.equippedWeapon || 'bunsen_burner';
-        const isKnight = getFantasySkin(initSkin).id === 'knight_hero';
+        if (isInstructorRef.current) {
+          return {
+            uid: user.id,
+            isSpectator: true,
+            state: battleStateRef.current || undefined
+          };
+        }
+        const spawnPt = !hasSpawnSynced.current ? getDistributedStudentSpawn(user.id) : undefined;
+        if (spawnPt) {
+          setPlayerCoords(spawnPt.x, spawnPt.y);
+          const vd = viewDimsRef.current;
+          cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, spawnPt.x - vd.width / 2));
+          cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, spawnPt.y - vd.height / 2));
+          hasSpawnSynced.current = true;
+        }
+        const studentPlayer = buildStudentJoinPlayer(spawnPt);
+        studentPlayer.x = Math.round(playerPosRef.current.x);
+        studentPlayer.y = Math.round(playerPosRef.current.y);
+        studentPlayer.angle = facingAngleRef.current;
+        studentPlayer.hp = hpRef.current;
+        studentPlayer.shield = shieldRef.current ?? studentPlayer.shield;
+        studentPlayer.wood = woodRef.current;
+        studentPlayer.brick = brickRef.current;
+        studentPlayer.metal = metalRef.current;
+        studentPlayer.isAlive = !localEliminatedRef.current;
         return {
           uid: user.id,
-          name: user.name || (user.role === 'instructor' ? 'Instructor (Admin)' : 'Hero'),
-          avatar: initSkin,
-          equippedWeapon: initWeapon,
-          x: Math.round(playerPosRef.current.x),
-          y: Math.round(playerPosRef.current.y),
-          angle: facingAngleRef.current,
-          hp: hpRef.current,
-          maxHp: 100,
-          shield: shieldRef.current ?? (isKnight ? 70 : 50),
-          maxShield: isKnight ? 120 : 100,
-          wood: woodRef.current,
-          brick: brickRef.current,
-          metal: metalRef.current,
-          isAlive: !localEliminatedRef.current,
+          isSpectator: false,
+          player: studentPlayer,
           state: battleStateRef.current || undefined,
-          seedPlayers: arenaPlayersRef.current.length > 0 ? arenaPlayersRef.current : undefined,
           seedStructures: structuresRef.current.length > 0 ? structuresRef.current : undefined,
           seedCrates: cratesRef.current.length > 0 ? cratesRef.current : undefined
         };
@@ -4338,20 +4423,50 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           if (state && state.status) {
             applyMatchStateTransition(state);
           }
-          if (Array.isArray(players) && players.length > 0) {
-            // Preserve existing names if Firestore had them
+          if (Array.isArray(players)) {
+            // Preserve existing names if Firestore had them; never include instructors/spectators
             const nameCache = new Map<string, string>();
             for (const oldP of arenaPlayersRef.current) {
               if (oldP.name) nameCache.set(oldP.uid, oldP.name);
             }
-            const mergedPlayers = players.map(p => ({
-              ...p,
-              name: p.name || nameCache.get(p.uid) || 'Hero'
-            }));
+            const mergedPlayers = players
+              .filter(p => p && p.uid && !p.isSpectator && !(isInstructorRef.current && p.uid === user.id))
+              .map(p => ({
+                ...p,
+                name: p.name || nameCache.get(p.uid) || 'Hero'
+              }));
             arenaPlayersRef.current = mergedPlayers;
             rebuildPlayerMap(mergedPlayers);
-            const me = mergedPlayers.find(p => p.uid === user.id);
-            if (me) syncLocalVitalsFromMe(me);
+
+            if (isInstructorRef.current) {
+              isAliveRef.current = false;
+              setIsAlive(false);
+              focusSpectatorOnAliveStudent(mergedPlayers);
+            } else {
+              const me = mergedPlayers.find(p => p.uid === user.id);
+              if (me) {
+                syncLocalVitalsFromMe(me);
+              } else if ((state?.status || battleStateRef.current?.status) === 'IN_PROGRESS' && !localEliminatedRef.current) {
+                const initStudent = buildStudentJoinPlayer();
+                setPlayerCoords(initStudent.x, initStudent.y);
+                const vd = viewDimsRef.current;
+                cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, initStudent.x - vd.width / 2));
+                cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, initStudent.y - vd.height / 2));
+                hasSpawnSynced.current = true;
+                arenaPlayersRef.current.push(initStudent);
+                playerByUidRef.current.set(initStudent.uid, initStudent);
+                isAliveRef.current = true;
+                setIsAlive(true);
+                ensureArenaPlayer(initStudent);
+                wsClient.sendRaw({
+                  type: 'hello',
+                  uid: initStudent.uid,
+                  isSpectator: false,
+                  player: initStudent,
+                  state: battleStateRef.current || undefined
+                });
+              }
+            }
             schedulePlayersReactSync(true);
           }
           if (Array.isArray(srvStructs) && srvStructs.length > 0) {
@@ -4372,32 +4487,72 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           setFrostSlowUntil(0);
           enemyFrostSlowUntilRef.current = {};
           applyMatchStateTransition(state, true);
-          if (Array.isArray(players)) {
-            arenaPlayersRef.current = players;
-            rebuildPlayerMap(players);
-            const me = players.find(p => p.uid === user.id);
+          const filteredPlayers = Array.isArray(players)
+            ? players.filter(p => p && p.uid && !p.isSpectator && !(isInstructorRef.current && p.uid === user.id))
+            : [];
+          arenaPlayersRef.current = filteredPlayers;
+          rebuildPlayerMap(filteredPlayers);
+
+          if (isInstructorRef.current) {
+            isAliveRef.current = false;
+            setIsAlive(false);
+            focusSpectatorOnAliveStudent(filteredPlayers);
+          } else {
+            localEliminatedRef.current = false;
+            localDeathTimeRef.current = 0;
+            const me = filteredPlayers.find(p => p.uid === user.id);
             if (me) {
               hpRef.current = me.hp;
               shieldRef.current = me.shield;
               woodRef.current = Math.max(10, me.wood ?? 20);
               brickRef.current = Math.max(10, me.brick ?? 10);
               metalRef.current = Math.max(5, me.metal ?? 5);
-              isAliveRef.current = me.isAlive;
+              isAliveRef.current = true;
               setLocalHp(me.hp);
               setLocalShield(me.shield);
               setLocalWood(woodRef.current);
               setLocalBrick(brickRef.current);
               setLocalMetal(metalRef.current);
-              setIsAlive(me.isAlive);
+              setIsAlive(true);
               setKills(0);
               setPlayerCoords(me.x, me.y);
               const vd = viewDimsRef.current;
               cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, me.x - vd.width / 2));
               cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, me.y - vd.height / 2));
               hasSpawnSynced.current = true;
+            } else {
+              const initStudent = buildStudentJoinPlayer();
+              hpRef.current = initStudent.hp;
+              shieldRef.current = initStudent.shield;
+              woodRef.current = initStudent.wood;
+              brickRef.current = initStudent.brick;
+              metalRef.current = initStudent.metal;
+              isAliveRef.current = true;
+              setLocalHp(initStudent.hp);
+              setLocalShield(initStudent.shield);
+              setLocalWood(initStudent.wood);
+              setLocalBrick(initStudent.brick);
+              setLocalMetal(initStudent.metal);
+              setIsAlive(true);
+              setKills(0);
+              setPlayerCoords(initStudent.x, initStudent.y);
+              const vd = viewDimsRef.current;
+              cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, initStudent.x - vd.width / 2));
+              cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, initStudent.y - vd.height / 2));
+              hasSpawnSynced.current = true;
+              arenaPlayersRef.current.push(initStudent);
+              playerByUidRef.current.set(initStudent.uid, initStudent);
+              ensureArenaPlayer(initStudent);
+              wsClient.sendRaw({
+                type: 'hello',
+                uid: initStudent.uid,
+                isSpectator: false,
+                player: initStudent,
+                state: battleStateRef.current || undefined
+              });
             }
-            schedulePlayersReactSync(true);
           }
+          schedulePlayersReactSync(true);
           if (Array.isArray(startCrates)) {
             cratesRef.current = startCrates;
             scheduleCratesReactSync(true);
@@ -4424,6 +4579,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           let rosterChanged = false;
           for (const t of tuples) {
             const [uid, x, y, angle, hp, shield, aliveNum, killCnt, avatar, equippedWeapon, hgNum, metalShieldUntilVal, frostSlowUntilVal] = t;
+            if (isInstructorRef.current && uid === user.id) continue;
             const existing = playerByUidRef.current.get(uid);
             const isAliveBool = aliveNum === 1;
             if (existing) {
@@ -4442,6 +4598,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               existing.highGroundActive = hgNum === 1;
               existing.metalShieldActiveUntil = metalShieldUntilVal;
               existing.frostSlowUntil = frostSlowUntilVal || 0;
+              if (uid === user.id && !isInstructorRef.current && !isAliveBool && !localEliminatedRef.current && battleStateRef.current?.status === 'IN_PROGRESS') {
+                syncLocalVitalsFromMe(existing);
+              }
             } else {
               const newEntry: ArenaPlayer = {
                 uid,
@@ -4459,6 +4618,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 brick: 10,
                 metal: 5,
                 isAlive: isAliveBool,
+                isSpectator: false,
                 kills: killCnt,
                 highGroundActive: hgNum === 1,
                 metalShieldActiveUntil: metalShieldUntilVal,
@@ -4468,6 +4628,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               playerByUidRef.current.set(uid, newEntry);
               rosterChanged = true;
             }
+          }
+          if (isInstructorRef.current && !hasSpectatorFocusedRef.current && arenaPlayersRef.current.length > 0) {
+            focusSpectatorOnAliveStudent(arenaPlayersRef.current);
           }
           if (aliveChanged || rosterChanged) {
             schedulePlayersReactSync(true);
@@ -4578,6 +4741,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           }
 
           if (dmg.targetUid === user.id) {
+            if (isInstructorRef.current) return;
             lastDamageTimeRef.current = Date.now();
             if (dmg.brittleGuardTriggered) {
               brittleGuardCooldownUntilRef.current = Date.now() + 25000;
@@ -4595,11 +4759,10 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               flashSkinAbility('Royal Absorption +Bricks!');
             }
 
-            const testerExempt = isOwnerTester && localDeathTimeRef.current === 0;
-            const resolvedAlive = testerExempt ? true : dmg.isAlive;
-            const resolvedHp = testerExempt && !dmg.isAlive ? 100 : (resolvedAlive ? dmg.hp : 0);
+            const resolvedAlive = dmg.isAlive;
+            const resolvedHp = resolvedAlive ? dmg.hp : 0;
 
-            if (!testerExempt && !dmg.isAlive && !localEliminatedRef.current) {
+            if (!dmg.isAlive && !localEliminatedRef.current) {
               localEliminatedRef.current = true;
               localDeathTimeRef.current = Date.now();
               selectedBuildTypeRef.current = null;
@@ -4681,10 +4844,13 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     );
 
     const unsubPlayers = subscribeToArenaPlayers((players) => {
+      const cleanPlayers = players.filter(
+        p => p && p.uid && !p.isSpectator && !(isInstructorRef.current && p.uid === user.id)
+      );
       if (wsConnectedRef.current && playerByUidRef.current.size > 0) {
         // WS is active & authoritative for live movement/combat; only merge missing UIDs & names
         let addedAny = false;
-        for (const p of players) {
+        for (const p of cleanPlayers) {
           const existing = playerByUidRef.current.get(p.uid);
           if (!existing) {
             arenaPlayersRef.current.push(p);
@@ -4694,15 +4860,28 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             existing.name = p.name;
           }
         }
+        if (isInstructorRef.current) {
+          focusSpectatorOnAliveStudent(arenaPlayersRef.current);
+        }
         if (addedAny) schedulePlayersReactSync(true);
         return;
       }
 
-      arenaPlayersRef.current = players;
-      rebuildPlayerMap(players);
+      arenaPlayersRef.current = cleanPlayers;
+      rebuildPlayerMap(cleanPlayers);
 
-      const me = players.find(p => p.uid === user.id);
-      const criticalLocalChange = me ? syncLocalVitalsFromMe(me) : false;
+      if (isInstructorRef.current) {
+        isAliveRef.current = false;
+        setIsAlive(false);
+        focusSpectatorOnAliveStudent(cleanPlayers);
+        schedulePlayersReactSync(false);
+        return;
+      }
+
+      const me = cleanPlayers.find(p => p.uid === user.id);
+      const criticalLocalChange = (me && battleStateRef.current?.status === 'IN_PROGRESS')
+        ? syncLocalVitalsFromMe(me)
+        : false;
       schedulePlayersReactSync(criticalLocalChange);
     });
 
@@ -4755,14 +4934,27 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     return () => unsub();
   }, [user.id]);
 
-  // Ensure local player exists in battleEvent/players/items/{user.id} ONLY if missing (avoids mount write storm)
+  // Ensure local STUDENT exists in battleEvent/players/items/{user.id} ONLY if missing (never enroll instructors!)
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || isInstructorRef.current) return;
     const timer = setTimeout(() => {
+      if (isInstructorRef.current) return;
       const alreadyListed = arenaPlayersRef.current.some(p => p.uid === user.id);
       if (alreadyListed) return;
-      const isTeacher = user.role === 'instructor' || gameProfile?.role === 'instructor';
-      if (!isTeacher && !hasProfileLoadedRef.current) return;
+
+      const h = hashSeedString(`${user.id}_${battleStateRef.current?.startedAt || 'live'}`);
+      const ang = ((h % 360) / 180) * Math.PI;
+      const rad = 1050 + (h % 350);
+      const spawnX = hasSpawnSynced.current ? Math.round(playerPosRef.current.x) : Math.round(2500 + Math.cos(ang) * rad);
+      const spawnY = hasSpawnSynced.current ? Math.round(playerPosRef.current.y) : Math.round(2500 + Math.sin(ang) * rad);
+      if (!hasSpawnSynced.current) {
+        setPlayerCoords(spawnX, spawnY);
+        const vd = viewDimsRef.current;
+        cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, spawnX - vd.width / 2));
+        cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, spawnY - vd.height / 2));
+        hasSpawnSynced.current = true;
+      }
+
       const initialAvatar = activeSkinId || gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist';
       const initialWeapon = activeWeaponId || gameProfile?.equippedWeapon || 'bunsen_burner';
       const resolvedSkin = getFantasySkin(initialAvatar);
@@ -4770,12 +4962,12 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
       const initPlayer: ArenaPlayer = {
         uid: user.id,
-        name: user.name || (isTeacher ? 'Instructor (Admin)' : 'Hero'),
+        name: user.name || 'Hero',
         avatar: initialAvatar,
         equippedWeapon: initialWeapon,
-        x: Math.round(playerPosRef.current.x),
-        y: Math.round(playerPosRef.current.y),
-        angle: 0,
+        x: spawnX,
+        y: spawnY,
+        angle: ang + Math.PI,
         hp: 100,
         maxHp: 100,
         shield: isKnightHero ? 70 : 50,
@@ -4784,15 +4976,22 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         brick: Math.max(10, gameProfile?.brick ?? 10),
         metal: Math.max(5, gameProfile?.metal ?? 5),
         isAlive: !localEliminatedRef.current,
+        isSpectator: false,
         kills: 0
       };
       ensureArenaPlayer(initPlayer);
       if (wsConnectedRef.current && wsClientRef.current) {
-        wsClientRef.current.sendRaw({ type: 'hello', ...initPlayer });
+        wsClientRef.current.sendRaw({
+          type: 'hello',
+          uid: initPlayer.uid,
+          isSpectator: false,
+          player: initPlayer,
+          state: battleStateRef.current || undefined
+        });
       }
     }, 1100);
     return () => clearTimeout(timer);
-  }, [user?.id, user?.name, user?.role, activeSkinId, activeWeaponId, gameProfile?.equippedSkin, gameProfile?.avatar, gameProfile?.equippedWeapon, gameProfile?.role, gameProfile?.wood, gameProfile?.brick, gameProfile?.metal]);
+  }, [user?.id, user?.name, user?.role, activeSkinId, activeWeaponId, gameProfile?.equippedSkin, gameProfile?.avatar, gameProfile?.equippedWeapon, gameProfile?.role, gameProfile?.wood, gameProfile?.brick, gameProfile?.metal, setPlayerCoords]);
 
   // Periodic Random Supply Crate Drop strictly within the Eye of the Storm
   const triggerStormEyeCrateDrop = useCallback(async (forceDrop: boolean = false) => {
@@ -4936,8 +5135,13 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     }
   }, [gameProfile?.equippedSkin]);
 
-  // Instructor detection
-  const isInstructor = user?.role === 'instructor' || gameProfile?.role === 'instructor';
+  // Keep instructors strictly in invisible spectator mode whenever a live match is running
+  useEffect(() => {
+    if (isInstructor && battleState?.status === 'IN_PROGRESS' && isAliveRef.current) {
+      isAliveRef.current = false;
+      setIsAlive(false);
+    }
+  }, [isInstructor, battleState?.status]);
 
   // Resolve equipped items & fantasy skin stats (speed + defense)
   const effectiveWeaponId = resolveArenaWeaponId(activeWeaponId || gameProfile?.equippedWeapon || 'bunsen_burner');
@@ -5012,24 +5216,27 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       wsClientRef.current.sendSelfVitals({ shield: nextShield });
     }
     await equipItem(user.id, 'skin', skinId);
-    ensureArenaPlayer({
-      uid: user.id,
-      name: user.name || (isInstructor ? 'Instructor (Admin)' : 'Scientist'),
-      avatar: skinId,
-      equippedWeapon: effectiveWeaponId,
-      x: Math.round(playerPosRef.current.x),
-      y: Math.round(playerPosRef.current.y),
-      angle: facingAngleRef.current,
-      hp: hpRef.current,
-      maxHp: 100,
-      shield: nextShield,
-      maxShield: nextMaxShield,
-      wood: woodRef.current,
-      brick: brickRef.current,
-      metal: metalRef.current,
-      isAlive: isAliveRef.current,
-      kills: kills
-    });
+    if (!isInstructorRef.current) {
+      ensureArenaPlayer({
+        uid: user.id,
+        name: user.name || 'Scientist',
+        avatar: skinId,
+        equippedWeapon: effectiveWeaponId,
+        x: Math.round(playerPosRef.current.x),
+        y: Math.round(playerPosRef.current.y),
+        angle: facingAngleRef.current,
+        hp: hpRef.current,
+        maxHp: 100,
+        shield: nextShield,
+        maxShield: nextMaxShield,
+        wood: woodRef.current,
+        brick: brickRef.current,
+        metal: metalRef.current,
+        isAlive: isAliveRef.current,
+        isSpectator: false,
+        kills: kills
+      });
+    }
   };
 
   // Solo Testing Helper for corbanb@gisboyshigh.net: Spawn training dummy
@@ -6960,6 +7167,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           sDirY *= 0.7071;
         }
         if (sDirX !== 0 || sDirY !== 0) {
+          hasSpectatorFocusedRef.current = true;
           const spectateSpeed = keysPressed.current['shift'] ? 700 : 440;
           px = Math.max(35, Math.min(MAP_SIZE - 35, px + sDirX * spectateSpeed * dt));
           py = Math.max(35, Math.min(MAP_SIZE - 35, py + sDirY * spectateSpeed * dt));
@@ -10414,7 +10622,11 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         ctx.font = 'bold 10px sans-serif';
         ctx.fillStyle = 'rgba(186, 230, 253, 0.85)';
         ctx.textAlign = 'center';
-        ctx.fillText('👁️ OBSERVING (INVISIBLE)', px, py - 28);
+        ctx.fillText(
+          isInstructorRef.current ? '👁️ INSTRUCTOR SPECTATOR (INVISIBLE)' : '👁️ OBSERVING (INVISIBLE)',
+          px,
+          py - 28
+        );
         ctx.restore();
       }
 
@@ -10429,9 +10641,10 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
   // 7. Auto Victory Royale Detection (Elected single-writer so 30 clients don't race)
   useEffect(() => {
-    if (isOwnerTester || hasDeclaredWinnerRef.current) return;
-    const alivePlayers = arenaPlayers.filter(p => p.isAlive && (p.hp === undefined || p.hp > 0));
-    if (alivePlayers.length === 1 && arenaPlayers.length > 1 && battleState?.status === 'IN_PROGRESS') {
+    if (hasDeclaredWinnerRef.current || battleState?.status !== 'IN_PROGRESS') return;
+    const realPlayers = arenaPlayers.filter(p => !p.uid.startsWith('dummy_') && !p.isSpectator);
+    const alivePlayers = realPlayers.filter(p => p.isAlive && (p.hp === undefined || p.hp > 0));
+    if (alivePlayers.length === 1 && realPlayers.length > 1) {
       const victor = alivePlayers[0];
       if (victor.uid === user.id || isInstructor) {
         hasDeclaredWinnerRef.current = true;
@@ -10442,7 +10655,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         });
       }
     }
-  }, [arenaPlayers, battleState?.status, isOwnerTester, user.id, isInstructor]);
+  }, [arenaPlayers, battleState?.status, user.id, isInstructor]);
 
   // Crate 15-second rapid question timer
   useEffect(() => {
@@ -10560,7 +10773,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     }
   };
 
-  const aliveCount = arenaPlayers.filter(p => p.isAlive && (p.hp === undefined || p.hp > 0)).length;
+  const aliveCount = arenaPlayers.filter(p => !p.isSpectator && p.isAlive && (p.hp === undefined || p.hp > 0)).length;
   const isMatchCurrentlyActive = !battleState || battleState.status === 'IN_PROGRESS';
   const distToStormSafe = isMatchCurrentlyActive 
     ? Math.max(0, Math.round(Math.hypot(localX - stormCenter.current.x, localY - stormCenter.current.y) - stormRadius))
@@ -10580,70 +10793,86 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           ========================================================================= */}
       <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs flex flex-wrap items-center justify-between gap-3 text-slate-800">
         
-        {/* Left: Health, Shield & Character Info */}
+        {/* Left: Health, Shield & Character Info OR Instructor Observer Status */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-[#FDFBF7] px-3 py-1.5 rounded-lg border border-slate-300">
-            <span className="text-xl">{equippedSkin.icon}</span>
-            <div className="hidden sm:block">
-              <span className="text-sm font-bold text-slate-800 block leading-tight">{user.name}</span>
-              <span className="text-xs font-semibold text-slate-600 flex items-center gap-1.5 flex-wrap">
-                <span>{equippedSkinDef.name}</span>
-                <span className="text-[10px] font-mono bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded border border-amber-300">
-                  ⚡ SPD {equippedSkinDef.speed}
+          {isInstructor && !isAlive ? (
+            <div className="flex items-center gap-2.5 bg-sky-50 px-3 py-1.5 rounded-lg border border-sky-300">
+              <Eye className="w-5 h-5 text-sky-700" />
+              <div>
+                <span className="text-sm font-bold text-slate-900 block leading-tight">
+                  {user.name} • Host Spectator
                 </span>
-                <span className="text-[10px] font-mono bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded border border-sky-300">
-                  🛡️ DEF {equippedSkinDef.defense}
+                <span className="text-[11px] font-semibold text-sky-800 block">
+                  Invisible to students • Watching live match
                 </span>
-                <span
-                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded border transition ${
-                    skinAbilityFlash
-                      ? 'bg-emerald-100 text-emerald-900 border-emerald-400 ring-1 ring-emerald-400'
-                      : 'bg-purple-50 text-purple-800 border-purple-200'
-                  }`}
-                  title={equippedSkinDef.ability}
-                >
-                  ✨ {skinAbilityFlash || equippedSkinDef.ability.split(':')[0]}
-                </span>
-              </span>
+              </div>
             </div>
-          </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 bg-[#FDFBF7] px-3 py-1.5 rounded-lg border border-slate-300">
+                <span className="text-xl">{equippedSkin.icon}</span>
+                <div className="hidden sm:block">
+                  <span className="text-sm font-bold text-slate-800 block leading-tight">{user.name}</span>
+                  <span className="text-xs font-semibold text-slate-600 flex items-center gap-1.5 flex-wrap">
+                    <span>{equippedSkinDef.name}</span>
+                    <span className="text-[10px] font-mono bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded border border-amber-300">
+                      ⚡ SPD {equippedSkinDef.speed}
+                    </span>
+                    <span className="text-[10px] font-mono bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded border border-sky-300">
+                      🛡️ DEF {equippedSkinDef.defense}
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded border transition ${
+                        skinAbilityFlash
+                          ? 'bg-emerald-100 text-emerald-900 border-emerald-400 ring-1 ring-emerald-400'
+                          : 'bg-purple-50 text-purple-800 border-purple-200'
+                      }`}
+                      title={equippedSkinDef.ability}
+                    >
+                      ✨ {skinAbilityFlash || equippedSkinDef.ability.split(':')[0]}
+                    </span>
+                  </span>
+                </div>
+              </div>
 
-          {/* Health Bar */}
-          <div className="space-y-0.5">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-              <span className="flex items-center gap-1 text-rose-700">
-                <Heart className="w-3.5 h-3.5 fill-rose-600 text-rose-600" />
-                <span>Health: {localHp}/100</span>
-              </span>
-            </div>
-            <div className="w-24 sm:w-32 h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-300">
-              <div 
-                className="h-full bg-rose-600 transition-all duration-150"
-                style={{ width: `${Math.max(0, localHp)}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Shield Bar */}
-          {(() => {
-            const maxShCap = equippedSkinDef.id === 'knight_hero' ? 120 : 100;
-            return (
+              {/* Health Bar */}
               <div className="space-y-0.5">
                 <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-                  <span className="flex items-center gap-1 text-sky-700">
-                    <Shield className="w-3.5 h-3.5 fill-sky-600 text-sky-600" />
-                    <span>Shield: {localShield}/{maxShCap}</span>
+                  <span className="flex items-center gap-1 text-rose-700">
+                    <Heart className="w-3.5 h-3.5 fill-rose-600 text-rose-600" />
+                    <span>Health: {localHp}/100</span>
                   </span>
                 </div>
                 <div className="w-24 sm:w-32 h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-300">
                   <div 
-                    className={`h-full transition-all duration-150 ${equippedSkinDef.id === 'knight_hero' ? 'bg-amber-500' : 'bg-sky-600'}`}
-                    style={{ width: `${Math.max(0, Math.min(100, (localShield / maxShCap) * 100))}%` }}
+                    className="h-full bg-rose-600 transition-all duration-150"
+                    style={{ width: `${Math.max(0, localHp)}%` }}
                   />
                 </div>
               </div>
-            );
-          })()}
+
+              {/* Shield Bar */}
+              {(() => {
+                const maxShCap = equippedSkinDef.id === 'knight_hero' ? 120 : 100;
+                return (
+                  <div className="space-y-0.5">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-800">
+                      <span className="flex items-center gap-1 text-sky-700">
+                        <Shield className="w-3.5 h-3.5 fill-sky-600 text-sky-600" />
+                        <span>Shield: {localShield}/{maxShCap}</span>
+                      </span>
+                    </div>
+                    <div className="w-24 sm:w-32 h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-300">
+                      <div 
+                        className={`h-full transition-all duration-150 ${equippedSkinDef.id === 'knight_hero' ? 'bg-amber-500' : 'bg-sky-600'}`}
+                        style={{ width: `${Math.max(0, Math.min(100, (localShield / maxShCap) * 100))}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
+            </>
+          )}
 
           {speedBoostUntil > Date.now() && (
             <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-purple-100 text-purple-800 border border-purple-300 text-xs font-bold animate-pulse">
@@ -11260,8 +11489,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           </div>
         )}
 
-        {/* Non-blocking Elimination Toast (3.8s) */}
-        {!isAlive && showEliminationToast && (
+        {/* Non-blocking Elimination Toast (3.8s - Students only) */}
+        {!isInstructor && !isAlive && showEliminationToast && (
           <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
             <div className="bg-slate-950/95 border border-rose-400/80 text-white px-4 py-2 rounded-xl shadow-xl text-xs sm:text-sm font-bold flex items-center gap-2 backdrop-blur-md">
               <span>💀</span>
@@ -11276,11 +11505,17 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             <div className="bg-slate-950/90 border border-sky-400/70 rounded-2xl px-3.5 py-2 shadow-xl backdrop-blur-md flex flex-wrap items-center justify-center gap-2.5 text-xs text-white">
               <span className="font-bold text-sky-300 flex items-center gap-1.5">
                 <Eye className="w-3.5 h-3.5" />
-                <span>SPECTATING INVISIBLY</span>
+                <span>{isInstructor ? 'INSTRUCTOR SPECTATING INVISIBLY' : 'SPECTATING INVISIBLY'}</span>
               </span>
-              <span className="text-slate-300 font-semibold">
-                Kills: <strong className="text-white">{kills}</strong>
-              </span>
+              {isInstructor ? (
+                <span className="text-slate-300 font-semibold">
+                  Alive Students: <strong className="text-emerald-300">{aliveCount}</strong>
+                </span>
+              ) : (
+                <span className="text-slate-300 font-semibold">
+                  Kills: <strong className="text-white">{kills}</strong>
+                </span>
+              )}
               {spectateTargetName && (
                 <span className="text-[11px] bg-sky-950/80 text-sky-200 px-2 py-0.5 rounded-lg border border-sky-500/40">
                   Focus: {spectateTargetName}
@@ -11291,9 +11526,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-[11px] transition cursor-pointer"
                 title="Jump camera to next active player"
               >
-                Follow Alive Player
+                {isInstructor ? 'Follow Student' : 'Follow Alive Player'}
               </button>
-              {isOwnerTester && (
+              {isOwnerTester && battleState?.status !== 'IN_PROGRESS' && (
                 <button
                   onClick={() => {
                     const maxSh = effectiveSkinDefRef.current.id === 'knight_hero' ? 120 : 100;
@@ -11309,10 +11544,10 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                   }}
                   className="px-2.5 py-1 rounded-lg bg-purple-700 hover:bg-purple-600 text-white text-[11px] font-bold transition cursor-pointer"
                 >
-                  Respawn
+                  Solo Test Fighter
                 </button>
               )}
-              {onOpenShop && (
+              {!isInstructor && onOpenShop && (
                 <button
                   onClick={onOpenShop}
                   className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition cursor-pointer"
@@ -11363,7 +11598,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 </div>
               )}
 
-              {/* Action Buttons: See Behind, Continue Testing, or Return */}
+              {/* Action Buttons: See Behind, Continue Watching/Testing, or Return */}
               <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
                 <button
                   onClick={() => setIsVictoryMinimized(prev => !prev)}
@@ -11377,9 +11612,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 <button
                   onClick={() => setWinnerCelebration(null)}
                   className="w-full sm:w-1/2 py-2 px-3 rounded-xl bg-purple-700 hover:bg-purple-600 text-white font-bold text-xs transition shadow-2xs cursor-pointer flex items-center justify-center gap-1.5"
-                  title="Close popup and continue playing in the arena"
+                  title="Close popup and view the arena"
                 >
-                  <span>Continue Testing</span>
+                  <span>{isInstructor ? 'Keep Observing' : 'Spectate Arena'}</span>
                 </button>
               </div>
 
@@ -11501,14 +11736,16 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 ? Math.max(100, Math.min(MAP_SIZE - 100, targetY))
                 : playerPosRef.current.y;
               setPlayerCoords(clampedX, clampedY);
-              isAliveRef.current = true;
               cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - viewDimsRef.current.width, clampedX - viewDimsRef.current.width / 2));
               cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - viewDimsRef.current.height, clampedY - viewDimsRef.current.height / 2));
+              if (battleStateRef.current?.status !== 'IN_PROGRESS' && !isInstructorRef.current) {
+                isAliveRef.current = true;
+                setIsAlive(true);
+              }
               setWinnerCelebration(null);
-              setIsAlive(true);
               setMapRevision(r => r + 1);
               setShowMapEditor(false);
-              addFloatingText(clampedX, clampedY - 30, 'Testing Map Location! 🚀', '#38bdf8');
+              addFloatingText(clampedX, clampedY - 30, 'Inspecting Map Location! 🚀', '#38bdf8');
             }}
           />
         )}

@@ -217,6 +217,7 @@ export interface ArenaPlayer {
   brick: number;
   metal: number;
   isAlive: boolean;
+  isSpectator?: boolean;
   kills: number;
   highGroundActive?: boolean;
   metalShieldActiveUntil?: number;
@@ -2046,6 +2047,12 @@ export const subscribeToBattleState = (
     return onSnapshot(stateDoc, (snap) => {
       if (snap.exists()) {
         const data = snap.data() as BattleEventState;
+        const prev = getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE);
+        if (prev.startedAt !== data.startedAt || data.status === 'LOBBY') {
+          setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, []);
+          setLocalGameItem(LOCAL_STRUCTURES_KEY, []);
+          setLocalGameItem(LOCAL_CRATES_KEY, []);
+        }
         setLocalGameItem(LOCAL_BATTLE_STATE_KEY, data);
         callback(data);
       } else {
@@ -2276,16 +2283,14 @@ export const startBattleRoyale = async (): Promise<void> => {
   setLocalGameItem(LOCAL_CRATES_KEY, initialCrates);
   ops.push({ type: 'set', ref: stateDoc, data: liveState });
 
-  // Notify live WS server room immediately alongside batched Firestore commit
-  await Promise.all([
-    notifyServerBattleControl({
-      action: 'start',
-      state: liveState,
-      players: initializedPlayers,
-      crates: initialCrates
-    }),
-    commitBatchOpsInChunks(ops)
-  ]);
+  // Commit Firestore deletions/spawns BEFORE notifying WS room & flipping state so late/joining students never read stale dead docs
+  await commitBatchOpsInChunks(ops);
+  await notifyServerBattleControl({
+    action: 'start',
+    state: liveState,
+    players: initializedPlayers,
+    crates: initialCrates
+  });
 };
 
 /**
@@ -2417,8 +2422,8 @@ export const endBattleRoyale = async (
         playersSnap.forEach(d => remoteList.push(d.data() as ArenaPlayer));
         candidates = remoteList;
       }
-      const realPlayers = candidates.filter(p => !p.uid.startsWith('dummy_'));
-      const pool = realPlayers.length > 0 ? realPlayers : candidates;
+      const realPlayers = candidates.filter(p => !p.uid.startsWith('dummy_') && !p.isSpectator);
+      const pool = realPlayers.length > 0 ? realPlayers : candidates.filter(p => !p.isSpectator);
       const alivePlayers = pool.filter(p => p.isAlive);
       const sorted = [...(alivePlayers.length > 0 ? alivePlayers : pool)].sort(
         (a, b) => (b.kills * 100 + b.hp) - (a.kills * 100 + a.hp)
@@ -2487,8 +2492,11 @@ export const endBattleRoyale = async (
 export const subscribeToArenaPlayers = (
   callback: (players: ArenaPlayer[]) => void
 ): (() => void) => {
+  const cachedState = getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE);
   const cached = getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []);
-  if (cached.length > 0) callback(cached);
+  if (cachedState.status === 'IN_PROGRESS' && cached.length > 0) {
+    callback(cached.filter(p => !p.isSpectator));
+  }
 
   try {
     const playersColl = collection(db, 'battleEvent', 'players', 'items');
@@ -2498,7 +2506,7 @@ export const subscribeToArenaPlayers = (
       snap.forEach((docSnap) => {
         const data = docSnap.data() as Partial<ArenaPlayer>;
         const resolvedUid = (data.uid || docSnap.id || '').trim();
-        if (!resolvedUid || seenUids.has(resolvedUid)) return;
+        if (!resolvedUid || data.isSpectator || seenUids.has(resolvedUid)) return;
         seenUids.add(resolvedUid);
         list.push({ ...(data as ArenaPlayer), uid: resolvedUid });
       });
@@ -2506,7 +2514,7 @@ export const subscribeToArenaPlayers = (
       callback(list);
     }, (err) => {
       handleFirestoreError(err, 'subscribeToArenaPlayers');
-      callback(getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []));
+      callback(getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []).filter(p => !p.isSpectator));
     });
   } catch (err) {
     handleFirestoreError(err, 'subscribeToArenaPlayers');
@@ -2519,7 +2527,7 @@ export const subscribeToArenaPlayers = (
  * If missing, initializes the player with their loadout and stats.
  */
 export const ensureArenaPlayer = async (player: ArenaPlayer): Promise<void> => {
-  if (!player.uid) return;
+  if (!player.uid || player.isSpectator) return;
   const currentPlayers = getLocalGameItem<ArenaPlayer[]>(LOCAL_ARENA_PLAYERS_KEY, []);
   if (!currentPlayers.some(p => p.uid === player.uid)) {
     setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, [...currentPlayers, player]);
