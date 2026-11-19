@@ -19,7 +19,8 @@ import {
   TrendingUp,
   RefreshCw,
   Bell,
-  ShieldCheck
+  ShieldCheck,
+  Archive
 } from 'lucide-react';
 import { 
   TaskWithSubmission, 
@@ -54,7 +55,7 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
 }) => {
   const [tasks, setTasks] = useState<TaskWithSubmission[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'todo' | 'overdue' | 'completed'>('todo');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'todo' | 'overdue' | 'completed' | 'ended'>('todo');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string>('Live');
 
@@ -113,9 +114,11 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
   };
 
   const now = Date.now();
-  const overdueTasks = tasks.filter(t => t.isOverdue && t.submission?.status !== 'completed');
-  const todoTasks = tasks.filter(t => t.submission?.status !== 'completed');
+  const overdueTasks = tasks.filter(t => t.status !== 'ended' && t.isOverdue && t.submission?.status !== 'completed');
+  const todoTasks = tasks.filter(t => t.status !== 'ended' && t.submission?.status !== 'completed');
   const completedTasks = tasks.filter(t => t.submission?.status === 'completed');
+  const endedTasks = tasks.filter(t => t.status === 'ended');
+  const activeOrCompletedTasks = tasks.filter(t => t.status !== 'ended' || t.submission?.status === 'completed');
 
   // Filter tasks based on view tab
   const filteredTasks = tasks.filter(task => {
@@ -124,11 +127,13 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
       task.targetSubtopics.some(s => s.toLowerCase().includes(searchQuery.toLowerCase()));
 
     const status = task.submission?.status || 'not_started';
+    const isEnded = task.status === 'ended';
     const matchesStatus = 
       statusFilter === 'all' ? true :
-      statusFilter === 'todo' ? status !== 'completed' :
-      statusFilter === 'overdue' ? (task.isOverdue && status !== 'completed') :
-      statusFilter === 'completed' ? status === 'completed' : true;
+      statusFilter === 'todo' ? (!isEnded && status !== 'completed') :
+      statusFilter === 'overdue' ? (!isEnded && task.isOverdue && status !== 'completed') :
+      statusFilter === 'completed' ? status === 'completed' :
+      statusFilter === 'ended' ? isEnded : true;
 
     return matchesSearch && matchesStatus;
   });
@@ -251,7 +256,7 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
             <span className="text-[11px] text-slate-400 block font-medium">Completion Rate</span>
             <div className="flex items-baseline gap-1.5 mt-0.5">
               <span className="text-lg sm:text-xl font-bold text-purple-400">
-                {tasks.length > 0 ? Math.round((completedTasks.length / tasks.length) * 100) : 100}%
+                {activeOrCompletedTasks.length > 0 ? Math.round((completedTasks.length / activeOrCompletedTasks.length) * 100) : 100}%
               </span>
               <span className="text-[10px] text-slate-500">Total</span>
             </div>
@@ -285,6 +290,16 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
             >
               Completed ({completedTasks.length})
             </button>
+            {endedTasks.length > 0 && (
+              <button
+                onClick={() => setStatusFilter('ended')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 ${
+                  statusFilter === 'ended' ? 'bg-slate-600 text-white shadow-xs' : 'bg-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                Ended ({endedTasks.length})
+              </button>
+            )}
             <button
               onClick={() => setStatusFilter('all')}
               className={`px-3 py-1.5 rounded-xl font-bold transition shrink-0 ${
@@ -331,10 +346,13 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredTasks.map(task => {
-            const submission = evaluateTaskProgressForStudent(task, user, progress, task.submission);
+            const isEnded = task.status === 'ended';
+            const submission = isEnded && task.submission
+              ? task.submission
+              : evaluateTaskProgressForStudent(task, user, progress, task.submission);
             const isCompleted = submission.status === 'completed';
             const dueDateObj = new Date(task.dueDate);
-            const isOverdue = task.isOverdue && !isCompleted;
+            const isOverdue = !isEnded && task.isOverdue && !isCompleted;
             const diffDays = Math.ceil((dueDateObj.getTime() - now) / (1000 * 60 * 60 * 24));
             const reqLen = task.requiredQuizLength || submission.requiredQuizLength || 10;
             const needsSlidesAndTL = task.requireSlidesAndTrafficLight !== false || task.type === 'both' || task.type === 'slides_traffic_light';
@@ -385,23 +403,27 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
                     <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-lg border flex items-center gap-1 ${
                       isCompleted
                         ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
-                        : isOverdue
-                          ? 'bg-rose-950/60 text-rose-300 border-rose-500/40 animate-pulse'
-                          : diffDays <= 1
-                            ? 'bg-amber-950/60 text-amber-300 border-amber-500/40'
-                            : 'bg-slate-800 text-slate-300 border-slate-700'
+                        : isEnded
+                          ? 'bg-slate-800 text-slate-300 border-slate-600'
+                          : isOverdue
+                            ? 'bg-rose-950/60 text-rose-300 border-rose-500/40 animate-pulse'
+                            : diffDays <= 1
+                              ? 'bg-amber-950/60 text-amber-300 border-amber-500/40'
+                              : 'bg-slate-800 text-slate-300 border-slate-700'
                     }`}>
-                      <Clock className="w-3 h-3" />
+                      {isEnded && !isCompleted ? <Archive className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
                       <span>
                         {isCompleted 
                           ? 'Done' 
-                          : isOverdue 
-                            ? `Overdue (${dueDateObj.toLocaleDateString()})` 
-                            : diffDays === 0 
-                              ? 'Due Today' 
-                              : diffDays === 1 
-                                ? 'Due Tomorrow' 
-                                : `Due in ${diffDays}d`}
+                          : isEnded
+                            ? `Ended${task.endedAt ? ` (${new Date(task.endedAt).toLocaleDateString()})` : ''}`
+                            : isOverdue 
+                              ? `Overdue (${dueDateObj.toLocaleDateString()})` 
+                              : diffDays === 0 
+                                ? 'Due Today' 
+                                : diffDays === 1 
+                                  ? 'Due Tomorrow' 
+                                  : `Due in ${diffDays}d`}
                       </span>
                     </span>
                   </div>
@@ -545,6 +567,28 @@ export const StudentTasksPanel: React.FC<StudentTasksPanelProps> = ({
                       >
                         <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
                         <span>Review Lesson & Practice Content</span>
+                      </button>
+                    </div>
+                  ) : isEnded ? (
+                    <div className="space-y-2">
+                      <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-300 text-xs flex items-center justify-between">
+                        <div className="flex items-center gap-2 font-semibold">
+                          <Archive className="w-4 h-4 text-slate-400 shrink-0" />
+                          <span>Task Ended by Instructor</span>
+                        </div>
+                        {task.endedAt && (
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {new Date(task.endedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                          </span>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={() => handleStartTask(task)}
+                        className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-xs transition flex items-center justify-center gap-1.5 border border-slate-700 cursor-pointer"
+                      >
+                        <BookOpen className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Review Lesson Content</span>
                       </button>
                     </div>
                   ) : task.type === 'both' ? (

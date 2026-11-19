@@ -6,12 +6,35 @@ import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
-import { getRevisionTasksForTopic, TOPIC_REVISION_CONFIGS } from './src/data/revisionScheduleTasks.ts';
-import { generateDynamicSyllabusQuestions } from './src/data/syllabusQuestionsBank.ts';
-import { isValidQuizQuestion } from './src/data/quizSanitizer.ts';
-import { attachBattleWebSocketServer, applyServerBattleControl } from './battleRoom.ts';
+import { WebSocketServer } from 'ws';
+import { createBattleWebSocketServer, applyServerBattleControl } from './battleRoom.ts';
+import { attachChallengeWebSocketHandlers } from './challengeRoom.ts';
 
 dotenv.config();
+
+let scheduleTasksModPromise: Promise<typeof import('./src/data/revisionScheduleTasks.ts')> | null = null;
+const getScheduleTasksMod = () => {
+  if (!scheduleTasksModPromise) {
+    scheduleTasksModPromise = import('./src/data/revisionScheduleTasks.ts');
+  }
+  return scheduleTasksModPromise;
+};
+
+let questionsBankModPromise: Promise<typeof import('./src/data/syllabusQuestionsBank.ts')> | null = null;
+const getQuestionsBankMod = () => {
+  if (!questionsBankModPromise) {
+    questionsBankModPromise = import('./src/data/syllabusQuestionsBank.ts');
+  }
+  return questionsBankModPromise;
+};
+
+let quizSanitizerModPromise: Promise<typeof import('./src/data/quizSanitizer.ts')> | null = null;
+const getQuizSanitizerMod = () => {
+  if (!quizSanitizerModPromise) {
+    quizSanitizerModPromise = import('./src/data/quizSanitizer.ts');
+  }
+  return quizSanitizerModPromise;
+};
 
 const __filename = typeof import.meta?.url === 'string' ? fileURLToPath(import.meta.url) : '';
 const __dirname = __filename ? path.dirname(__filename) : process.cwd();
@@ -1196,7 +1219,7 @@ app.post('/api/schedule', async (req, res) => {
       ? selectedTopics
       : (weaknesses.length > 0 ? weaknesses : ['C4 Electrolysis', 'B5 Enzymes', 'P4 Electricity']);
 
-    const fallback = generateFallbackSchedule(
+    const fallback = await generateFallbackSchedule(
       examDate, 
       computedWeeklyHours, 
       computedDailyHours, 
@@ -1310,6 +1333,7 @@ Return a valid JSON object matching this schema:
     // Guarantee that for EVERY daily item:
     // 1. Task 1 MUST ALWAYS be the specific slides recap with slide range, deck title, and key concepts
     // 2. Task 2 and Task 3 are creative, topic-relevant tasks
+    const { getRevisionTasksForTopic, TOPIC_REVISION_CONFIGS } = await getScheduleTasksMod();
     items = items.map((it: any) => {
       const cleanCode = (it.topicCode || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 3) || 'B2';
       const config = TOPIC_REVISION_CONFIGS[cleanCode] || TOPIC_REVISION_CONFIGS[cleanCode.slice(0, 2)];
@@ -1356,7 +1380,7 @@ Return a valid JSON object matching this schema:
       : (req.body.weaknesses || ['C4 Electrolysis', 'B5 Enzymes', 'P4 Electricity']);
 
     res.json({
-      ...generateFallbackSchedule(
+      ...(await generateFallbackSchedule(
         req.body.examDate, 
         computedWeeklyHours, 
         computedDailyHours, 
@@ -1365,7 +1389,7 @@ Return a valid JSON object matching this schema:
         req.body.topicSelectionMode, 
         req.body.studyDaysPerWeek,
         req.body.totalWeeks
-      ),
+      )),
       source: 'fallback-planner',
     });
   }
@@ -1429,6 +1453,8 @@ app.post('/api/generate-quiz', async (req, res) => {
   try {
     const { topics, subtopics, numQuestions, tier, seed } = req.body;
     const requestedCount = Math.min(40, Math.max(1, Math.round(Number(numQuestions) || 10)));
+    const normalizedTier: 'Core' | 'Extended' =
+      String(tier || 'Extended').trim().toLowerCase() === 'core' ? 'Core' : 'Extended';
     const targetSubtopics: string[] = Array.isArray(subtopics) ? subtopics : [];
     const targetTopics: string[] = targetSubtopics.length > 0 
       ? targetSubtopics 
@@ -1440,9 +1466,24 @@ app.post('/api/generate-quiz', async (req, res) => {
     const ai = getGenAI();
 
     if (!ai) {
-      const fallback = generateServerFallbackQuiz(targetTopics, requestedCount, tier, sessionSeed);
+      const fallback = await generateServerFallbackQuiz(targetTopics, requestedCount, normalizedTier, sessionSeed);
       return res.json({ quiz: fallback, source: 'syllabus-engine' });
     }
+
+    const tierDirective = normalizedTier === 'Core'
+      ? `CURRICULUM TIER CONSTRAINT (CORE ONLY — STRICTLY PAPER 1 LEVEL):
+- Generate ONLY questions testing CORE syllabus content in Cambridge IGCSE 0653.
+- Strictly EXCLUDE all Supplement / Extended objectives:
+  * NO mm-to-μm conversions (B2.2 magnification in Core uses consistent units like mm only)
+  * NO water potential, turgor pressure, flaccid/plasmolysis, or active transport (B3.2/B3.3)
+  * NO lock-and-key model, enzyme-substrate complex, active site denaturation (B5)
+  * NO balanced symbol photosynthesis equation 6CO2 + 6H2O, limiting factors, or hydrogencarbonate indicator (B6)
+  * NO digestive enzyme details (amylase/protease/pepsin/lipase) or bile emulsification (B7)
+  * NO potometer (B8), blood clotting/one-way valve mechanisms (B9), antibodies/vaccines/memory cells/virus structure (B10), alveoli one-cell-thick adaptation (B11), balanced aerobic respiration symbol equation C6H12O6 + 6O2 (B12), MRSA natural selection (B13), wind-pollinated flowers (B14), or overharvesting/foreign species (B15)
+  * NO Boyle's law (C1), giant ionic lattice/intermolecular forces/C2H4/CH3OH/CO2/O2/N2 dot-and-cross (C2), ionic equations (C3), molten binary product prediction (C4), activation energy Ea/reaction pathway diagrams/bond energy math (C5), collision theory/oxidation numbers (C6), insoluble salt precipitation (C7), halogen displacement/transition elements (C8), alloy atom-layer disruption/blast furnace symbol equations (C9), infrared greenhouse mechanism (C10), cracking/alkene addition reactions/addition polymerisation poly(ethene) (C11)
+  * NO acceleration a=(v-u)/t, area under speed-time graph, F=ma, Ek=1/2 mv², ΔEp=mgΔh, efficiency calculations (P1), free delocalised electrons/Leslie cube/Earth radiation balance (P2), compressions & rarefactions/ultrasound/transverse vs longitudinal definitions (P3), parallel resistance 1/R=1/R1+1/R2 or R∝L/A (P4), orbital speed v=2πr/T, nuclear fusion, or galactic redshift (P5).`
+      : `CURRICULUM TIER SCOPE (EXTENDED — FULL SYLLABUS: CORE + EXTENDED):
+- Generate questions spanning the ENTIRE Cambridge IGCSE 0653 syllabus, mixing BOTH Core syllabus objectives AND Extended (Supplement) syllabus objectives (Paper 1 + Paper 2 content).`;
 
     // Helper to generate a single batch of questions using gemini-3.8-flash with safe error isolation
     async function generateBatch(count: number, batchSeed: string, topicsSubset: string[]): Promise<any[]> {
@@ -1460,6 +1501,7 @@ Format Rules:
       "topicCode": "B2", // e.g. B1, B2, C1, P4
       "topicTitle": "Cells & Organisation",
       "syllabusRef": "B2.1",
+      "tier": "${normalizedTier}", // "Core" or "Extended"
       "question": "Exact question stem text...",
       "options": [
         "First plausible option",
@@ -1478,8 +1520,9 @@ Quality Rules:
 - Distribute questions evenly across the provided topics: ${topicsSubset.join(', ')}.
 - Exactly 4 options per question. Do NOT include 'A.', 'B.', 'C.', 'D.' in the option strings.
 - Only ONE option must be indisputably correct. Distractors should target classic Cambridge examiner report errors.
-- Tier focus: ${tier || 'Extended'}.
-- Include relevant formulas (e.g. Magnification M = I/A, speed = d/t, weight = mg with g=9.8 N/kg, V = IR, wave speed v = fλ) where appropriate.
+- Selected Tier Mode: ${normalizedTier}.
+${tierDirective}
+- Include relevant formulas (e.g. Magnification M = I/A, speed = d/t, weight = mg with g=9.8 N/kg, V = IR, wave speed v = fλ) where appropriate for the selected tier.
 - Quality & Syllabus Constraints (STRICT Cambridge IGCSE Combined Science 0653 2025–2027 ONLY — do NOT include 0654 Co-ordinated Sciences or separate 0610/0620/0625 content):
   * Do NOT generate questions on isotopes, radioactive isotopes, radioactivity, half-life, alpha/beta/gamma decay or ionising/penetrating power, or nuclear fission reactors (P5 in 0653 is Space Physics only; C2.2 does NOT include isotopes).
   * Do NOT generate questions on mole calculations (n = m/Mr), molar gas volume (24 dm³), concentration (c = n/V), or relative atomic/molecular/formula mass (Ar/Mr) calculations.
@@ -1489,7 +1532,7 @@ Quality Rules:
   * Do NOT generate questions on anaerobic respiration, lactic acid, oxygen debt, yeast fermentation, Haber process, or eutrophication.
 - UNIQUE SESSION SEED: ${batchSeed}. You MUST generate distinct, novel questions with varied scenarios, experimental apparatus, and numerical values.`;
 
-        const prompt = `Generate ${count} brand-new, unique Cambridge IGCSE Combined Science 0653 multiple choice questions for these syllabus topics: ${topicsSubset.join(', ')}.
+        const prompt = `Generate ${count} brand-new, unique Cambridge IGCSE Combined Science 0653 multiple choice questions (${normalizedTier === 'Core' ? 'CORE SYLLABUS ONLY' : 'ENTIRE SYLLABUS: BOTH CORE AND EXTENDED'}) for these syllabus topics: ${topicsSubset.join(', ')}.
 Ensure high variety and rigor. Output JSON only.`;
 
         const { text } = await callGeminiWithFallback(ai!, {
@@ -1506,7 +1549,7 @@ Ensure high variety and rigor. Output JSON only.`;
         const parsed = JSON.parse(text || '{}');
         return Array.isArray(parsed.questions) ? parsed.questions : (Array.isArray(parsed) ? parsed : []);
       } catch (batchErr) {
-        return generateServerFallbackQuiz(topicsSubset, count, tier || 'Extended', batchSeed);
+        return await generateServerFallbackQuiz(topicsSubset, count, normalizedTier, batchSeed);
       }
     }
 
@@ -1562,6 +1605,7 @@ Ensure high variety and rigor. Output JSON only.`;
           topicCode,
           topicTitle: q.topicTitle || 'Cambridge 0653 Science',
           syllabusRef: q.syllabusRef || `${topicCode}.1`,
+          tier: q.tier === 'Extended' ? 'Extended' : (q.tier === 'Core' ? 'Core' : undefined),
           question: q.question || 'Cambridge Science Question',
           options: shuffledOpts,
           correctIndex: newCorrectIndex >= 0 ? newCorrectIndex : 0,
@@ -1569,11 +1613,17 @@ Ensure high variety and rigor. Output JSON only.`;
         };
       });
 
-      // Filter out any malformed, duplicate, or non-0653 syllabus questions
-      const nonGenetics = formatted.filter(q => {
-        const fullContent = `${q.question} ${(q.options || []).join(' ')} ${q.explanation}`;
-        return !isGeneticsContent(fullContent) && isValidQuizQuestion(q as any);
-      });
+      // Filter out any malformed, duplicate, non-0653 syllabus, or off-tier questions
+      const { isValidQuizQuestion, matchesExamTier, isExtendedOnlyQuestion } = await getQuizSanitizerMod();
+      const nonGenetics = formatted
+        .filter(q => {
+          const fullContent = `${q.question} ${(q.options || []).join(' ')} ${q.explanation}`;
+          return !isGeneticsContent(fullContent) && isValidQuizQuestion(q as any) && matchesExamTier(q as any, normalizedTier);
+        })
+        .map(q => ({
+          ...q,
+          tier: isExtendedOnlyQuestion(q as any) ? 'Extended' : (q.tier || 'Core')
+        }));
 
       // Deduplicate questions from parallel AI batches
       const seenStems = new Set<string>();
@@ -1618,7 +1668,7 @@ Ensure high variety and rigor. Output JSON only.`;
         const quota = topicQuotas.get(t) || 0;
         if (bucket.length < quota) {
           const needed = quota - bucket.length;
-          const fill = generateServerFallbackQuiz([t], needed, tier, `${sessionSeed}-fill-${t}`, bucket);
+          const fill = await generateServerFallbackQuiz([t], needed, normalizedTier, `${sessionSeed}-fill-${t}`, bucket);
           for (const f of fill) {
             const norm = normalizeStem(f.question);
             if (!seenStems.has(norm)) {
@@ -1647,11 +1697,11 @@ Ensure high variety and rigor. Output JSON only.`;
       return res.json({ quiz: balancedQuestions.slice(0, requestedCount), source: 'gemini-3.8-flash' });
     }
 
-    const fallback = generateServerFallbackQuiz(targetTopics, requestedCount, tier, sessionSeed);
+    const fallback = await generateServerFallbackQuiz(targetTopics, requestedCount, tier, sessionSeed);
     return res.json({ quiz: fallback, source: 'syllabus-engine' });
   } catch (error) {
     console.error('Error generating AI quiz in /api/generate-quiz:', error);
-    const fallback = generateServerFallbackQuiz(req.body.topics || ['B1', 'C1', 'P1'], req.body.numQuestions || 10, req.body.tier, req.body.seed);
+    const fallback = await generateServerFallbackQuiz(req.body.topics || ['B1', 'C1', 'P1'], req.body.numQuestions || 10, req.body.tier, req.body.seed);
     res.json({ quiz: fallback, source: 'syllabus-engine' });
   }
 });
@@ -2300,23 +2350,29 @@ const SERVER_SYLLABUS_BANK: Record<string, {
   }
 };
 
-function generateServerFallbackQuiz(
+async function generateServerFallbackQuiz(
   topics: string[], 
   count: number, 
   tier?: string, 
   seed?: string, 
   existingQuestions: { question: string }[] = []
-): ServerFallbackQuestion[] {
+): Promise<ServerFallbackQuestion[]> {
   const safeCount = Math.min(40, Math.max(1, count));
+  const effectiveTier: 'Core' | 'Extended' = String(tier || 'Extended').trim().toLowerCase() === 'core' ? 'Core' : 'Extended';
   const normalizeStem = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
   const seenExisting = new Set<string>(existingQuestions.map(eq => normalizeStem(eq?.question || '')).filter(Boolean));
 
-  const generated = generateDynamicSyllabusQuestions(topics, safeCount + existingQuestions.length, tier || 'Extended', seed || '');
+  const [{ generateDynamicSyllabusQuestions }, { isValidQuizQuestion, matchesExamTier }] = await Promise.all([
+    getQuestionsBankMod(),
+    getQuizSanitizerMod()
+  ]);
+
+  const generated = generateDynamicSyllabusQuestions(topics, safeCount + existingQuestions.length, effectiveTier, seed || '');
   const filtered = generated.filter(q => {
     const norm = normalizeStem(q.question);
     if (!norm || seenExisting.has(norm)) return false;
     seenExisting.add(norm);
-    return isValidQuizQuestion(q);
+    return isValidQuizQuestion(q) && matchesExamTier(q, effectiveTier);
   });
 
   return filtered.slice(0, safeCount).map(q => ({
@@ -2550,7 +2606,7 @@ Regarding your question on **"${query}"** in ${topic || 'Cambridge Combined Scie
 Feel free to ask for a practice exam question, a model answer with mark schemes, or a step-by-step breakdown of any 0653 subtopic!`;
 }
 
-function generateFallbackSchedule(
+async function generateFallbackSchedule(
   examDate?: string, 
   weeklyHours?: number, 
   dailyHours?: number, 
@@ -2560,6 +2616,7 @@ function generateFallbackSchedule(
   studyDaysPerWeek: number = 7,
   totalWeeksParam?: number
 ) {
+  const { getRevisionTasksForTopic, TOPIC_REVISION_CONFIGS } = await getScheduleTasksMod();
   const targetWeeklyHours = typeof weeklyHours === 'number'
     ? Math.min(20, Math.max(1, Number(weeklyHours)))
     : (dailyHours ? Math.min(20, Math.max(1, Number(dailyHours) * studyDaysPerWeek)) : 10);
@@ -2779,44 +2836,62 @@ function generateFallbackRecommendations(studentName?: string, topicScores?: Rec
 async function startServer() {
   const distPath = path.join(process.cwd(), 'dist');
   const indexHtmlPath = path.join(distPath, 'index.html');
-
   // Detect environment: dev mode is active when running via tsx ("dev": "tsx server.ts") or NODE_ENV is development
   const isRunningViaTsx = process.argv.some(arg => arg.includes('tsx')) || process.execPath.includes('tsx');
   const isDev = isRunningViaTsx || process.env.NODE_ENV === 'development' || (process.env.NODE_ENV !== 'production' && !fs.existsSync(indexHtmlPath));
 
   if (isDev) {
-    // Local dev server: Mount Vite middlewares for live React compilation and HMR
-    try {
-      const { createServer: createViteServer } = await import('vite');
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: 'spa',
-      });
-      app.use(vite.middlewares);
-      console.log('Vite development middleware mounted successfully on Express.');
+    // Initialize Vite middleware asynchronously so port 3000 binds immediately and health checks never time out
+    let viteInstance: any = null;
+    let viteInitError: unknown = null;
+    const viteReadyPromise = (async () => {
+      try {
+        const { createServer: createViteServer } = await import('vite');
+        const vite = await createViteServer({
+          server: { middlewareMode: true },
+          appType: 'spa',
+        });
+        viteInstance = vite;
+        console.log('Vite development middleware mounted successfully on Express.');
+        return vite;
+      } catch (viteErr) {
+        viteInitError = viteErr;
+        console.error('Failed to start Vite development middleware:', viteErr);
+        return null;
+      }
+    })();
 
-      // Serve transformed index.html for SPA routes
-      app.get('*', async (req, res, next) => {
-        if (req.path.startsWith('/api') || req.path === '/healthz') {
-          return next();
+    app.use(async (req, res, next) => {
+      if (req.path.startsWith('/api') || req.path === '/healthz') {
+        return next();
+      }
+      const vite = viteInstance || (await viteReadyPromise);
+      if (!vite) {
+        return next(viteInitError || new Error('Vite development middleware failed to start'));
+      }
+      return vite.middlewares(req, res, next);
+    });
+
+    // Serve transformed index.html for SPA routes
+    app.get('*', async (req, res, next) => {
+      if (req.path.startsWith('/api') || req.path === '/healthz') {
+        return next();
+      }
+      try {
+        const vite = viteInstance || (await viteReadyPromise);
+        const url = req.originalUrl;
+        const indexPath = path.resolve(process.cwd(), 'index.html');
+        if (vite && fs.existsSync(indexPath)) {
+          let template = fs.readFileSync(indexPath, 'utf-8');
+          template = await vite.transformIndexHtml(url, template);
+          return res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
         }
-        try {
-          const url = req.originalUrl;
-          const indexPath = path.resolve(process.cwd(), 'index.html');
-          if (fs.existsSync(indexPath)) {
-            let template = fs.readFileSync(indexPath, 'utf-8');
-            template = await vite.transformIndexHtml(url, template);
-            return res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
-          }
-          next();
-        } catch (e) {
-          vite.ssrFixStacktrace(e as Error);
-          next(e);
-        }
-      });
-    } catch (viteErr) {
-      console.error('Failed to start Vite development middleware:', viteErr);
-    }
+        next();
+      } catch (e) {
+        if (viteInstance) viteInstance.ssrFixStacktrace(e as Error);
+        next(e);
+      }
+    });
   } else {
     // Production mode (Cloud Run standalone): Serve pre-built static bundle
     if (fs.existsSync(distPath)) {
@@ -2843,7 +2918,34 @@ async function startServer() {
   });
 
   const httpServer = http.createServer(app);
-  attachBattleWebSocketServer(httpServer);
+  const battleWss = createBattleWebSocketServer();
+  const challengeWss = new WebSocketServer({
+    noServer: true,
+    perMessageDeflate: false
+  });
+  attachChallengeWebSocketHandlers(challengeWss);
+
+  httpServer.on('upgrade', (request, socket, head) => {
+    let pathname = '';
+    try {
+      pathname = new URL(request.url || '/', 'http://localhost').pathname;
+    } catch {
+      pathname = '';
+    }
+    if (pathname === '/ws/battle') {
+      battleWss.handleUpgrade(request, socket, head, (ws) => {
+        battleWss.emit('connection', ws, request);
+      });
+    } else if (pathname === '/ws/challenge') {
+      challengeWss.handleUpgrade(request, socket, head, (ws) => {
+        challengeWss.emit('connection', ws, request);
+      });
+    }
+  });
+
+  httpServer.on('error', (err) => {
+    console.error('HTTP server failed to start:', err);
+  });
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on 0.0.0.0:${PORT} (${isDev ? 'development (Vite middleware)' : 'production (Static dist)'})`);

@@ -97,6 +97,8 @@ import { db, auth } from './firebaseAuth';
 import { getFantasySkin } from '../data/fantasySkinsData';
 import { notifyServerBattleControl } from './battleRealtimeClient';
 import { getRandomizedPracticeVaultQuestions } from '../data/syllabusQuestionsBank';
+import { getLocalDateKey, getYesterdayDateKey } from './badgeService';
+import { ALL_WEAPON_ITEMS, getBoosterPackById, resolveArenaWeaponId } from '../data/gameCatalogData';
 
 export type InstructorRewardType = 'booster_pack' | 'gold' | 'skin' | 'weapon';
 
@@ -130,6 +132,11 @@ export interface UserGameProfile {
   giftedPacks?: Record<string, number>;
   rewardHistory?: InstructorRewardRecord[];
   monthlyCrown?: boolean;
+  streakDays?: number;
+  longestStreak?: number;
+  lastStreakDate?: string;
+  lastStreakGoldAwardDate?: string;
+  lastStreakGoldBonus?: number;
 }
 
 export type ShopCategory = 'skin' | 'weapon' | 'power';
@@ -473,266 +480,8 @@ export const SHOP_ITEMS: ShopItem[] = [
     imageSrc: '/assets/characters/archangel.png'
   },
 
-  // --- 10 WEAPONS (RANKED BY RARITY WITH ALTERNATE FIRE MODES) ---
-  // 1. Common: Thermal Bunsen Burner
-  {
-    id: 'bunsen_burner',
-    name: 'Thermal Bunsen Burner',
-    category: 'weapon',
-    rarity: 'common',
-    description: 'Pressurized laboratory methane burner. High fire rate flame burst with continuous thermal cone spray.',
-    price: 0,
-    icon: '🔥',
-    stats: {
-      damage: 16,
-      fireRate: 4.5,
-      cooldownSeconds: 0.22,
-      range: 340,
-      beamColor: '#f97316',
-      specialEffect: 'Thermal Spray',
-      altFire: {
-        altName: 'Overheat Heatwave',
-        altCooldownSeconds: 3.0,
-        altDamage: 32,
-        altType: 'ring_wave',
-        altDescription: 'Discharges an expanding 360° thermal flame shockwave pushing enemies back.'
-      }
-    }
-  },
-
-  // 2. Common: Corrosive Acid Pipette
-  {
-    id: 'acid_pipette',
-    name: 'Corrosive Acid Pipette',
-    category: 'weapon',
-    rarity: 'common',
-    description: 'Pressurized jet of dilute hydrochloric acid that rapidly dissolves defenses and leaves caustic residue.',
-    price: 80,
-    icon: '🧪',
-    stats: {
-      damage: 20,
-      fireRate: 3.1,
-      cooldownSeconds: 0.32,
-      range: 380,
-      beamColor: '#10b981',
-      specialEffect: 'Acid Dissolution',
-      altFire: {
-        altName: 'Chemical Acid Splash',
-        altCooldownSeconds: 3.5,
-        altDamage: 25,
-        altType: 'acid_pool',
-        altDescription: 'Launches an acid vial creating a lingering corrosive toxic splash pool for 3.5s.'
-      }
-    }
-  },
-
-  // 3. Rare: Cryogenic Frost Ray
-  {
-    id: 'cryo_freeze_ray',
-    name: 'Cryogenic Frost Ray',
-    category: 'weapon',
-    rarity: 'rare',
-    description: 'Sub-zero liquid nitrogen emitter. Fires frosty beams that chill and slow enemy movement by 35% for 3.5s.',
-    price: 180,
-    icon: '❄️',
-    stats: {
-      damage: 28,
-      fireRate: 2.2,
-      cooldownSeconds: 0.45,
-      range: 460,
-      beamColor: '#06b6d4',
-      specialEffect: 'Cryo Frost Chill (-35% Speed 3.5s)',
-      altFire: {
-        altName: 'Glacial Freeze Blast',
-        altCooldownSeconds: 4.5,
-        altDamage: 45,
-        altType: 'freeze_blast',
-        altDescription: 'Shoots a spread of icy crystals that shatter on impact and slow enemies by 35% for 3.5s.'
-      }
-    }
-  },
-
-  // 4. Rare: Prismatic Laser Cannon
-  {
-    id: 'laser_pointer',
-    name: 'Prismatic Laser Cannon',
-    category: 'weapon',
-    rarity: 'rare',
-    description: 'Coherent Ruby photon beam. Extreme range and piercing photons that penetrate through enemies to hit targets behind them.',
-    price: 220,
-    icon: '🔦',
-    stats: {
-      damage: 38,
-      fireRate: 1.8,
-      cooldownSeconds: 0.55,
-      range: 640,
-      beamColor: '#ef4444',
-      specialEffect: 'Piercing Photon Beam',
-      altFire: {
-        altName: 'Prismatic Tri-Splitter',
-        altCooldownSeconds: 4.0,
-        altDamage: 32,
-        altType: 'spread_beam',
-        altDescription: 'Splits ruby beam through optical crystal to fire 3 enemy-piercing lasers across a 40° fan.'
-      }
-    }
-  },
-
-  // 5. Epic: Tesla Arc Disruptor
-  {
-    id: 'tesla_coil',
-    name: 'Tesla Arc Disruptor',
-    category: 'weapon',
-    rarity: 'epic',
-    description: 'High-voltage electrostatic discharging coil that crackles with chainable voltage arcs.',
-    price: 340,
-    icon: '⚡',
-    stats: {
-      damage: 35,
-      fireRate: 3.6,
-      cooldownSeconds: 0.28,
-      range: 440,
-      beamColor: '#38bdf8',
-      specialEffect: 'Voltage Arc',
-      altFire: {
-        altName: 'EMP Pulse Nova',
-        altCooldownSeconds: 5.0,
-        altDamage: 50,
-        altType: 'emp_burst',
-        altDescription: 'Releases a radial 360° electromagnetic pulse wave knocking back nearby hostiles.'
-      }
-    }
-  },
-
-  // 6. Epic: Ultrasonic Resonator
-  {
-    id: 'centrifuge_sonic_blaster',
-    name: 'Ultrasonic Resonator',
-    category: 'weapon',
-    rarity: 'epic',
-    description: 'Fires high-decibel acoustic resonance shock rings that violently push back opponents and structures.',
-    price: 380,
-    icon: '🔊',
-    stats: {
-      damage: 48,
-      fireRate: 1.4,
-      cooldownSeconds: 0.70,
-      range: 500,
-      beamColor: '#eab308',
-      specialEffect: 'Acoustic Shockwave',
-      altFire: {
-        altName: 'Acoustic Deflector Shield',
-        altCooldownSeconds: 5.5,
-        altDamage: 40,
-        altType: 'sonic_barrier',
-        altDescription: 'Deploys an ultrasonic barrier projecting around the player to deflect projectiles for 2.5s.'
-      }
-    }
-  },
-
-  // 7. Legendary: Relativistic Particle Accelerator
-  {
-    id: 'particle_accelerator',
-    name: 'Relativistic Particle Accelerator',
-    category: 'weapon',
-    rarity: 'legendary',
-    description: 'Relativistic particle collider firing supercharged dark matter plasma spheres that decimate barriers.',
-    price: 520,
-    icon: '🌀',
-    stats: {
-      damage: 68,
-      fireRate: 1.1,
-      cooldownSeconds: 0.95,
-      range: 640,
-      beamColor: '#a855f7',
-      specialEffect: 'Dark Matter Plasma',
-      altFire: {
-        altName: 'Gravitational Vortex',
-        altCooldownSeconds: 7.0,
-        altDamage: 60,
-        altType: 'vortex',
-        altDescription: 'Generates a micro gravitational singularity pulling enemies inward and imploding.'
-      }
-    }
-  },
-
-  // 8. Legendary: Biohazard Mutagen Railgun
-  {
-    id: 'biohazard_railgun',
-    name: 'Biohazard Mutagen Railgun',
-    category: 'weapon',
-    rarity: 'legendary',
-    description: 'Electromagnetic railgun propelling radioactive tungsten slugs with supreme penetrating sniper velocity.',
-    price: 580,
-    icon: '☣️',
-    stats: {
-      damage: 88,
-      fireRate: 0.9,
-      cooldownSeconds: 1.15,
-      range: 780,
-      beamColor: '#84cc16',
-      specialEffect: 'Radioactive Kinetic Slug',
-      altFire: {
-        altName: 'Mutagenic Cluster Bomb',
-        altCooldownSeconds: 6.5,
-        altDamage: 45,
-        altType: 'cluster_bomb',
-        altDescription: 'Launches 3 spreading toxic canisters that detonate into poisonous corrosive clouds.'
-      }
-    }
-  },
-
-  // 9. Mythic: Quantum Displacer Rifle (TELEPORTATION WEAPON)
-  {
-    id: 'quantum_displacer',
-    name: 'Quantum Displacer Rifle',
-    category: 'weapon',
-    rarity: 'mythic',
-    description: 'Harnesses quantum entanglement to fire tachyon bolts that distort spacetime. Teleportation alternate fire.',
-    price: 780,
-    icon: '🌌',
-    stats: {
-      damage: 54,
-      fireRate: 4.0,
-      cooldownSeconds: 0.25,
-      range: 680,
-      beamColor: '#06b6d4',
-      specialEffect: 'Tachyon Quantum Phase',
-      altFire: {
-        altName: 'Quantum Warp Teleport',
-        altCooldownSeconds: 3.5,
-        altDamage: 40,
-        altType: 'teleport',
-        altDescription: 'Instantly teleports you directly to where your mouse is aimed in the arena! Emits arrival shock.'
-      }
-    }
-  },
-
-  // 10. Mythic: Antimatter Annihilator Core
-  {
-    id: 'antimatter_annihilator',
-    name: 'Antimatter Annihilator Core',
-    category: 'weapon',
-    rarity: 'mythic',
-    description: 'Top-secret particle synthesizer firing pure antiparticles that cause catastrophic subatomic annihilation.',
-    price: 950,
-    icon: '⚛️',
-    stats: {
-      damage: 115,
-      fireRate: 0.7,
-      cooldownSeconds: 1.35,
-      range: 750,
-      beamColor: '#f43f5e',
-      specialEffect: 'Positron Annihilation',
-      altFire: {
-        altName: 'Orbital Positron Strike',
-        altCooldownSeconds: 8.5,
-        altDamage: 130,
-        altType: 'orbital_strike',
-        altDescription: 'Calls down an orbital positron death ray targeting the mouse position after 0.5s laser lock.'
-      }
-    }
-  },
+  // --- 10 IN-GAME ARSENAL WEAPONS (SINGLE SOURCE OF TRUTH) ---
+  ...ALL_WEAPON_ITEMS,
 
   // --- SPECIAL POWERS ---
   {
@@ -1009,11 +758,7 @@ export const ALL_FANTASY_SKIN_IDS = [
   'slime_king', 'overlord'
 ];
 
-export const ALL_CANONICAL_WEAPON_IDS = [
-  'wpn_starter_blaster', 'bunsen_burner', 'acid_pipette', 'wpn_heavy_cannon',
-  'wpn_rapid_repeater', 'wpn_sniper_railgun', 'wpn_freezer_lance', 'wpn_solar_disintegrator',
-  'quantum_displacer', 'wpn_antimatter_rifle'
-];
+export const ALL_CANONICAL_WEAPON_IDS = ALL_WEAPON_ITEMS.map(w => w.id);
 
 const DEFAULT_GAME_PROFILE: UserGameProfile = {
   uid: '',
@@ -1025,13 +770,18 @@ const DEFAULT_GAME_PROFILE: UserGameProfile = {
   metal: 10,
   avatar: 'cultist',
   equippedSkin: 'cultist',
-  equippedWeapon: 'wpn_starter_blaster',
+  equippedWeapon: 'bunsen_burner',
   equippedPower: 'element_shield',
-  inventory: ['cultist', 'wpn_starter_blaster', 'bunsen_burner', 'element_shield'],
+  inventory: ['cultist', 'bunsen_burner', 'element_shield'],
   unlockedSkins: ['cultist'],
   giftedPacks: {},
   rewardHistory: [],
-  monthlyCrown: false
+  monthlyCrown: false,
+  streakDays: 0,
+  longestStreak: 0,
+  lastStreakDate: '',
+  lastStreakGoldAwardDate: '',
+  lastStreakGoldBonus: 0
 };
 
 export const normalizeUserGameProfile = (
@@ -1052,7 +802,6 @@ export const normalizeUserGameProfile = (
     : (Array.isArray(data.inventory) ? [...data.inventory] : [...DEFAULT_GAME_PROFILE.inventory]);
 
   if (!inv.includes('cultist')) inv.push('cultist');
-  if (!inv.includes('wpn_starter_blaster')) inv.push('wpn_starter_blaster');
   if (!inv.includes('bunsen_burner')) inv.push('bunsen_burner');
 
   const skins = isInstructor
@@ -1076,24 +825,32 @@ export const normalizeUserGameProfile = (
     ? data.rewardHistory.slice(-25)
     : [];
 
+  const rawGoldValue = Number(data.gold ?? data.goldCoins ?? DEFAULT_GAME_PROFILE.gold);
+  const normalizedGold = Number.isFinite(rawGoldValue) ? Math.max(0, Math.floor(rawGoldValue)) : 0;
+
   return {
     uid,
     level: isInstructor ? 99 : level,
     xp,
     role: data.role,
-    gold: isInstructor ? 999999 : Math.max(0, Number(data.gold ?? data.goldCoins ?? DEFAULT_GAME_PROFILE.gold)),
+    gold: isInstructor ? 999999 : normalizedGold,
     wood: isInstructor ? 9999 : Number(data.wood ?? DEFAULT_GAME_PROFILE.wood),
     brick: isInstructor ? 9999 : Number(data.brick ?? DEFAULT_GAME_PROFILE.brick),
     metal: isInstructor ? 9999 : Number(data.metal ?? DEFAULT_GAME_PROFILE.metal),
     avatar: data.equippedSkin || data.avatar || DEFAULT_GAME_PROFILE.avatar,
     equippedSkin: data.equippedSkin || data.avatar || DEFAULT_GAME_PROFILE.avatar,
-    equippedWeapon: data.equippedWeapon || DEFAULT_GAME_PROFILE.equippedWeapon,
+    equippedWeapon: resolveArenaWeaponId(data.equippedWeapon || DEFAULT_GAME_PROFILE.equippedWeapon),
     equippedPower: data.equippedPower || DEFAULT_GAME_PROFILE.equippedPower,
     inventory: inv,
     unlockedSkins: skins,
     giftedPacks,
     rewardHistory,
-    monthlyCrown: isInstructor ? true : Boolean(data.monthlyCrown)
+    monthlyCrown: isInstructor ? true : Boolean(data.monthlyCrown),
+    streakDays: Math.max(0, Number(data.streakDays ?? data.progressSnapshot?.currentStreak ?? 0)),
+    longestStreak: Math.max(0, Number(data.longestStreak ?? data.progressSnapshot?.longestStreak ?? data.streakDays ?? 0)),
+    lastStreakDate: typeof data.lastStreakDate === 'string' ? data.lastStreakDate : (data.progressSnapshot?.lastStreakDate || ''),
+    lastStreakGoldAwardDate: typeof data.lastStreakGoldAwardDate === 'string' ? data.lastStreakGoldAwardDate : '',
+    lastStreakGoldBonus: Math.max(0, Number(data.lastStreakGoldBonus ?? 0))
   };
 };
 
@@ -1297,6 +1054,7 @@ export const resetAllStudentsGameProfiles = async (
       const userRef = doc(db, 'users', userDoc.id);
       batch.update(userRef, {
         gold: 100,
+        goldCoins: 100,
         wood: 25,
         brick: 15,
         metal: 10,
@@ -1346,6 +1104,11 @@ export const openBoosterPackTransaction = async (
   }
 ): Promise<{ success: boolean; profile?: UserGameProfile; error?: string }> => {
   if (!uid) return { success: false, error: 'Missing user ID.' };
+  const canonicalPack = getBoosterPackById(options.packId);
+  if (!canonicalPack) {
+    return { success: false, error: 'Invalid booster pack selected.' };
+  }
+  const authoritativePrice = Math.max(1, Math.floor(Number(canonicalPack.price) || 90));
   const localKey = `igcse_game_profile_${uid}`;
 
   try {
@@ -1354,11 +1117,13 @@ export const openBoosterPackTransaction = async (
       const snap = await tx.get(userRef);
       const data = snap.exists() ? snap.data() : {};
       const current = normalizeUserGameProfile(uid, data);
+      const verifiedInstructor = Boolean(options.isInstructor) && data.role === 'instructor';
 
       const giftedMap: Record<string, number> = { ...(current.giftedPacks || {}) };
-      const availableGifted = Math.max(0, Number(giftedMap[options.packId] || 0));
+      const availableGifted = Math.max(0, Math.floor(Number(giftedMap[options.packId] || 0)));
+      const currentGold = Number.isFinite(current.gold) ? Math.max(0, Math.floor(current.gold)) : 0;
 
-      let nextGold = current.gold;
+      let nextGold = currentGold;
       if (options.useGiftedPack) {
         if (availableGifted <= 0) {
           throw new Error('No gifted packs of this tier remaining.');
@@ -1369,21 +1134,26 @@ export const openBoosterPackTransaction = async (
         } else {
           delete giftedMap[options.packId];
         }
-      } else if (!options.isInstructor) {
-        if (current.gold < options.packPrice) {
-          throw new Error(`Insufficient Gold! You need ${options.packPrice} Gold.`);
+      } else if (!verifiedInstructor) {
+        if (currentGold < authoritativePrice) {
+          throw new Error(`Insufficient Gold! You need ${authoritativePrice} Gold (you have ${currentGold} Gold).`);
         }
-        nextGold = Math.max(0, current.gold - options.packPrice);
+        nextGold = currentGold - authoritativePrice;
       }
 
+      const canonicalItemId =
+        options.unlockedItemType === 'weapon'
+          ? resolveArenaWeaponId(options.unlockedItemId)
+          : options.unlockedItemId;
+
       const nextUnlockedSkins =
-        options.unlockedItemType === 'skin' && !(current.unlockedSkins || []).includes(options.unlockedItemId)
-          ? [...(current.unlockedSkins || ['cultist']), options.unlockedItemId]
+        options.unlockedItemType === 'skin' && !(current.unlockedSkins || []).includes(canonicalItemId)
+          ? [...(current.unlockedSkins || ['cultist']), canonicalItemId]
           : [...(current.unlockedSkins || ['cultist'])];
 
-      const nextInventory = current.inventory.includes(options.unlockedItemId)
+      const nextInventory = current.inventory.includes(canonicalItemId)
         ? [...current.inventory]
-        : [...current.inventory, options.unlockedItemId];
+        : [...current.inventory, canonicalItemId];
 
       const writePayload: Record<string, any> = {
         giftedPacks: giftedMap,
@@ -1391,7 +1161,7 @@ export const openBoosterPackTransaction = async (
         inventory: nextInventory
       };
 
-      if (!options.isInstructor) {
+      if (!verifiedInstructor) {
         writePayload.gold = nextGold;
         writePayload.goldCoins = nextGold;
       }
@@ -1857,6 +1627,204 @@ export const awardQuizAndLevelGold = async (params: {
     levelsGained,
     newGameLevel: nextRewardedGameLevel,
     newScholarLevel: nextRewardedScholarLevel
+  };
+};
+
+export interface DailyStreakResult {
+  currentStreak: number;
+  longestStreak: number;
+  goldAwarded: number;
+  isNewDay: boolean;
+  isConsecutive: boolean;
+  lastStreakDate: string;
+  nextDayBonus: number;
+}
+
+/**
+ * Computes the consecutive-day active engagement gold bonus.
+ * Day 1 starts the streak (0 bonus); consecutive days award +15 Gold (Day 2),
+ * +20 Gold (Day 3), +25 Gold (Day 4), +30 Gold (Day 5), up to +35 Gold/day cap.
+ */
+export const calculateStreakGoldBonus = (streakDays: number): number => {
+  if (streakDays < 2) return 0;
+  return Math.min(35, 10 + (streakDays - 1) * 5);
+};
+
+/**
+ * Records a student's daily active engagement atomically in Firestore (/users/{uid})
+ * and awards a small bonus of gold once per calendar day when maintaining a consecutive streak.
+ */
+export const recordDailyEngagementStreak = async (
+  uid: string,
+  options?: {
+    isInstructorPreview?: boolean;
+    seedStreak?: number;
+    seedLongestStreak?: number;
+    seedLastStreakDate?: string;
+  }
+): Promise<DailyStreakResult> => {
+  const now = new Date();
+  const today = getLocalDateKey(now);
+  const yesterday = getYesterdayDateKey(now);
+
+  if (!uid || options?.isInstructorPreview) {
+    const fallbackStreak = Math.max(0, options?.seedStreak || 0);
+    return {
+      currentStreak: fallbackStreak,
+      longestStreak: Math.max(fallbackStreak, options?.seedLongestStreak || 0),
+      goldAwarded: 0,
+      isNewDay: false,
+      isConsecutive: false,
+      lastStreakDate: options?.seedLastStreakDate || today,
+      nextDayBonus: calculateStreakGoldBonus(Math.max(1, fallbackStreak) + 1)
+    };
+  }
+
+  const localKey = `igcse_game_profile_${uid}`;
+  const localProfile = getLocalGameItem<UserGameProfile>(localKey, { ...DEFAULT_GAME_PROFILE, uid });
+
+  const computeNextState = (source: {
+    streakDays?: number;
+    longestStreak?: number;
+    lastStreakDate?: string;
+    lastStreakGoldAwardDate?: string;
+    lastStreakGoldBonus?: number;
+    gold?: number;
+  }) => {
+    const prevStreak = Math.max(0, Number(source.streakDays ?? options?.seedStreak ?? 0));
+    const prevLongest = Math.max(prevStreak, Number(source.longestStreak ?? options?.seedLongestStreak ?? 0));
+    const prevLastDate = String(source.lastStreakDate || options?.seedLastStreakDate || '');
+    const prevAwardDate = String(source.lastStreakGoldAwardDate || '');
+
+    let nextStreak = 1;
+    let isNewDay = true;
+    let isConsecutive = false;
+
+    if (!prevLastDate) {
+      nextStreak = Math.max(1, prevStreak);
+      isConsecutive = false;
+    } else if (prevLastDate === today) {
+      nextStreak = Math.max(1, prevStreak);
+      isNewDay = false;
+      isConsecutive = false;
+    } else if (prevLastDate === yesterday) {
+      nextStreak = Math.max(1, prevStreak) + 1;
+      isConsecutive = true;
+    } else {
+      nextStreak = 1;
+    }
+
+    const nextLongest = Math.max(prevLongest, nextStreak);
+    const goldAwarded = (isNewDay && isConsecutive && prevAwardDate !== today)
+      ? calculateStreakGoldBonus(nextStreak)
+      : 0;
+
+    return {
+      nextStreak,
+      nextLongest,
+      goldAwarded,
+      isNewDay,
+      isConsecutive,
+      prevGold: Math.max(0, Number(source.gold ?? localProfile.gold ?? DEFAULT_GAME_PROFILE.gold)),
+      prevAwardDate,
+      prevBonus: Number(source.lastStreakGoldBonus ?? 0)
+    };
+  };
+
+  let finalState = computeNextState(localProfile);
+
+  if (canPerformFirestoreWrite()) {
+    try {
+      const userDocRef = doc(db, 'users', uid);
+      finalState = await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(userDocRef);
+        const remote = snap.exists() ? (snap.data() as Record<string, any>) : {};
+
+        if (remote.role === 'instructor' || localProfile.role === 'instructor') {
+          return {
+            nextStreak: Math.max(0, Number(remote.streakDays ?? 0)),
+            nextLongest: Math.max(0, Number(remote.longestStreak ?? 0)),
+            goldAwarded: 0,
+            isNewDay: false,
+            isConsecutive: false,
+            prevGold: Number(remote.gold ?? 0),
+            prevAwardDate: String(remote.lastStreakGoldAwardDate || ''),
+            prevBonus: 0
+          };
+        }
+
+        const mergedSource = {
+          streakDays: remote.streakDays ?? localProfile.streakDays ?? options?.seedStreak,
+          longestStreak: Math.max(Number(remote.longestStreak || 0), Number(localProfile.longestStreak || 0), Number(options?.seedLongestStreak || 0)),
+          lastStreakDate: remote.lastStreakDate || localProfile.lastStreakDate || options?.seedLastStreakDate,
+          lastStreakGoldAwardDate: remote.lastStreakGoldAwardDate || localProfile.lastStreakGoldAwardDate,
+          lastStreakGoldBonus: remote.lastStreakGoldBonus ?? localProfile.lastStreakGoldBonus,
+          gold: remote.gold ?? remote.goldCoins ?? localProfile.gold ?? DEFAULT_GAME_PROFILE.gold
+        };
+
+        const computed = computeNextState(mergedSource);
+        const nowIso = new Date().toISOString();
+        const shouldWrite =
+          computed.isNewDay ||
+          computed.goldAwarded > 0 ||
+          Number(remote.streakDays ?? 0) !== computed.nextStreak ||
+          String(remote.lastStreakDate || '') !== today;
+
+        if (shouldWrite) {
+          const updatePayload: Record<string, any> = {
+            streakDays: computed.nextStreak,
+            longestStreak: computed.nextLongest,
+            lastStreakDate: today,
+            lastActive: nowIso
+          };
+          if (computed.goldAwarded > 0) {
+            updatePayload.gold = computed.prevGold + computed.goldAwarded;
+            updatePayload.lastStreakGoldAwardDate = today;
+            updatePayload.lastStreakGoldBonus = computed.goldAwarded;
+          }
+          transaction.set(userDocRef, updatePayload, { merge: true });
+        }
+
+        return computed;
+      });
+    } catch (err) {
+      handleFirestoreError(err, 'recordDailyEngagementStreak');
+    }
+  }
+
+  if (localProfile.role === 'instructor') {
+    return {
+      currentStreak: finalState.nextStreak,
+      longestStreak: finalState.nextLongest,
+      goldAwarded: 0,
+      isNewDay: false,
+      isConsecutive: false,
+      lastStreakDate: today,
+      nextDayBonus: 0
+    };
+  }
+
+  const updatedLocalProfile: UserGameProfile = {
+    ...localProfile,
+    uid,
+    streakDays: finalState.nextStreak,
+    longestStreak: finalState.nextLongest,
+    lastStreakDate: today,
+    lastStreakGoldAwardDate: finalState.goldAwarded > 0 ? today : (finalState.prevAwardDate || localProfile.lastStreakGoldAwardDate || ''),
+    lastStreakGoldBonus: finalState.goldAwarded > 0 ? finalState.goldAwarded : (finalState.prevBonus || localProfile.lastStreakGoldBonus || 0),
+    gold: finalState.prevGold + finalState.goldAwarded
+  };
+  setLocalGameItem(localKey, updatedLocalProfile);
+  dispatchGameProfileUpdated(uid, updatedLocalProfile);
+
+  return {
+    currentStreak: finalState.nextStreak,
+    longestStreak: finalState.nextLongest,
+    goldAwarded: finalState.goldAwarded,
+    isNewDay: finalState.isNewDay,
+    isConsecutive: finalState.isConsecutive,
+    lastStreakDate: today,
+    nextDayBonus: calculateStreakGoldBonus(finalState.nextStreak + 1)
   };
 };
 

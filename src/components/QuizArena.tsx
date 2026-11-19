@@ -94,7 +94,7 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
   const [selectedSubtopics, setSelectedSubtopics] = useState<string[]>([]);
   const [expandedTopics, setExpandedTopics] = useState<Record<string, boolean>>({});
   const [attemptCount, setAttemptCount] = useState<number>(1);
-  const [tier, setTier] = useState<'Extended' | 'Core' | 'Mixed'>('Extended');
+  const [tier, setTier] = useState<'Extended' | 'Core'>('Extended');
   const [topicSearch, setTopicSearch] = useState<string>('');
   const [activeSubjectTab, setActiveSubjectTab] = useState<'all' | 'biology' | 'chemistry' | 'physics'>('all');
 
@@ -566,8 +566,8 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
                   <span>Curriculum Tier</span>
                 </label>
 
-                <div className="grid grid-cols-3 gap-2">
-                  {(['Extended', 'Core', 'Mixed'] as const).map(t => (
+                <div className="grid grid-cols-2 gap-3">
+                  {(['Core', 'Extended'] as const).map(t => (
                     <button
                       key={t}
                       type="button"
@@ -580,15 +580,22 @@ export const QuizArena: React.FC<QuizArenaProps> = ({
                     >
                       <div className="text-sm font-bold">{t}</div>
                       <div className="text-xs opacity-75 mt-0.5">
-                        {t === 'Extended' ? 'Paper 2' : t === 'Core' ? 'Paper 1' : 'Both Papers'}
+                        {t === 'Core' ? 'Core Syllabus Only' : 'Core + Extended'}
                       </div>
                     </button>
                   ))}
                 </div>
 
-                <div className="text-xs text-slate-600 flex items-center gap-2">
-                  <Clock className="w-3.5 h-3.5 text-slate-500" />
-                  <span>Estimated time: ~{Math.round(numQuestions * 1.5)} minutes (1.5 min per question)</span>
+                <div className="text-xs text-slate-600 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <span>Estimated time: ~{Math.round(numQuestions * 1.5)} minutes (1.5 min per question)</span>
+                  </div>
+                  <p className="text-slate-500">
+                    {tier === 'Core'
+                      ? 'Core mode: questions are strictly drawn from Core syllabus objectives only.'
+                      : 'Extended mode: questions cover the entire syllabus (both Core and Extended objectives).'}
+                  </p>
                 </div>
               </div>
             </div>

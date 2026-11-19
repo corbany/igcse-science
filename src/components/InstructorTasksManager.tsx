@@ -33,7 +33,8 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  RotateCcw
+  RotateCcw,
+  Archive
 } from 'lucide-react';
 import { 
   ClassTask, 
@@ -50,6 +51,8 @@ import {
   fetchClassTasks, 
   fetchTaskSubmissions, 
   deleteClassTask, 
+  endClassTask,
+  reopenClassTask,
   updateClassTaskDueDate,
   fetchStudentsInClass,
   notifyStudentsOfTaskAssignment,
@@ -78,8 +81,11 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
   const [tasks, setTasks] = useState<ClassTask[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [selectedClassId, setSelectedClassId] = useState<string>(initialSelectedClassId || 'all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'overdue'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'overdue' | 'ended'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [confirmEndTaskId, setConfirmEndTaskId] = useState<string | null>(null);
+  const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
+  const [endingTaskId, setEndingTaskId] = useState<string | null>(null);
   
   // Create task modal state
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
@@ -693,15 +699,70 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
     }
   };
 
+  const handleEndTask = async (taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEndingTaskId(taskId);
+    try {
+      await endClassTask(taskId, {
+        id: currentUser.id,
+        name: currentUser.name,
+        email: currentUser.email
+      });
+      const endedAt = new Date().toISOString();
+      setTasks(prev =>
+        prev.map(t =>
+          t.id === taskId
+            ? {
+                ...t,
+                status: 'ended',
+                endedAt,
+                endedBy: currentUser.id,
+                endedByName: currentUser.name || currentUser.email || 'Instructor'
+              }
+            : t
+        )
+      );
+      setConfirmEndTaskId(null);
+      setFeedbackNotice({
+        type: 'success',
+        text: 'Task ended. Student progress history is preserved and the task is no longer marked as pending or overdue.'
+      });
+    } catch (err: any) {
+      setFeedbackNotice({ type: 'error', text: err?.message || 'Failed to end task.' });
+    } finally {
+      setEndingTaskId(null);
+    }
+  };
+
+  const handleReopenTask = async (taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEndingTaskId(taskId);
+    try {
+      await reopenClassTask(taskId);
+      setTasks(prev =>
+        prev.map(t => {
+          if (t.id !== taskId) return t;
+          const next = { ...t, status: 'active' as const };
+          delete next.endedAt;
+          delete next.endedBy;
+          delete next.endedByName;
+          return next;
+        })
+      );
+      setFeedbackNotice({ type: 'success', text: 'Task reopened and active for students again.' });
+    } catch (err: any) {
+      setFeedbackNotice({ type: 'error', text: err?.message || 'Failed to reopen task.' });
+    } finally {
+      setEndingTaskId(null);
+    }
+  };
+
   const handleDeleteTask = async (taskId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm('Are you sure you want to delete this task? All student progress for this task will be permanently removed.')) {
-      return;
-    }
-
     try {
       await deleteClassTask(taskId);
-      setTasks(tasks.filter(t => t.id !== taskId));
+      setTasks(prev => prev.filter(t => t.id !== taskId));
+      setConfirmDeleteTaskId(null);
       setFeedbackNotice({ type: 'success', text: 'Task deleted successfully.' });
     } catch (err: any) {
       setFeedbackNotice({ type: 'error', text: err?.message || 'Failed to delete task.' });
@@ -719,7 +780,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
 
     try {
       await updateClassTaskDueDate(taskId, newDueStr);
-      setTasks(tasks.map(t => t.id === taskId ? { ...t, dueDate: newDueStr } : t));
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, dueDate: newDueStr } : t));
       setFeedbackNotice({ type: 'success', text: `Due date extended by ${daysToAdd} days!` });
     } catch (err: any) {
       setFeedbackNotice({ type: 'error', text: 'Failed to update due date.' });
@@ -732,10 +793,12 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
       task.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
       task.targetSubtopics.some(s => s.toLowerCase().includes(searchQuery.toLowerCase()));
 
-    const isOverdue = new Date(task.dueDate).getTime() < Date.now();
+    const isEnded = task.status === 'ended';
+    const isOverdue = !isEnded && new Date(task.dueDate).getTime() < Date.now();
     const matchesStatus = statusFilter === 'all' || 
+      (statusFilter === 'ended' && isEnded) ||
       (statusFilter === 'overdue' && isOverdue) || 
-      (statusFilter === 'active' && !isOverdue);
+      (statusFilter === 'active' && !isEnded && !isOverdue);
 
     return matchesSearch && matchesStatus;
   });
@@ -941,7 +1004,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
             </select>
 
             <span className="text-slate-600 dark:text-slate-400 font-semibold ml-2">Status:</span>
-            <div className="flex items-center gap-1 bg-[#FDFBF7] dark:bg-black p-1 rounded-lg border-2 border-black dark:border-white">
+            <div className="flex items-center gap-1 bg-[#FDFBF7] dark:bg-black p-1 rounded-lg border-2 border-black dark:border-white flex-wrap">
               <button
                 onClick={() => setStatusFilter('all')}
                 className={`px-2.5 py-1 rounded-md font-semibold transition ${
@@ -960,7 +1023,7 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     : 'text-slate-600 dark:text-slate-400 hover:text-black dark:hover:text-white'
                 }`}
               >
-                Active ({tasks.filter(t => new Date(t.dueDate).getTime() >= now).length})
+                Active ({tasks.filter(t => t.status !== 'ended' && new Date(t.dueDate).getTime() >= now).length})
               </button>
               <button
                 onClick={() => setStatusFilter('overdue')}
@@ -970,7 +1033,17 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                     : 'text-slate-600 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400'
                 }`}
               >
-                Past Due ({tasks.filter(t => new Date(t.dueDate).getTime() < now).length})
+                Past Due ({tasks.filter(t => t.status !== 'ended' && new Date(t.dueDate).getTime() < now).length})
+              </button>
+              <button
+                onClick={() => setStatusFilter('ended')}
+                className={`px-2.5 py-1 rounded-md font-semibold transition ${
+                  statusFilter === 'ended' 
+                    ? 'bg-slate-700 text-white dark:bg-zinc-700 dark:text-white shadow-xs' 
+                    : 'text-slate-600 dark:text-slate-400 hover:text-black dark:hover:text-white'
+                }`}
+              >
+                Ended ({tasks.filter(t => t.status === 'ended').length})
               </button>
             </div>
           </div>
@@ -1018,8 +1091,9 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
             const subs = taskSubmissions[task.id] || [];
             const isSubsLoading = loadingSubmissions[task.id];
 
+            const isEnded = task.status === 'ended';
             const dueDateObj = new Date(task.dueDate);
-            const isOverdue = dueDateObj.getTime() < now;
+            const isOverdue = !isEnded && dueDateObj.getTime() < now;
             const diffDays = Math.ceil((dueDateObj.getTime() - now) / (1000 * 60 * 60 * 24));
 
             // Calculate progress counts
@@ -1125,26 +1199,35 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                       )}
                     </div>
 
-                    {/* Due Date & Overdue Badge */}
-                    <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 shrink-0">
-                      <div className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 ${
-                        isOverdue
-                          ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-500/40 text-rose-800 dark:text-rose-300 animate-pulse'
-                          : diffDays <= 1
-                            ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-300 dark:border-amber-500/40 text-amber-800 dark:text-amber-300'
-                            : 'bg-[#FDFBF7] dark:bg-zinc-900 border-slate-300 dark:border-zinc-700 text-[#1E293B] dark:text-slate-300'
-                      }`}>
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>
-                          {isOverdue 
-                            ? `Overdue (${dueDateObj.toLocaleDateString()})` 
-                            : diffDays === 0 
-                              ? 'Due Today' 
-                              : diffDays === 1 
-                                ? 'Due Tomorrow' 
-                                : `Due in ${diffDays} days`}
-                        </span>
-                      </div>
+                    {/* Due Date / Ended Status & Quick Lifecycle Action */}
+                    <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 shrink-0 flex-wrap">
+                      {isEnded ? (
+                        <div className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 bg-slate-100 dark:bg-zinc-800 border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-slate-200">
+                          <Archive className="w-3.5 h-3.5" />
+                          <span>
+                            Ended{task.endedAt ? ` (${new Date(task.endedAt).toLocaleDateString()})` : ''}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 ${
+                          isOverdue
+                            ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-300 dark:border-rose-500/40 text-rose-800 dark:text-rose-300 animate-pulse'
+                            : diffDays <= 1
+                              ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-300 dark:border-amber-500/40 text-amber-800 dark:text-amber-300'
+                              : 'bg-[#FDFBF7] dark:bg-zinc-900 border-slate-300 dark:border-zinc-700 text-[#1E293B] dark:text-slate-300'
+                        }`}>
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>
+                            {isOverdue 
+                              ? `Overdue (${dueDateObj.toLocaleDateString()})` 
+                              : diffDays === 0 
+                                ? 'Due Today' 
+                                : diffDays === 1 
+                                  ? 'Due Tomorrow' 
+                                  : `Due in ${diffDays} days`}
+                          </span>
+                        </div>
+                      )}
 
                       <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
                         <span>Due:</span>
@@ -1152,6 +1235,54 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                           {dueDateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
+
+                      {isEnded ? (
+                        <button
+                          type="button"
+                          onClick={e => handleReopenTask(task.id, e)}
+                          disabled={endingTaskId === task.id}
+                          title="Reopen this task so students can work on it again"
+                          className="px-2.5 py-1 rounded-lg bg-white dark:bg-black hover:bg-slate-100 dark:hover:bg-zinc-900 text-[#1E293B] dark:text-white border border-slate-300 dark:border-zinc-700 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>{endingTaskId === task.id ? 'Reopening...' : 'Reopen Task'}</span>
+                        </button>
+                      ) : confirmEndTaskId === task.id ? (
+                        <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={e => handleEndTask(task.id, e)}
+                            disabled={endingTaskId === task.id}
+                            className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold transition cursor-pointer disabled:opacity-50"
+                          >
+                            {endingTaskId === task.id ? 'Ending...' : 'Confirm End'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              setConfirmEndTaskId(null);
+                            }}
+                            className="px-2 py-1 rounded-lg bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-zinc-700 text-[11px] font-semibold transition cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setConfirmDeleteTaskId(null);
+                            setConfirmEndTaskId(task.id);
+                          }}
+                          title="End this task and close it for students while keeping progress history"
+                          className="px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <Archive className="w-3 h-3" />
+                          <span>End Task</span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1259,22 +1390,92 @@ export const InstructorTasksManager: React.FC<InstructorTasksManagerProps> = ({
                           )}
                         </button>
 
-                        <button
-                          onClick={e => handleQuickExtendDueDate(task.id, 2, e)}
-                          title="Extend due date by 2 days"
-                          className="px-3 py-1.5 rounded-xl bg-white dark:bg-black hover:bg-slate-50 dark:hover:bg-zinc-900 text-[#1E293B] dark:text-white text-xs font-semibold border-2 border-black dark:border-white transition"
-                        >
-                          +2 Days Deadline
-                        </button>
+                        {!isEnded && (
+                          <button
+                            onClick={e => handleQuickExtendDueDate(task.id, 2, e)}
+                            title="Extend due date by 2 days"
+                            className="px-3 py-1.5 rounded-xl bg-white dark:bg-black hover:bg-slate-50 dark:hover:bg-zinc-900 text-[#1E293B] dark:text-white text-xs font-semibold border-2 border-black dark:border-white transition"
+                          >
+                            +2 Days Deadline
+                          </button>
+                        )}
 
-                        <button
-                          onClick={e => handleDeleteTask(task.id, e)}
-                          title="Permanently delete this task"
-                          className="px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-700 text-xs font-semibold transition flex items-center gap-1.5"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Delete</span>
-                        </button>
+                        {isEnded ? (
+                          <button
+                            onClick={e => handleReopenTask(task.id, e)}
+                            disabled={endingTaskId === task.id}
+                            title="Reopen this task so it becomes active for students again"
+                            className="px-3 py-1.5 rounded-xl bg-white dark:bg-black hover:bg-slate-50 dark:hover:bg-zinc-900 text-[#1E293B] dark:text-white border-2 border-black dark:border-white text-xs font-semibold transition flex items-center gap-1.5 disabled:opacity-50"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>{endingTaskId === task.id ? 'Reopening...' : 'Reopen Task'}</span>
+                          </button>
+                        ) : confirmEndTaskId === task.id ? (
+                          <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={e => handleEndTask(task.id, e)}
+                              disabled={endingTaskId === task.id}
+                              className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition disabled:opacity-50"
+                            >
+                              {endingTaskId === task.id ? 'Ending...' : 'Confirm End Task'}
+                            </button>
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                setConfirmEndTaskId(null);
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-zinc-700 text-xs font-semibold transition"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              setConfirmDeleteTaskId(null);
+                              setConfirmEndTaskId(task.id);
+                            }}
+                            title="End this task and stop student reminders while keeping submission records"
+                            className="px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700 text-xs font-semibold transition flex items-center gap-1.5"
+                          >
+                            <Archive className="w-3.5 h-3.5" />
+                            <span>End Task</span>
+                          </button>
+                        )}
+
+                        {confirmDeleteTaskId === task.id ? (
+                          <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={e => handleDeleteTask(task.id, e)}
+                              className="px-3 py-1.5 rounded-xl bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold transition"
+                            >
+                              Confirm Delete
+                            </button>
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                setConfirmDeleteTaskId(null);
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-zinc-700 text-xs font-semibold transition"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              setConfirmEndTaskId(null);
+                              setConfirmDeleteTaskId(task.id);
+                            }}
+                            title="Permanently delete this task"
+                            className="px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-700 text-xs font-semibold transition flex items-center gap-1.5"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Delete</span>
+                          </button>
+                        )}
                       </div>
                     </div>
 

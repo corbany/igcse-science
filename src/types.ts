@@ -37,6 +37,7 @@ export interface UserProfile {
   dailyStudyMinutes?: number;
   targetGrade?: string;
   streakDays?: number;
+  longestStreak?: number;
   lastActiveDate?: string;
   featuredBadgeId?: string;
   xp?: number;
@@ -341,6 +342,10 @@ export interface ClassTask {
   requiredQuizLength?: number; // exact number of questions students must choose in Practice Quiz (default 10)
   requireSlidesAndTrafficLight?: boolean; // default true: must read all slides & complete Traffic Light Quiz
   dueDate: string; // ISO date string (e.g. 2026-10-10T23:59:59Z)
+  status?: 'active' | 'ended';
+  endedAt?: string;
+  endedBy?: string;
+  endedByName?: string;
   instructorId: string;
   instructorName: string;
   instructorEmail?: string;
@@ -396,4 +401,38 @@ export interface CompletedActivity {
   trafficLight?: TrafficLightStatus;
   completedAt: string; // ISO date string
 }
+
+// -------------------------------------------------------------
+// 1V1 LIVE QUIZ CHALLENGES (LEADERBOARD)
+// -------------------------------------------------------------
+export type ChallengeStatus =
+  | 'pending'
+  | 'accepted'
+  | 'in_progress'
+  | 'completed'
+  | 'declined'
+  | 'cancelled';
+
+export interface QuizChallenge {
+  id: string;
+  classId: string;
+  challengerId: string;
+  challengerName: string;
+  challengedId: string;
+  challengedName: string;
+  participantIds: [string, string];
+  topics: string[];
+  questionCount: number;
+  tier: ExamTier;
+  status: ChallengeStatus;
+  questions: QuizQuestion[];
+  challengerScore: number;
+  challengedScore: number;
+  winnerId?: string;
+  createdAt: string;
+  updatedAt: string;
+  acceptedAt?: string;
+  completedAt?: string;
+}
+
 

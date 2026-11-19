@@ -273,10 +273,9 @@ export function applyServerBattleControl(input: {
   }
 }
 
-export function attachBattleWebSocketServer(httpServer: HttpServer) {
+export function createBattleWebSocketServer() {
   const wss = new WebSocketServer({
-    server: httpServer,
-    path: '/ws/battle',
+    noServer: true,
     perMessageDeflate: false // Skip per-frame deflate CPU overhead for 32-player 20Hz ticks
   });
 

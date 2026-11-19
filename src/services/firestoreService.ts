@@ -9,7 +9,8 @@ import {
   query, 
   where,
   increment,
-  onSnapshot
+  onSnapshot,
+  deleteField
 } from 'firebase/firestore';
 import { db } from './firebaseAuth';
 import { UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, SubtopicSlideProgress, QuizLengthRecord, ScienceSubject, ExamTier, ClassTask, TaskSubmission, TaskWithSubmission, TaskProgressStatus } from '../types';
@@ -92,6 +93,9 @@ export interface ClassStudentItem {
   bestTotalXP?: number;
   featuredBadgeId?: string;
   streakDays?: number;
+  longestStreak?: number;
+  lastStreakDate?: string;
+  activeDates?: string[];
 }
 
 const hydratedRemoteMaxByClassStudent = new Map<string, Partial<ClassStudentItem>>();
@@ -1225,7 +1229,10 @@ export async function hydrateStudentProgressFromFirestore(
           cumulativeQuizPoints: data.cumulativeQuizPoints || data.totalQuizScore || 0,
           cumulativeQuizzesCount: data.cumulativeQuizzesCount || data.quizzesCompletedCount || 0,
           bestTotalXP: data.bestTotalXP || data.xp || 0,
-          currentStreak: data.streakDays || 0
+          currentStreak: data.streakDays || 0,
+          longestStreak: data.longestStreak || data.streakDays || 0,
+          lastStreakDate: data.lastStreakDate,
+          activeDates: data.activeDates || []
         });
       }
     } catch {
@@ -1317,6 +1324,19 @@ export async function hydrateStudentProgressFromFirestore(
     localProgress.currentStreak || 0,
     ...remoteSnapshots.map(s => s.currentStreak || 0)
   );
+  const longestStreak = Math.max(
+    localProgress.longestStreak || 0,
+    currentStreak,
+    ...remoteSnapshots.map(s => s.longestStreak || 0)
+  );
+  const lastStreakDate = [localProgress.lastStreakDate, ...remoteSnapshots.map(s => s.lastStreakDate)]
+    .filter((d): d is string => Boolean(d))
+    .sort()
+    .pop();
+  const activeDates = Array.from(new Set([
+    ...(localProgress.activeDates || []),
+    ...remoteSnapshots.flatMap(s => s.activeDates || [])
+  ])).sort();
 
   return {
     ...localProgress,
@@ -1333,7 +1353,10 @@ export async function hydrateStudentProgressFromFirestore(
     bestTotalXP,
     cumulativeQuizPoints,
     cumulativeQuizzesCount,
-    currentStreak
+    currentStreak,
+    longestStreak,
+    lastStreakDate,
+    activeDates
   };
 }
 
@@ -1363,7 +1386,11 @@ export async function syncStudentProgressToClasses(
         earnedBadges: progress.earnedBadges || [],
         bestTotalXP: Math.max(progress.bestTotalXP || 0, badgeEval.totalXP),
         cumulativeQuizPoints: progress.cumulativeQuizPoints || 0,
-        cumulativeQuizzesCount: progress.cumulativeQuizzesCount || 0
+        cumulativeQuizzesCount: progress.cumulativeQuizzesCount || 0,
+        currentStreak: progress.currentStreak || 0,
+        longestStreak: progress.longestStreak || 0,
+        lastStreakDate: progress.lastStreakDate,
+        activeDates: progress.activeDates || []
       },
       lastActive: new Date().toISOString()
     }), { merge: true });
@@ -1526,7 +1553,10 @@ export async function syncStudentProgressToClasses(
       badgesCount,
       earnedBadges: mergedEarnedBadges,
       featuredBadgeId: progress.featuredBadgeId || student.featuredBadgeId || remoteMax.featuredBadgeId,
-      streakDays: Math.max(progress.currentStreak || 1, existingLocal?.streakDays || 1, remoteMax.streakDays || 1),
+      streakDays: progress.currentStreak ?? existingLocal?.streakDays ?? remoteMax.streakDays ?? 1,
+      longestStreak: Math.max(progress.longestStreak || 0, progress.currentStreak || 0, existingLocal?.longestStreak || 0, remoteMax.longestStreak || 0),
+      lastStreakDate: progress.lastStreakDate || existingLocal?.lastStreakDate || remoteMax.lastStreakDate,
+      activeDates: Array.from(new Set([...(remoteMax.activeDates || []), ...(existingLocal?.activeDates || []), ...(progress.activeDates || [])])).sort(),
       xp: monotonicXP,
       bestTotalXP: monotonicXP
     };
@@ -1909,6 +1939,7 @@ export async function createClassTask(
     targetSubtopics: Array.isArray(taskData.targetSubtopics) ? taskData.targetSubtopics : [],
     description: taskData.description || '',
     className: taskData.className || 'Combined Science Class',
+    status: 'active',
     id,
     createdAt
   };
@@ -2340,8 +2371,10 @@ export async function fetchTasksForStudent(
         // use local
       }
 
+      const isEnded = task.status === 'ended';
+
       // Automatically evaluate if student's progress satisfies strict completion criteria (never downgrades 'completed')
-      if (studentProgress && !options?.skipAutoPersist) {
+      if (studentProgress && !options?.skipAutoPersist && !isEnded) {
         const prevPersisted = submission;
         const evaluated = evaluateTaskProgressForStudent(task, student, studentProgress, prevPersisted);
         const changed = hasSubmissionChanged(prevPersisted, evaluated);
@@ -2372,7 +2405,7 @@ export async function fetchTasksForStudent(
       }
 
       const dueTimestamp = new Date(task.dueDate).getTime();
-      const isOverdue = dueTimestamp < now && submission.status !== 'completed';
+      const isOverdue = !isEnded && dueTimestamp < now && submission.status !== 'completed';
 
       studentTasks.push({
         ...task,
@@ -2617,6 +2650,94 @@ export async function updateClassTaskDueDate(taskId: string, newDueDate: string)
     await updateDoc(doc(db, 'tasks', taskId), { dueDate: newDueDate });
   } catch {
     // Offline
+  }
+
+  return true;
+}
+
+/**
+ * Ends an active or past-due task without deleting student submission history.
+ */
+export async function endClassTask(
+  taskId: string,
+  endedBy?: { id?: string; name?: string; email?: string }
+): Promise<boolean> {
+  const endedAt = new Date().toISOString();
+  const endedById = endedBy?.id || '';
+  const endedByName = endedBy?.name || endedBy?.email || 'Instructor';
+
+  const localTasks = getLocalItem<ClassTask[]>(LOCAL_TASKS_KEY, []);
+  const idx = localTasks.findIndex(t => t.id === taskId);
+  if (idx >= 0) {
+    localTasks[idx] = {
+      ...localTasks[idx],
+      status: 'ended',
+      endedAt,
+      endedBy: endedById || undefined,
+      endedByName
+    };
+    setLocalItem(LOCAL_TASKS_KEY, localTasks);
+  }
+
+  try {
+    await setDoc(
+      doc(db, 'tasks', taskId),
+      cleanFirestoreData({
+        id: taskId,
+        status: 'ended',
+        endedAt,
+        endedBy: endedById || undefined,
+        endedByName
+      }),
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn('Failed to end task in Firestore, local state updated:', err);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('igcse_task_submission_updated', { detail: { taskId } }));
+  }
+
+  return true;
+}
+
+/**
+ * Reopens a previously ended task so it becomes active for students again.
+ */
+export async function reopenClassTask(taskId: string): Promise<boolean> {
+  const localTasks = getLocalItem<ClassTask[]>(LOCAL_TASKS_KEY, []);
+  const idx = localTasks.findIndex(t => t.id === taskId);
+  if (idx >= 0) {
+    const updated = { ...localTasks[idx], status: 'active' as const };
+    delete updated.endedAt;
+    delete updated.endedBy;
+    delete updated.endedByName;
+    localTasks[idx] = updated;
+    setLocalItem(LOCAL_TASKS_KEY, localTasks);
+  }
+
+  try {
+    await updateDoc(doc(db, 'tasks', taskId), {
+      status: 'active',
+      endedAt: deleteField(),
+      endedBy: deleteField(),
+      endedByName: deleteField()
+    });
+  } catch {
+    try {
+      await setDoc(
+        doc(db, 'tasks', taskId),
+        { id: taskId, status: 'active' },
+        { merge: true }
+      );
+    } catch (err) {
+      console.warn('Failed to reopen task in Firestore, local state updated:', err);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('igcse_task_submission_updated', { detail: { taskId } }));
   }
 
   return true;
@@ -2928,7 +3049,7 @@ export async function autoCheckTaskCompletion(
 
     const studentTasks = await fetchTasksForStudent(student, enrolledClassIds);
     for (const task of studentTasks) {
-      if (task.submission?.status === 'completed') continue;
+      if (task.status === 'ended' || task.submission?.status === 'completed') continue;
       const matches = isTargetSubtopicMatched(task.targetSubtopics, subtopicCode);
       if (!matches) continue;
 
@@ -2974,6 +3095,7 @@ export async function autoEvaluateAllTasksForStudent(
     // Fetch raw persisted submissions first so we detect exact delta & reliably await Firestore writes
     const studentTasks = await fetchTasksForStudent(student, enrolledClassIds, studentProgress, { skipAutoPersist: true });
     for (const task of studentTasks) {
+      if (task.status === 'ended') continue;
       const curr = task.submission;
       const evaluated = evaluateTaskProgressForStudent(task, student, studentProgress, curr);
       const changed = hasSubmissionChanged(curr, evaluated);

@@ -69,17 +69,7 @@ export const RARITY_RANK: Record<ItemRarity, { rank: number; label: string; badg
 };
 
 export const ALL_WEAPON_ITEMS: ShopItem[] = [
-  // --- COMMON (Rank 5) ---
-  {
-    id: 'wpn_starter_blaster',
-    name: 'Laboratory Pulse Blaster',
-    category: 'weapon',
-    rarity: 'common',
-    price: 0,
-    icon: '🔫',
-    description: 'Standard issue laboratory scientific blaster for precision target practice.',
-    stats: { damage: 18, fireRate: 2.9, cooldownSeconds: 0.35, range: 450, specialEffect: 'laser' }
-  },
+  // --- 1. COMMON: Thermal Bunsen Burner (Starter) ---
   {
     id: 'bunsen_burner',
     name: 'Thermal Bunsen Burner',
@@ -87,9 +77,25 @@ export const ALL_WEAPON_ITEMS: ShopItem[] = [
     rarity: 'common',
     price: 0,
     icon: '🔥',
-    description: 'Pressurized laboratory methane burner with continuous thermal cone spray.',
-    stats: { damage: 16, fireRate: 4.5, cooldownSeconds: 0.22, range: 340, specialEffect: 'thermal' }
+    description: 'Pressurized laboratory methane burner. High fire rate flame burst with continuous thermal cone spray.',
+    stats: {
+      damage: 16,
+      fireRate: 4.5,
+      cooldownSeconds: 0.22,
+      range: 340,
+      beamColor: '#f97316',
+      specialEffect: 'Thermal Spray',
+      altFire: {
+        altName: 'Overheat Heatwave',
+        altCooldownSeconds: 3.0,
+        altDamage: 32,
+        altType: 'ring_wave',
+        altDescription: 'Discharges an expanding 360° thermal flame shockwave pushing enemies back.'
+      }
+    }
   },
+
+  // --- 2. COMMON: Corrosive Acid Pipette ---
   {
     id: 'acid_pipette',
     name: 'Corrosive Acid Pipette',
@@ -97,67 +103,181 @@ export const ALL_WEAPON_ITEMS: ShopItem[] = [
     rarity: 'common',
     price: 80,
     icon: '🧪',
-    description: 'Pressurized jet of dilute hydrochloric acid that rapidly dissolves defenses.',
-    stats: { damage: 20, fireRate: 3.1, cooldownSeconds: 0.32, range: 380, specialEffect: 'acid' }
+    description: 'Pressurized jet of dilute hydrochloric acid that rapidly dissolves defenses and leaves caustic residue.',
+    stats: {
+      damage: 20,
+      fireRate: 3.1,
+      cooldownSeconds: 0.32,
+      range: 380,
+      beamColor: '#10b981',
+      specialEffect: 'Acid Dissolution',
+      altFire: {
+        altName: 'Chemical Acid Splash',
+        altCooldownSeconds: 3.5,
+        altDamage: 25,
+        altType: 'acid_pool',
+        altDescription: 'Launches an acid vial creating a lingering corrosive toxic splash pool for 3.5s.'
+      }
+    }
   },
 
-  // --- RARE (Rank 4) ---
+  // --- 3. RARE: Cryogenic Frost Ray ---
   {
-    id: 'wpn_heavy_cannon',
-    name: 'Tesla Ion Cannon',
+    id: 'cryo_freeze_ray',
+    name: 'Cryogenic Frost Ray',
     category: 'weapon',
     rarity: 'rare',
     price: 180,
-    icon: '⚡',
-    description: 'Fires high-voltage electromagnetic rounds that pierce multiple targets.',
-    stats: { damage: 45, fireRate: 1.2, cooldownSeconds: 0.85, range: 600, specialEffect: 'lightning' }
+    icon: '❄️',
+    description: 'Sub-zero liquid nitrogen emitter. Fires frosty beams that chill and slow enemy movement by 35% for 3.5s.',
+    stats: {
+      damage: 28,
+      fireRate: 2.2,
+      cooldownSeconds: 0.45,
+      range: 460,
+      beamColor: '#06b6d4',
+      specialEffect: 'Cryo Frost Chill (-35% Speed 3.5s)',
+      altFire: {
+        altName: 'Glacial Freeze Blast',
+        altCooldownSeconds: 4.5,
+        altDamage: 45,
+        altType: 'freeze_blast',
+        altDescription: 'Shoots a spread of icy crystals that shatter on impact and slow enemies by 35% for 3.5s.'
+      }
+    }
   },
+
+  // --- 4. RARE: Prismatic Laser Cannon ---
   {
-    id: 'wpn_rapid_repeater',
-    name: 'Quantum Rapid Repeater',
+    id: 'laser_pointer',
+    name: 'Prismatic Laser Cannon',
     category: 'weapon',
     rarity: 'rare',
-    price: 150,
-    icon: '🌀',
-    description: 'Rapid-fire quantum particle accelerator with high cycle rate.',
-    stats: { damage: 12, fireRate: 8.3, cooldownSeconds: 0.12, range: 380, specialEffect: 'plasma' }
+    price: 220,
+    icon: '🔦',
+    description: 'Coherent Ruby photon beam. Extreme range and piercing photons that penetrate through enemies to hit targets behind them.',
+    stats: {
+      damage: 38,
+      fireRate: 1.8,
+      cooldownSeconds: 0.55,
+      range: 640,
+      beamColor: '#ef4444',
+      specialEffect: 'Piercing Photon Beam',
+      altFire: {
+        altName: 'Prismatic Tri-Splitter',
+        altCooldownSeconds: 4.0,
+        altDamage: 32,
+        altType: 'spread_beam',
+        altDescription: 'Splits ruby beam through optical crystal to fire 3 enemy-piercing lasers across a 40° fan.'
+      }
+    }
   },
 
-  // --- EPIC (Rank 3) ---
+  // --- 5. EPIC: Tesla Arc Disruptor ---
   {
-    id: 'wpn_sniper_railgun',
-    name: 'Linear Accelerator Railgun',
+    id: 'tesla_coil',
+    name: 'Tesla Arc Disruptor',
     category: 'weapon',
     rarity: 'epic',
-    price: 260,
-    icon: '🎯',
-    description: 'Long-range electromagnetic photon rifle that penetrates through enemies to hit targets behind them.',
-    stats: { damage: 85, fireRate: 0.7, cooldownSeconds: 1.4, range: 900, specialEffect: 'beam' }
-  },
-  {
-    id: 'wpn_freezer_lance',
-    name: 'Cryogenic Absolute Zero Lance',
-    category: 'weapon',
-    rarity: 'epic',
-    price: 240,
-    icon: '❄️',
-    description: 'Emits a cryogenic beam that chills and slows enemy movement speed by 35% for 3.5s.',
-    stats: { damage: 32, fireRate: 2.0, cooldownSeconds: 0.5, range: 500, specialEffect: 'frost' }
+    price: 340,
+    icon: '⚡',
+    description: 'High-voltage electrostatic discharging coil that arcs across up to 3 consecutive targets within 215px.',
+    stats: {
+      damage: 35,
+      fireRate: 3.6,
+      cooldownSeconds: 0.28,
+      range: 440,
+      beamColor: '#38bdf8',
+      specialEffect: '3-Target Chain Lightning',
+      altFire: {
+        altName: 'EMP Pulse Nova',
+        altCooldownSeconds: 5.0,
+        altDamage: 50,
+        altType: 'emp_burst',
+        altDescription: 'Releases a radial 360° electromagnetic pulse wave knocking back nearby hostiles.'
+      }
+    }
   },
 
-  // --- LEGENDARY (Rank 2) ---
+  // --- 6. EPIC: Ultrasonic Resonator ---
   {
-    id: 'wpn_solar_disintegrator',
-    name: 'Solar Thermal Disintegrator',
+    id: 'centrifuge_sonic_blaster',
+    name: 'Ultrasonic Resonator',
+    category: 'weapon',
+    rarity: 'epic',
+    price: 380,
+    icon: '🔊',
+    description: 'Fires high-decibel acoustic resonance shock rings that violently push back opponents and structures.',
+    stats: {
+      damage: 48,
+      fireRate: 1.4,
+      cooldownSeconds: 0.70,
+      range: 500,
+      beamColor: '#eab308',
+      specialEffect: 'Acoustic Shockwave',
+      altFire: {
+        altName: 'Acoustic Deflector Shield',
+        altCooldownSeconds: 5.5,
+        altDamage: 40,
+        altType: 'sonic_barrier',
+        altDescription: 'Deploys an ultrasonic barrier projecting around the player to deflect projectiles for 2.5s.'
+      }
+    }
+  },
+
+  // --- 7. LEGENDARY: Relativistic Particle Accelerator ---
+  {
+    id: 'particle_accelerator',
+    name: 'Relativistic Particle Accelerator',
     category: 'weapon',
     rarity: 'legendary',
-    price: 360,
-    icon: '☀️',
-    description: 'Channels concentrated solar radiation for massive thermal area damage.',
-    stats: { damage: 95, fireRate: 0.8, cooldownSeconds: 1.2, range: 750, specialEffect: 'solar' }
+    price: 520,
+    icon: '🌀',
+    description: 'Relativistic particle collider firing supercharged dark matter plasma spheres that decimate barriers.',
+    stats: {
+      damage: 68,
+      fireRate: 1.1,
+      cooldownSeconds: 0.95,
+      range: 640,
+      beamColor: '#a855f7',
+      specialEffect: 'Dark Matter Plasma',
+      altFire: {
+        altName: 'Gravitational Vortex',
+        altCooldownSeconds: 7.0,
+        altDamage: 60,
+        altType: 'vortex',
+        altDescription: 'Generates a gravity well that drags nearby enemies inward toward its center until it fades and implodes.'
+      }
+    }
   },
 
-  // --- MYTHIC (Rank 1) ---
+  // --- 8. LEGENDARY: Biohazard Mutagen Railgun ---
+  {
+    id: 'biohazard_railgun',
+    name: 'Biohazard Mutagen Railgun',
+    category: 'weapon',
+    rarity: 'legendary',
+    price: 580,
+    icon: '☣️',
+    description: 'Electromagnetic railgun propelling radioactive tungsten slugs with supreme penetrating sniper velocity.',
+    stats: {
+      damage: 88,
+      fireRate: 0.9,
+      cooldownSeconds: 1.15,
+      range: 780,
+      beamColor: '#84cc16',
+      specialEffect: 'Radioactive Kinetic Slug',
+      altFire: {
+        altName: 'Mutagenic Cluster Bomb',
+        altCooldownSeconds: 6.5,
+        altDamage: 45,
+        altType: 'cluster_bomb',
+        altDescription: 'Launches 3 spreading toxic canisters that detonate into poisonous corrosive clouds.'
+      }
+    }
+  },
+
+  // --- 9. MYTHIC: Quantum Displacer Rifle ---
   {
     id: 'quantum_displacer',
     name: 'Quantum Displacer Rifle',
@@ -165,33 +285,53 @@ export const ALL_WEAPON_ITEMS: ShopItem[] = [
     rarity: 'mythic',
     price: 780,
     icon: '🌌',
-    description: 'Harnesses quantum entanglement to fire tachyon bolts with phase warp.',
-    stats: { damage: 54, fireRate: 4.0, cooldownSeconds: 0.25, range: 680, specialEffect: 'tachyon' }
+    description: 'Harnesses quantum entanglement to fire tachyon bolts that distort spacetime. Teleportation alternate fire.',
+    stats: {
+      damage: 54,
+      fireRate: 4.0,
+      cooldownSeconds: 0.25,
+      range: 680,
+      beamColor: '#06b6d4',
+      specialEffect: 'Tachyon Quantum Phase',
+      altFire: {
+        altName: 'Quantum Warp Teleport',
+        altCooldownSeconds: 3.5,
+        altDamage: 40,
+        altType: 'teleport',
+        altDescription: 'Instantly teleports you directly to where your mouse is aimed in the arena! Emits arrival shock.'
+      }
+    }
   },
+
+  // --- 10. MYTHIC: Antimatter Annihilator Core ---
   {
-    id: 'wpn_antimatter_rifle',
-    name: 'Antimatter Annihilator',
+    id: 'antimatter_annihilator',
+    name: 'Antimatter Annihilator Core',
     category: 'weapon',
     rarity: 'mythic',
-    price: 500,
+    price: 950,
     icon: '⚛️',
-    description: 'Experimental antimatter particle rifle with maximum theoretical power.',
-    stats: { damage: 120, fireRate: 0.7, cooldownSeconds: 1.5, range: 850, specialEffect: 'void' }
+    description: 'Top-secret particle synthesizer firing pure antiparticles that cause catastrophic subatomic annihilation.',
+    stats: {
+      damage: 115,
+      fireRate: 0.7,
+      cooldownSeconds: 1.35,
+      range: 750,
+      beamColor: '#f43f5e',
+      specialEffect: 'Positron Annihilation',
+      altFire: {
+        altName: 'Orbital Positron Strike',
+        altCooldownSeconds: 18.0,
+        altDamage: 130,
+        altType: 'orbital_strike',
+        altDescription: 'Calls down a devastating orbital positron death ray targeting the mouse position after a 0.55s laser lock (18s recharge).'
+      }
+    }
   }
 ];
 
+// 1-to-1 legacy ID -> canonical in-game arena weapon ID mapping for existing player inventories
 export const WEAPON_ALIASES: Record<string, string> = {
-  cryo_freeze_ray: 'wpn_freezer_lance',
-  laser_pointer: 'wpn_sniper_railgun',
-  tesla_coil: 'wpn_heavy_cannon',
-  centrifuge_sonic_blaster: 'wpn_rapid_repeater',
-  particle_accelerator: 'wpn_solar_disintegrator',
-  biohazard_railgun: 'wpn_sniper_railgun',
-  wpn_quantum_rifle: 'quantum_displacer',
-  antimatter_annihilator: 'wpn_antimatter_rifle'
-};
-
-export const CATALOG_TO_ARENA_WEAPON_ALIASES: Record<string, string> = {
   wpn_starter_blaster: 'bunsen_burner',
   wpn_freezer_lance: 'cryo_freeze_ray',
   wpn_sniper_railgun: 'laser_pointer',
@@ -202,37 +342,103 @@ export const CATALOG_TO_ARENA_WEAPON_ALIASES: Record<string, string> = {
   wpn_antimatter_rifle: 'antimatter_annihilator'
 };
 
+export const CATALOG_TO_ARENA_WEAPON_ALIASES: Record<string, string> = WEAPON_ALIASES;
+
+export function resolveArenaWeaponId(weaponId?: string): string {
+  if (!weaponId) return 'bunsen_burner';
+  return WEAPON_ALIASES[weaponId] || weaponId;
+}
+
 export function resolveWeaponItem(weaponId?: string): ShopItem {
   if (!weaponId) return ALL_WEAPON_ITEMS[0];
-  const canonicalId = WEAPON_ALIASES[weaponId] || weaponId;
+  const canonicalId = resolveArenaWeaponId(weaponId);
   return (
     ALL_WEAPON_ITEMS.find(w => w.id === canonicalId || w.id === weaponId) ||
     ALL_WEAPON_ITEMS[0]
   );
 }
 
-export function resolveArenaWeaponId(weaponId?: string): string {
-  if (!weaponId) return 'bunsen_burner';
-  return CATALOG_TO_ARENA_WEAPON_ALIASES[weaponId] || weaponId;
-}
-
 export function hasWeaponInInventory(inventory: string[] | undefined, weaponId: string): boolean {
+  const targetCanonical = resolveArenaWeaponId(weaponId);
+  if (targetCanonical === 'bunsen_burner') return true;
   if (!inventory || inventory.length === 0) return false;
-  if (inventory.includes(weaponId)) return true;
-  const canonical = WEAPON_ALIASES[weaponId];
-  if (canonical && inventory.includes(canonical)) return true;
-  const arenaId = CATALOG_TO_ARENA_WEAPON_ALIASES[weaponId];
-  if (arenaId && inventory.includes(arenaId)) return true;
-  // Check any other alias that maps to the same canonical or arena weapon
-  return inventory.some(ownedId => {
-    const ownedCanonical = WEAPON_ALIASES[ownedId] || ownedId;
-    const targetCanonical = WEAPON_ALIASES[weaponId] || weaponId;
-    return ownedCanonical === targetCanonical || resolveArenaWeaponId(ownedId) === resolveArenaWeaponId(weaponId);
-  });
+  return inventory.some(ownedId => resolveArenaWeaponId(ownedId) === targetCanonical);
 }
 
 export function getBoosterPackById(packId?: string): BoosterPackConfig | undefined {
   if (!packId) return undefined;
   return BOOSTER_PACKS.find(p => p.id === packId);
 }
+
+export const SKIN_DROP_PROBABILITY = 0.65;
+
+/**
+ * Roll a rarity tier strictly proportional to the pack's configured odds.
+ * Normalizes weights so minor floating-point variance or non-100 sums never skew tiers.
+ */
+export function rollRarity(
+  odds: BoosterPackConfig['odds'],
+  rng: () => number = Math.random
+): ItemRarity {
+  const mythic = Math.max(0, Number(odds.mythic) || 0);
+  const legendary = Math.max(0, Number(odds.legendary) || 0);
+  const epic = Math.max(0, Number(odds.epic) || 0);
+  const rare = Math.max(0, Number(odds.rare) || 0);
+  const common = Math.max(0, Number(odds.common) || 0);
+  const total = mythic + legendary + epic + rare + common;
+
+  if (total <= 0) return 'common';
+
+  const roll = Math.min(0.999999999999, Math.max(0, rng())) * total;
+  let threshold = mythic;
+  if (roll < threshold) return 'mythic';
+  threshold += legendary;
+  if (roll < threshold) return 'legendary';
+  threshold += epic;
+  if (roll < threshold) return 'epic';
+  threshold += rare;
+  if (roll < threshold) return 'rare';
+  return 'common';
+}
+
+/**
+ * Roll a booster pack reward (65% skin / 35% weapon) preserving the exact rolled rarity tier.
+ */
+export function rollPackReward<TSkin extends { id: string; rarity: ItemRarity }>(
+  odds: BoosterPackConfig['odds'],
+  skins: TSkin[],
+  weapons: ShopItem[] = ALL_WEAPON_ITEMS,
+  rng: () => number = Math.random
+): { type: 'skin'; item: TSkin; rarity: ItemRarity } | { type: 'weapon'; item: ShopItem; rarity: ItemRarity } {
+  const rolledRarity = rollRarity(odds, rng);
+  const isSkinDrop = rng() < SKIN_DROP_PROBABILITY;
+
+  const matchingSkins = skins.filter(s => s.rarity === rolledRarity);
+  const matchingWeapons = weapons.filter(w => w.rarity === rolledRarity);
+
+  if (isSkinDrop) {
+    if (matchingSkins.length > 0) {
+      const selected = matchingSkins[Math.floor(rng() * matchingSkins.length)];
+      return { type: 'skin', item: selected, rarity: rolledRarity };
+    }
+    if (matchingWeapons.length > 0) {
+      const selected = matchingWeapons[Math.floor(rng() * matchingWeapons.length)];
+      return { type: 'weapon', item: selected, rarity: rolledRarity };
+    }
+  } else {
+    if (matchingWeapons.length > 0) {
+      const selected = matchingWeapons[Math.floor(rng() * matchingWeapons.length)];
+      return { type: 'weapon', item: selected, rarity: rolledRarity };
+    }
+    if (matchingSkins.length > 0) {
+      const selected = matchingSkins[Math.floor(rng() * matchingSkins.length)];
+      return { type: 'skin', item: selected, rarity: rolledRarity };
+    }
+  }
+
+  // Fallback only if a rarity has neither skins nor weapons in catalog
+  const selected = skins[Math.floor(rng() * skins.length)];
+  return { type: 'skin', item: selected, rarity: selected.rarity };
+}
+
 

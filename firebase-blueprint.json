@@ -28,7 +28,12 @@
         "inventory": { "type": "array", "description": "List of all owned item IDs" },
         "unlockedSkins": { "type": "array", "description": "List of unlocked avatar skin card IDs" },
         "giftedPacks": { "type": "object", "description": "Map of booster pack IDs to remaining free gifted pack counts awarded by an instructor" },
-        "rewardHistory": { "type": "array", "description": "Recent instructor-awarded booster packs, gold, skins, and weapons" }
+        "rewardHistory": { "type": "array", "description": "Recent instructor-awarded booster packs, gold, skins, and weapons" },
+        "streakDays": { "type": "number", "description": "Current consecutive days of active engagement" },
+        "longestStreak": { "type": "number", "description": "All-time longest consecutive active study streak" },
+        "lastStreakDate": { "type": "string", "description": "Calendar date (YYYY-MM-DD) of last counted active engagement" },
+        "lastStreakGoldAwardDate": { "type": "string", "description": "Calendar date (YYYY-MM-DD) when the daily consecutive streak gold bonus was last awarded" },
+        "lastStreakGoldBonus": { "type": "number", "description": "Amount of gold awarded for the most recent consecutive daily streak" }
       },
       "required": ["uid", "name", "email", "role"]
     },
@@ -94,6 +99,9 @@
         "xp": { "type": "number", "description": "Aggregated experience points" },
         "bestTotalXP": { "type": "number", "description": "Highest total XP achieved" },
         "streakDays": { "type": "number", "description": "Unbroken active study streak days" },
+        "longestStreak": { "type": "number", "description": "All-time longest active study streak days" },
+        "lastStreakDate": { "type": "string", "description": "Calendar date (YYYY-MM-DD) of last active engagement" },
+        "activeDates": { "type": "array", "description": "Calendar dates (YYYY-MM-DD) of recorded student engagement" },
         "featuredBadgeId": { "type": "string", "description": "Identifier of the student's featured badge" }
       },
       "required": ["studentId", "name", "email", "joinedAt"]
@@ -127,6 +135,10 @@
         "requiredQuizLength": { "type": "number", "description": "Exact number of questions students must choose for the practice quiz" },
         "requireSlidesAndTrafficLight": { "type": "boolean", "description": "Whether reading all assigned slides and completing the traffic light quiz are required" },
         "dueDate": { "type": "string", "description": "ISO timestamp of the due date" },
+        "status": { "type": "string", "enum": ["active", "ended"], "description": "Lifecycle status of the task (active or ended by instructor)" },
+        "endedAt": { "type": "string", "description": "ISO timestamp when the instructor ended the task" },
+        "endedBy": { "type": "string", "description": "UID of the instructor who ended the task" },
+        "endedByName": { "type": "string", "description": "Display name of the instructor who ended the task" },
         "instructorId": { "type": "string", "description": "UID of the creating instructor" },
         "instructorName": { "type": "string", "description": "Display name of the instructor" },
         "createdAt": { "type": "string", "description": "Creation timestamp" }
@@ -287,6 +299,33 @@
         "createdAt": { "type": "string", "description": "ISO timestamp when notification was created" }
       },
       "required": ["type", "title", "message", "targetStudentIds", "createdAt"]
+    },
+    "QuizChallenge": {
+      "title": "QuizChallenge",
+      "description": "1v1 live quiz challenge between two classmates on the leaderboard.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$", "description": "Challenge document ID" },
+        "classId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$", "description": "Class ID where challenge originated" },
+        "challengerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$", "description": "UID of the student initiating the challenge" },
+        "challengerName": { "type": "string", "maxLength": 100, "description": "Display name of challenger" },
+        "challengedId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$", "description": "UID of the challenged student" },
+        "challengedName": { "type": "string", "maxLength": 100, "description": "Display name of challenged student" },
+        "participantIds": { "type": "array", "description": "Exact two-element array [challengerId, challengedId] for secure querying" },
+        "topics": { "type": "array", "description": "Selected Cambridge 0653 topic codes" },
+        "questionCount": { "type": "number", "description": "Number of questions (5 to 20)" },
+        "tier": { "type": "string", "enum": ["Core", "Extended"], "description": "Curriculum tier for challenge questions" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "in_progress", "completed", "declined", "cancelled"], "description": "Challenge lifecycle state" },
+        "questions": { "type": "array", "description": "Shared MCQ questions presented simultaneously to both students" },
+        "challengerScore": { "type": "number", "description": "Final or latest cumulative live quiz score for challenger" },
+        "challengedScore": { "type": "number", "description": "Final or latest cumulative live quiz score for challenged student" },
+        "winnerId": { "type": "string", "maxLength": 128, "description": "UID of winner, 'draw', or empty while active" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server creation timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server update timestamp" },
+        "acceptedAt": { "type": "string", "format": "date-time", "description": "ISO timestamp when challenge was accepted" },
+        "completedAt": { "type": "string", "format": "date-time", "description": "ISO timestamp when challenge finished" }
+      },
+      "required": ["id", "classId", "challengerId", "challengerName", "challengedId", "challengedName", "participantIds", "topics", "questionCount", "tier", "status", "questions", "challengerScore", "challengedScore", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -349,6 +388,10 @@
     "/notifications/{notificationId}": {
       "schema": { "$ref": "#/entities/Notification" },
       "description": "In-app notifications delivered to students for tasks and instructor rewards."
+    },
+    "/challenges/{challengeId}": {
+      "schema": { "$ref": "#/entities/QuizChallenge" },
+      "description": "Live 1v1 quiz challenges between classmates initiated from the Leaderboard."
     }
   }
 }

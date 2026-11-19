@@ -6,15 +6,18 @@ import {
   Gamepad2, 
   Lock, 
   Zap, 
-  Check
+  Check,
+  Flame
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { 
   UserGameProfile, 
   subscribeToGameProfile, 
   calculateLevelFromXP, 
+  calculateStreakGoldBonus,
   BattleEventState
 } from '../services/firebaseGameService';
+import { getLocalDateKey } from '../services/badgeService';
 import { SCIENCE_SKIN_SVGS, SKIN_ALIASES } from '../data/spriteAtlasData';
 import { getFantasySkin } from '../data/fantasySkinsData';
 import { resolveWeaponItem } from '../data/gameCatalogData';
@@ -23,6 +26,8 @@ interface UserProfileHeaderProps {
   user: UserProfile;
   theme?: 'dark' | 'light';
   battleState?: BattleEventState | null;
+  streakDays?: number;
+  longestStreak?: number;
   onOpenShop?: () => void;
   onOpenCollection?: () => void;
   onOpenArena?: () => void;
@@ -33,6 +38,8 @@ interface UserProfileHeaderProps {
 export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
   user,
   battleState,
+  streakDays,
+  longestStreak,
   onOpenShop,
   onOpenCollection,
   onOpenArena,
@@ -60,6 +67,11 @@ export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
   const wood = gameProfile?.wood ?? 20;
   const brick = gameProfile?.brick ?? 10;
   const metal = gameProfile?.metal ?? 5;
+  const streakCount = Math.max(0, gameProfile?.streakDays || streakDays || user?.streakDays || 0);
+  const bestStreak = Math.max(streakCount, gameProfile?.longestStreak || longestStreak || user?.longestStreak || 0);
+  const todayKey = getLocalDateKey();
+  const streakGoldToday = gameProfile?.lastStreakGoldAwardDate === todayKey ? (gameProfile?.lastStreakGoldBonus || 0) : 0;
+  const nextDayStreakGold = calculateStreakGoldBonus(Math.max(1, streakCount) + 1);
   const totalGiftedPacks = Object.values(gameProfile?.giftedPacks || {}).reduce(
     (sum, n) => sum + Math.max(0, Number(n) || 0),
     0
@@ -140,12 +152,30 @@ export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
         {/* Center / Right: Gold, Materials & Actions */}
         <div className="flex items-center justify-between lg:justify-end gap-3 flex-wrap pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-200">
           
-          {/* Economy Counters: Gold & Materials */}
+          {/* Economy Counters: Daily Streak, Gold & Materials */}
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Daily Study Streak Counter */}
+            <div
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold ${
+                streakCount > 0
+                  ? 'bg-amber-50 border-amber-300 text-amber-900'
+                  : 'bg-[#FDFBF7] border-slate-300 text-slate-700'
+              }`}
+              title={`Daily Streak: ${streakCount} ${streakCount === 1 ? 'day' : 'days'} (Best: ${bestStreak}). Consecutive daily engagement awards +15 to +35 bonus Gold/day! Next day bonus: +${nextDayStreakGold} Gold.`}
+            >
+              <Flame className={`w-4 h-4 ${streakCount > 0 ? 'text-amber-600 fill-amber-500' : 'text-slate-400'}`} />
+              <span>{streakCount} Day Streak</span>
+              {streakGoldToday > 0 && (
+                <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-200/80 text-amber-900 leading-none">
+                  +{streakGoldToday}g
+                </span>
+              )}
+            </div>
+
             {/* Gold Balance */}
             <div 
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#FDFBF7] border border-slate-300 text-slate-800 text-xs font-bold"
-              title="Gold coins earned from revising slides & acing quizzes"
+              title="Gold coins earned from daily streaks, revising slides & acing quizzes"
             >
               <Coins className="w-4 h-4 text-amber-600" />
               <span>{gold} Gold</span>

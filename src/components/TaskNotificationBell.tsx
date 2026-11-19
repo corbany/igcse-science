@@ -97,7 +97,7 @@ export const TaskNotificationBell: React.FC<TaskNotificationBellProps> = ({
           const classTasks = await fetchClassTasks(undefined, user.id);
           const mapped: TaskWithSubmission[] = classTasks.map(t => ({
             ...t,
-            isOverdue: new Date(t.dueDate).getTime() < Date.now()
+            isOverdue: t.status !== 'ended' && new Date(t.dueDate).getTime() < Date.now()
           }));
           if (isMounted) setTasks(mapped);
         }
@@ -135,11 +135,12 @@ export const TaskNotificationBell: React.FC<TaskNotificationBellProps> = ({
   }, []);
 
   const now = Date.now();
-  const overdueTasks = tasks.filter(t => t.isOverdue && t.submission?.status !== 'completed');
-  const pendingTasks = tasks.filter(t => t.submission?.status !== 'completed');
+  const activeTasks = tasks.filter(t => t.status !== 'ended');
+  const overdueTasks = activeTasks.filter(t => t.isOverdue && t.submission?.status !== 'completed');
+  const pendingTasks = activeTasks.filter(t => t.submission?.status !== 'completed');
   const alertCount = user.role === 'student'
     ? (overdueTasks.length > 0 ? overdueTasks.length : pendingTasks.length) + rewardNotifs.length
-    : tasks.length;
+    : activeTasks.length;
   const hasUrgent = overdueTasks.length > 0;
 
   return (
@@ -219,7 +220,7 @@ export const TaskNotificationBell: React.FC<TaskNotificationBellProps> = ({
               </div>
             )}
 
-            {tasks.length === 0 && rewardNotifs.length === 0 ? (
+            {activeTasks.length === 0 && rewardNotifs.length === 0 ? (
               <div className="py-6 text-center text-xs text-slate-400 space-y-1">
                 <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
                 <p className="font-semibold text-slate-300">No active tasks right now</p>
@@ -241,7 +242,7 @@ export const TaskNotificationBell: React.FC<TaskNotificationBellProps> = ({
                 )}
 
                 {/* List items */}
-                {tasks.slice(0, 4).map(task => {
+                {activeTasks.slice(0, 4).map(task => {
                   const dueDateObj = new Date(task.dueDate);
                   const isDone = task.submission?.status === 'completed';
                   const isOver = task.isOverdue && !isDone;

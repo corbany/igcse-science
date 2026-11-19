@@ -1,15 +1,34 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
     function isAuthenticated() {
       return request.auth != null;
     }
-    
+
+    function isVerifiedUser() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
-    
+
     function isClassInstructor(classId) {
       return isAuthenticated() && (
         get(/databases/$(database)/documents/classes/$(classId)).data.instructorId == request.auth.uid ||
@@ -19,72 +38,177 @@ service cloud.firestore {
       );
     }
 
-    // Connection test document
+    function isValidChallenge(data) {
+      return data.keys().hasAll([
+          'id', 'classId', 'challengerId', 'challengerName',
+          'challengedId', 'challengedName', 'participantIds',
+          'topics', 'questionCount', 'tier', 'status',
+          'questions', 'challengerScore', 'challengedScore',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'classId', 'challengerId', 'challengerName',
+          'challengedId', 'challengedName', 'participantIds',
+          'topics', 'questionCount', 'tier', 'status',
+          'questions', 'challengerScore', 'challengedScore',
+          'winnerId', 'createdAt', 'updatedAt', 'acceptedAt', 'completedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.classId is string && data.classId.size() <= 128 &&
+        isValidId(data.challengerId) &&
+        isValidId(data.challengedId) &&
+        data.challengerId != data.challengedId &&
+        data.challengerName is string && data.challengerName.size() >= 1 && data.challengerName.size() <= 100 &&
+        data.challengedName is string && data.challengedName.size() >= 1 && data.challengedName.size() <= 100 &&
+        data.participantIds is list &&
+        data.participantIds.size() == 2 &&
+        data.participantIds[0] == data.challengerId &&
+        data.participantIds[1] == data.challengedId &&
+        data.topics is list && data.topics.size() >= 1 && data.topics.size() <= 33 && data.topics[0] is string &&
+        data.questionCount is number && data.questionCount >= 1 && data.questionCount <= 30 &&
+        data.tier in ['Core', 'Extended'] &&
+        data.status in ['pending', 'accepted', 'in_progress', 'completed', 'declined', 'cancelled'] &&
+        data.questions is list && data.questions.size() >= 1 && data.questions.size() <= 30 &&
+        data.challengerScore is number && data.challengerScore >= 0 && data.challengerScore <= 10000 &&
+        data.challengedScore is number && data.challengedScore >= 0 && data.challengedScore <= 10000 &&
+        (!('winnerId' in data) || (data.winnerId is string && data.winnerId.size() <= 128)) &&
+        (!('acceptedAt' in data) || (data.acceptedAt is string && data.acceptedAt.size() <= 64)) &&
+        (!('completedAt' in data) || (data.completedAt is string && data.completedAt.size() <= 64)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function challengeCoreImmutable() {
+      return incoming().id == existing().id &&
+        incoming().classId == existing().classId &&
+        incoming().challengerId == existing().challengerId &&
+        incoming().challengerName == existing().challengerName &&
+        incoming().challengedId == existing().challengedId &&
+        incoming().challengedName == existing().challengedName &&
+        incoming().participantIds == existing().participantIds &&
+        incoming().topics == existing().topics &&
+        incoming().questionCount == existing().questionCount &&
+        incoming().tier == existing().tier &&
+        incoming().questions == existing().questions &&
+        incoming().createdAt == existing().createdAt;
+    }
+
+    // Connection test document (read-only startup check)
     match /test/{docId} {
-      allow read, write: if true;
+      allow get: if true;
+      allow list, write: if false;
     }
 
     // Shared Google Drive curriculum slides & subtopic presentations
     match /settings/{docId} {
-      allow read, write: if true;
+      allow read, write: if isAuthenticated();
     }
     match /curriculum_slides/{docId} {
-      allow read, write: if true;
+      allow read, write: if isAuthenticated();
     }
 
     // User profiles & subcollections (including completedModules anti-farming records)
     match /users/{userId} {
-      allow read, write: if true;
+      allow read, write: if isAuthenticated();
 
       match /{subcollection=**} {
-        allow read, write: if true;
+        allow read, write: if isAuthenticated();
       }
     }
-    
+
     // Gamified Battle Royale Tournament Events
     match /battleEvent/{docId} {
-      allow read, write: if true;
+      allow read, write: if isAuthenticated();
 
       match /{subcollection=**} {
-        allow read, write: if true;
+        allow read, write: if isAuthenticated();
       }
     }
-    
+
     // Instructor invites
     match /instructor_invites/{inviteId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      allow read, write: if isAuthenticated();
     }
-    
+
     // Classes created by instructors
     match /classes/{classId} {
-      allow read: if true;
-      allow create: if isAuthenticated() || true;
-      allow update, delete: if true;
-      
+      allow read, write: if isAuthenticated();
+
       // Enrolled students in a class
       match /students/{studentId} {
-        allow read: if true;
-        allow create, update: if true;
-        allow delete: if true;
+        allow read, write: if isAuthenticated();
       }
     }
 
     // Tasks and homework assignments
     match /tasks/{taskId} {
-      allow read: if true;
-      allow create, update, delete: if true;
+      allow read, write: if isAuthenticated();
 
       // Student progress submissions per task
       match /submissions/{studentId} {
-        allow read: if true;
-        allow create, update, delete: if true;
+        allow read, write: if isAuthenticated();
       }
     }
 
     // In-app notifications
     match /notifications/{notificationId} {
-      allow read, write: if true;
+      allow read, write: if isAuthenticated();
+    }
+
+    // Hardened 1v1 Live Quiz Challenges
+    match /challenges/{challengeId} {
+      allow get: if isAuthenticated() && isValidId(challengeId) &&
+        (existing().challengerId == request.auth.uid || existing().challengedId == request.auth.uid);
+
+      allow list: if isAuthenticated() &&
+        (resource.data.challengerId == request.auth.uid ||
+         resource.data.challengedId == request.auth.uid ||
+         request.auth.uid in resource.data.participantIds);
+
+      allow create: if isVerifiedUser() &&
+        isValidId(challengeId) &&
+        isValidChallenge(incoming()) &&
+        incoming().id == challengeId &&
+        incoming().challengerId == request.auth.uid &&
+        incoming().status == 'pending' &&
+        incoming().challengerScore == 0 &&
+        incoming().challengedScore == 0 &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser() &&
+        isValidId(challengeId) &&
+        isValidChallenge(incoming()) &&
+        challengeCoreImmutable() &&
+        incoming().updatedAt == request.time &&
+        !(existing().status in ['completed', 'declined', 'cancelled']) &&
+        (
+          // Action 1: Challenged student accepts or declines a pending challenge
+          (
+            request.auth.uid == existing().challengedId &&
+            existing().status == 'pending' &&
+            incoming().status in ['accepted', 'declined'] &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'acceptedAt'])
+          ) ||
+          // Action 2: Challenger cancels a pending or accepted challenge before completion
+          (
+            request.auth.uid == existing().challengerId &&
+            existing().status in ['pending', 'accepted'] &&
+            incoming().status == 'cancelled' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          ) ||
+          // Action 3: Either participant syncs active match progress / final result
+          (
+            (request.auth.uid == existing().challengerId || request.auth.uid == existing().challengedId) &&
+            existing().status in ['accepted', 'in_progress'] &&
+            incoming().status in ['in_progress', 'completed'] &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'challengerScore', 'challengedScore', 'winnerId', 'completedAt', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if false;
     }
   }
 }

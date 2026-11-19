@@ -49,6 +49,7 @@ interface NavbarProps {
   onExitStudentPreview?: () => void;
   battleState?: BattleEventState | null;
   onOpenShop?: () => void;
+  pendingChallengesCount?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -72,7 +73,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onEnterStudentPreview,
   onExitStudentPreview,
   battleState,
-  onOpenShop
+  onOpenShop,
+  pendingChallengesCount = 0
 }) => {
   const [showMoreTools, setShowMoreTools] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -161,6 +163,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   <Trophy className="w-3.5 h-3.5 text-amber-600" />
                   <span>Leaderboard</span>
+                  {pendingChallengesCount > 0 && (
+                    <span className="ml-0.5 px-1.5 py-0.5 rounded bg-amber-300 text-slate-950 font-mono tabular-nums text-[10px] font-black leading-none border border-black">
+                      {pendingChallengesCount}
+                    </span>
+                  )}
                 </button>
 
                 <button
@@ -530,6 +537,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   <Trophy className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-500 shrink-0" />
                   <span className="truncate">Leaderboard</span>
+                  {pendingChallengesCount > 0 && (
+                    <span className="px-1.5 py-0.5 rounded bg-amber-300 text-slate-950 font-mono tabular-nums text-[10px] font-black leading-none border border-black shrink-0">
+                      {pendingChallengesCount}
+                    </span>
+                  )}
                 </button>
               </>
             )}

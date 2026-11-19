@@ -9,7 +9,7 @@ import { predefinedSubtopicQuizzes } from './predefinedSubtopicQuizzes';
 import { CURATED_BIO_QUESTIONS } from './curatedQuestionsBio';
 import { CURATED_CHEM_QUESTIONS } from './curatedQuestionsChem';
 import { CURATED_PHY_QUESTIONS } from './curatedQuestionsPhy';
-import { isValidQuizQuestion } from './quizSanitizer';
+import { isValidQuizQuestion, isExtendedOnlyQuestion, matchesExamTier } from './quizSanitizer';
 import { practiceQuizzes } from './quizData';
 
 export interface DynamicTopicMeta {
@@ -68,6 +68,7 @@ interface QuestionTemplate {
   explanation: string | ((v: any) => string);
   generateVars?: () => any;
   ref?: string;
+  tier?: 'Core' | 'Extended';
 }
 
 // Comprehensive Question Templates for ALL 33 syllabus topics
@@ -118,14 +119,34 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
         `${(v.imageMm * v.mag).toFixed(0)} μm`
       ],
       explanation: (v: any) => `Using Actual size A = Image size I / Magnification M: First convert Image size to μm (${v.imageMm} mm × 1000 = ${v.imageMm * 1000} μm). Then ${v.imageMm * 1000} / ${v.mag} = ${v.actualUm} μm.`,
-      ref: 'B2.2'
+      ref: 'B2.2',
+      tier: 'Extended'
+    },
+    {
+      generateVars: () => {
+        const actualMm = [0.05, 0.1, 0.12, 0.15, 0.2, 0.25][Math.floor(Math.random() * 6)];
+        const mag = [100, 150, 200, 300, 400][Math.floor(Math.random() * 5)];
+        const imageMm = Number((actualMm * mag).toFixed(1));
+        return { actualMm, mag, imageMm };
+      },
+      stem: (v: any) => `A light microscope drawing of a leaf cell has an image length of ${v.imageMm} mm at a magnification of ×${v.mag}. What is the actual length of the cell in millimetres?`,
+      correct: (v: any) => `${v.actualMm} mm`,
+      distractors: (v: any) => [
+        `${Number((v.actualMm * 10).toFixed(2))} mm`,
+        `${Number((v.actualMm / 10).toFixed(3))} mm`,
+        `${Number((v.imageMm * v.mag).toFixed(1))} mm`
+      ],
+      explanation: (v: any) => `Using Magnification M = Image size I / Actual size A: Actual size A = ${v.imageMm} mm / ${v.mag} = ${v.actualMm} mm.`,
+      ref: 'B2.2',
+      tier: 'Core'
     },
     {
       stem: 'Which cell structure is found in plant cells and bacterial cells, but is completely absent in animal cells?',
       correct: 'Cell wall',
       distractors: ['Mitochondria', 'Cell membrane', 'Cytoplasm'],
       explanation: 'Plant cells have a cellulose cell wall and bacterial cells have a peptidoglycan cell wall. Animal cells never have a cell wall.',
-      ref: 'B2.1'
+      ref: 'B2.1',
+      tier: 'Core'
     },
     {
       stem: 'What is the correct hierarchical order of biological organisation from simplest to most complex?',
@@ -136,12 +157,37 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
         'Cell → Organ → Tissue → Organism → Organ system'
       ],
       explanation: 'Cells form tissues, tissues form organs, organs form organ systems, which together constitute the organism.',
-      ref: 'B2.1'
+      ref: 'B2.1',
+      tier: 'Core'
     }
   ],
 
   // B3 Movement In & Out of Cells
   'B3': [
+    {
+      stem: 'Which process describes the net movement of oxygen particles from a region of higher concentration in the air spaces of a leaf to a lower concentration inside mesophyll cells?',
+      correct: 'Diffusion through the partially permeable cell membrane down a concentration gradient',
+      distractors: [
+        'Osmosis of dissolved solute molecules from high to low water concentration',
+        'Evaporation of oxygen vapour through closed guard cells',
+        'Convection of air molecules driven by chlorophyll'
+      ],
+      explanation: 'Diffusion is the net movement of particles from a region of their higher concentration to a region of their lower concentration as a result of random movement.',
+      ref: 'B3.1',
+      tier: 'Core'
+    },
+    {
+      stem: 'Fresh strips of potato tissue are placed in pure distilled water for 1 hour. What change is observed in the potato strips?',
+      correct: 'They gain mass and become firmer because water enters the cells by osmosis',
+      distractors: [
+        'They lose mass because starch dissolves out of the potato cells',
+        'They shrink and soften because water moves out into the distilled water',
+        'Their mass stays unchanged because distilled water cannot cross cell membranes'
+      ],
+      explanation: 'Water diffuses by osmosis through partially permeable membranes from the dilute distilled water outside into the more concentrated cell sap, making the strips heavier and firmer.',
+      ref: 'B3.2',
+      tier: 'Core'
+    },
     {
       stem: 'Potato strips placed in a concentrated sucrose solution (high solute concentration) decrease in mass and become limp. What causes this?',
       correct: 'Water moves out of the potato cells by osmosis down a water potential gradient',
@@ -151,7 +197,8 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
         'Cell walls dissolve due to low water potential'
       ],
       explanation: 'The external solution has a lower water potential than the cell sap. Water moves out across the partially permeable cell membrane by osmosis, causing cells to become plasmolysed/flaccid.',
-      ref: 'B3.2'
+      ref: 'B3.2',
+      tier: 'Extended'
     },
     {
       stem: 'Which statement correctly distinguishes active transport from diffusion?',
@@ -162,7 +209,8 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
         'Diffusion requires specific carrier proteins and cellular respiration'
       ],
       explanation: 'Active transport moves particles from low to high concentration using energy released by respiration and carrier proteins in the membrane.',
-      ref: 'B3.3'
+      ref: 'B3.3',
+      tier: 'Extended'
     }
   ],
 
@@ -316,6 +364,30 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
   // B10 Diseases & Immunity
   'B10': [
     {
+      stem: 'What is a direct mechanical barrier that prevents pathogens from entering the human body?',
+      correct: 'Intact skin and hairs inside the nose trapping dust and microorganisms',
+      distractors: [
+        'Hydrochloric acid inside the stomach destroying swallowed bacteria',
+        'Red blood cells carrying oxygen around the circulatory system',
+        'Digestive breakdown of starch inside the mouth'
+      ],
+      explanation: 'Skin and nasal hairs act as physical/mechanical barriers against pathogen entry; mucus and stomach hydrochloric acid act as chemical barriers.',
+      ref: 'B10.1',
+      tier: 'Core'
+    },
+    {
+      stem: 'Which term describes a disease in which the pathogen can be passed from one infected host to another?',
+      correct: 'A transmissible disease',
+      distractors: [
+        'A nutritional deficiency disease',
+        'A genetic condition',
+        'An allergic reaction'
+      ],
+      explanation: 'A transmissible disease is a disease in which the pathogen can be passed from one host to another via direct contact (e.g. blood) or indirect contact (e.g. contaminated surfaces, food, water, or air droplets).',
+      ref: 'B10.1',
+      tier: 'Core'
+    },
+    {
       stem: 'Why are antibiotics like penicillin effective against bacterial infections but completely ineffective against viral diseases like influenza or COVID-19?',
       correct: 'Antibiotics target bacterial cell structures (such as cell walls and bacterial ribosomes) which viruses lack',
       distractors: [
@@ -324,7 +396,8 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
         'Viruses produce enzymes that destroy antibiotic molecules instantly'
       ],
       explanation: 'Viruses do not possess cell walls, ribosomes, or their own metabolic machinery—they replicate inside host cells, so bacterial targets do not exist in viruses.',
-      ref: 'B10.1'
+      ref: 'B10.1',
+      tier: 'Core'
     },
     {
       stem: 'How does vaccination provide long-term active immunity against a pathogen?',
@@ -335,7 +408,8 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
         'Vaccines alter human DNA to prevent pathogen entry'
       ],
       explanation: 'Antigens in the vaccine trigger a primary immune response, generating memory cells that produce antibodies rapidly upon future infection.',
-      ref: 'B10.1'
+      ref: 'B10.1',
+      tier: 'Extended'
     }
   ],
 
@@ -617,6 +691,42 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
   // C5 Chemical Energetics
   'C5': [
     {
+      stem: 'A student dissolves ammonium nitrate crystals in a beaker of water and observes that the thermometer reading drops from 22 °C to 15 °C. How should this reaction be classified?',
+      correct: 'Endothermic, because thermal energy is taken in from the surroundings',
+      distractors: [
+        'Exothermic, because thermal energy is transferred to the surroundings',
+        'Neutralisation, because the salt dissolves completely in water',
+        'Catalytic, because the thermometer temperature fell rapidly'
+      ],
+      explanation: 'An endothermic reaction absorbs thermal energy from the surroundings, causing the temperature of the solution/surroundings to decrease.',
+      ref: 'C5.1',
+      tier: 'Core'
+    },
+    {
+      stem: 'When dilute hydrochloric acid is added to magnesium ribbon in a test tube, the mixture fizzes and the thermometer rises from 20 °C to 38 °C. Why did the temperature increase?',
+      correct: 'It is an exothermic reaction that transfers thermal energy to the surroundings',
+      distractors: [
+        'It is an endothermic reaction that absorbs thermal energy from the room',
+        'Hydrogen gas released friction heat against the glass walls',
+        'Magnesium dissolved without any chemical energy change'
+      ],
+      explanation: 'Exothermic reactions transfer thermal energy to the surroundings, causing the temperature measured in the reaction mixture to increase.',
+      ref: 'C5.1',
+      tier: 'Core'
+    },
+    {
+      stem: 'Which of the following chemical processes is always an exothermic reaction?',
+      correct: 'Complete combustion of methane gas in oxygen',
+      distractors: [
+        'Thermal decomposition of calcium carbonate by strong heating',
+        'Photosynthesis in green plant leaves using sunlight',
+        'Evaporation of liquid ethanol on the skin'
+      ],
+      explanation: 'Combustion reactions release thermal energy to the surroundings (increasing temperature), making them exothermic.',
+      ref: 'C5.1',
+      tier: 'Core'
+    },
+    {
       stem: 'Which statement accurately describes an exothermic chemical reaction in terms of bond energies and temperature change?',
       correct: 'Energy released during bond formation is greater than energy absorbed breaking bonds; temperature of surroundings rises',
       distractors: [
@@ -625,7 +735,8 @@ export const TOPIC_TEMPLATES: Record<string, QuestionTemplate[]> = {
         'Activation energy is negative and thermal energy is absorbed from surroundings'
       ],
       explanation: 'Bond breaking is endothermic; bond making is exothermic. If energy released by bond making exceeds energy taken to break bonds, ΔH is negative (exothermic) and temperature increases.',
-      ref: 'C5.1'
+      ref: 'C5.1',
+      tier: 'Extended'
     }
   ],
 
@@ -1031,6 +1142,10 @@ export function calculateTopicQuotas(topics: string[], totalCount: number): Map<
  * Generate a set of unique dynamic syllabus questions for the selected topics.
  * GUARANTEES AN EVEN PROPORTION OF QUESTIONS ACROSS ALL CHOSEN TOPICS
  * AND ZERO REPEAT QUESTIONS WITHIN THE PRACTICE QUIZ.
+ *
+ * Tier semantics:
+ * - 'Core': STRICTLY Core syllabus objectives only (Paper 1 Core level; excludes all Supplement-only content).
+ * - 'Extended': Entire syllabus — BOTH Core and Extended (Supplement) syllabus objectives (Paper 1 + Paper 2).
  */
 export function generateDynamicSyllabusQuestions(
   topics: string[],
@@ -1051,13 +1166,24 @@ export function generateDynamicSyllabusQuestions(
   // 1. Calculate the exact, fair quota for each chosen topic/subtopic (even distribution)
   const topicQuotas = calculateTopicQuotas(activeTopicCodes, safeCount);
 
-  // 2. Prepare official exam papers pool
-  const normTier = (tier || 'Extended').toLowerCase();
-  const candidateExamPapers = [
-    ...(normTier === 'extended' ? [march2026Paper22Extended, specimen2025Paper2] : 
-        normTier === 'foundation' || normTier === 'core' ? [march2026Paper12Core] : 
-        [march2026Paper12Core, march2026Paper22Extended, specimen2025Paper2])
-  ];
+  // 2. Prepare official exam papers pool & curriculum tier
+  const normTier = (tier || 'Extended').trim().toLowerCase();
+  const isCoreOnly = normTier === 'core' || normTier === 'foundation';
+  const effectiveTier: 'Core' | 'Extended' = isCoreOnly ? 'Core' : 'Extended';
+
+  // Core includes strictly Paper 1 Core; Extended includes the full syllabus (Paper 1 Core + Paper 2 Extended)
+  const candidateExamPapers = isCoreOnly
+    ? [march2026Paper12Core]
+    : [march2026Paper22Extended, specimen2025Paper2, march2026Paper12Core];
+
+  const shuffleArray = <T,>(arr: T[]): T[] => {
+    const copy = [...arr];
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+  };
 
   // Map to store gathered questions per topic bucket
   const topicBuckets = new Map<string, QuizQuestion[]>();
@@ -1065,22 +1191,7 @@ export function generateDynamicSyllabusQuestions(
     topicBuckets.set(code, []);
   }
 
-  const addToBucket = (topicCode: string, q: QuizQuestion): boolean => {
-    if (!isValidQuizQuestion(q)) return false;
-    const norm = normalizeStem(q.question);
-    if (norm.length < 15 || globalSeenStems.has(norm)) return false;
-    
-    const bucket = topicBuckets.get(topicCode);
-    if (!bucket) return false;
-    const targetQuota = topicQuotas.get(topicCode) || 0;
-    if (bucket.length >= targetQuota) return false;
-
-    globalSeenStems.add(norm);
-    bucket.push(q);
-    return true;
-  };
-
-  // 3. For each topic, collect questions specifically for that topic until its quota is satisfied
+  // 3. Collect tier-eligible candidates for each topicCode, shuffle/mix, then satisfy quota
   for (const topicCode of activeTopicCodes) {
     const quota = topicQuotas.get(topicCode) || 0;
     if (quota <= 0) continue;
@@ -1089,15 +1200,29 @@ export function generateDynamicSyllabusQuestions(
     const parentCode = isExactSubtopic ? topicCode.split('.')[0].toUpperCase() : topicCode.toUpperCase();
     const meta = SYLLABUS_TOPICS_META[parentCode] || SYLLABUS_TOPICS_META['B1'];
 
-    // 3a. Sourced from TOPIC_TEMPLATES (only when not restricted to another exact subtopic)
+    const poolCandidates: QuizQuestion[] = [];
+    const localSeen = new Set<string>();
+
+    const pushCandidate = (q: QuizQuestion) => {
+      if (!isValidQuizQuestion(q)) return;
+      if (!matchesExamTier(q, effectiveTier)) return;
+      const norm = normalizeStem(q.question);
+      if (norm.length < 15 || globalSeenStems.has(norm) || localSeen.has(norm)) return;
+      localSeen.add(norm);
+      poolCandidates.push({
+        ...q,
+        tier: isExtendedOnlyQuestion(q) ? 'Extended' : (q.tier || 'Core')
+      });
+    };
+
+    // 3a. Sourced from TOPIC_TEMPLATES
     const templates = TOPIC_TEMPLATES[parentCode] || [];
     for (let tIdx = 0; tIdx < templates.length; tIdx++) {
-      if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
       const template = templates[tIdx];
+      if (isCoreOnly && template.tier === 'Extended') continue;
       if (isExactSubtopic && template.ref && template.ref.toUpperCase() !== topicCode.toUpperCase()) continue;
       const iterations = template.generateVars ? 3 : 1;
       for (let v = 0; v < iterations; v++) {
-        if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
         const vars = template.generateVars ? template.generateVars() : null;
         const stem = typeof template.stem === 'function' ? template.stem(vars) : template.stem;
         const correctAns = typeof template.correct === 'function' ? template.correct(vars) : template.correct;
@@ -1105,19 +1230,16 @@ export function generateDynamicSyllabusQuestions(
         const explanation = typeof template.explanation === 'function' ? template.explanation(vars) : template.explanation;
 
         const rawOptions = [correctAns, ...distractors.slice(0, 3)];
-        const shuffled = [...rawOptions];
-        for (let j = shuffled.length - 1; j > 0; j--) {
-          const k = Math.floor(Math.random() * (j + 1));
-          [shuffled[j], shuffled[k]] = [shuffled[k], shuffled[j]];
-        }
+        const shuffled = shuffleArray(rawOptions);
         const correctIndex = shuffled.indexOf(correctAns);
 
-        addToBucket(topicCode, {
+        pushCandidate({
           id: `tpl-${parentCode.toLowerCase()}-${uniqueToken}-${tIdx}-${v}`,
           subject: meta.subject,
           topicCode: parentCode,
           topicTitle: meta.title,
           syllabusRef: template.ref || meta.syllabusRef,
+          tier: template.tier,
           question: stem,
           options: shuffled,
           correctIndex: correctIndex >= 0 ? correctIndex : 0,
@@ -1134,42 +1256,38 @@ export function generateDynamicSyllabusQuestions(
       CURATED_PHY_QUESTIONS
     ];
     for (const bank of curatedSources) {
-      if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
       for (const [k, list] of Object.entries(bank)) {
-        if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
         const matches = isExactSubtopic
           ? k.toUpperCase() === topicCode.toUpperCase()
           : k.toUpperCase().startsWith(`${parentCode}.`);
         if (!matches) continue;
-        for (const cq of list) {
-          if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
-          addToBucket(topicCode, {
+        for (let idx = 0; idx < list.length; idx++) {
+          const cq = list[idx];
+          pushCandidate({
             ...cq,
             topicCode: parentCode,
             topicTitle: meta.title,
-            id: `cur-${k.toLowerCase()}-${uniqueToken}-${(topicBuckets.get(topicCode)?.length || 0) + 1}`
+            id: `cur-${k.toLowerCase()}-${uniqueToken}-${idx + 1}`
           });
         }
       }
     }
 
     const topicLib = TOPIC_QUESTION_LIBRARY[parentCode] || [];
-    for (const tq of topicLib) {
-      if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
+    for (let idx = 0; idx < topicLib.length; idx++) {
+      const tq = topicLib[idx];
       if (isExactSubtopic && tq.syllabusRef && tq.syllabusRef.toUpperCase() !== topicCode.toUpperCase()) continue;
-      addToBucket(topicCode, {
+      pushCandidate({
         ...tq,
         topicCode: parentCode,
         topicTitle: meta.title,
-        id: `lib-${parentCode.toLowerCase()}-${uniqueToken}-${(topicBuckets.get(topicCode)?.length || 0) + 1}`
+        id: `lib-${parentCode.toLowerCase()}-${uniqueToken}-${idx + 1}`
       });
     }
 
     // 3c. Sourced from Cambridge examination papers
     for (const paper of candidateExamPapers) {
-      if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
       for (const q of paper.questions) {
-        if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
         const qTopic = q.syllabusCode ? q.syllabusCode.split('.')[0].toUpperCase() : '';
         const matches = isExactSubtopic
           ? q.syllabusCode?.toUpperCase() === topicCode.toUpperCase()
@@ -1179,12 +1297,13 @@ export function generateDynamicSyllabusQuestions(
           const letter = q.correctAnswer || 'A';
           const correctIdx = ['A', 'B', 'C', 'D'].indexOf(letter);
 
-          addToBucket(topicCode, {
+          pushCandidate({
             id: `exam-${q.id}-${uniqueToken}`,
             subject: q.subject,
             topicCode: parentCode,
             topicTitle: meta.title,
             syllabusRef: q.syllabusCode,
+            tier: paper.tier === 'Extended' ? 'Extended' : 'Core',
             question: q.questionText,
             options: optTexts,
             correctIndex: correctIdx >= 0 ? correctIdx : 0,
@@ -1194,32 +1313,37 @@ export function generateDynamicSyllabusQuestions(
       }
     }
 
-    // 3d. Sourced from clean subtopics engine
+    // 3d. Sourced from clean subtopics engine (tier-filtered)
     const matchingSubtopics = allSubtopicsData.filter(s =>
       isExactSubtopic
         ? s.subtopicCode.toUpperCase() === topicCode.toUpperCase()
         : (s.topicCode === parentCode || s.subtopicCode.startsWith(`${parentCode}.`))
     );
     for (const sub of matchingSubtopics) {
-      if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
-      const subQuiz = getQuizForSubtopic(sub.subtopicCode, { count: 12 });
-      for (const q of subQuiz) {
-        if ((topicBuckets.get(topicCode)?.length || 0) >= quota) break;
-        addToBucket(topicCode, {
+      const subQuiz = getQuizForSubtopic(sub.subtopicCode, { count: 12, tier: effectiveTier });
+      for (let idx = 0; idx < subQuiz.length; idx++) {
+        const q = subQuiz[idx];
+        pushCandidate({
           ...q,
           topicCode: parentCode,
           topicTitle: meta.title,
-          id: `sub-${sub.subtopicCode.toLowerCase()}-${uniqueToken}-${(topicBuckets.get(topicCode)?.length || 0) + 1}`
+          id: `sub-${sub.subtopicCode.toLowerCase()}-${uniqueToken}-${idx + 1}`
         });
       }
     }
 
     // 3e. Formula parametric variations ONLY for formula-based topics (B2, C3, P1, P3, P4, P5)
     if (['B2', 'C3', 'P1', 'P3', 'P4', 'P5'].includes(parentCode)) {
-      for (let paramCounter = 1; (topicBuckets.get(topicCode)?.length || 0) < quota && paramCounter <= 20; paramCounter++) {
-        const paramQ = generateParametricQuestion(parentCode, isExactSubtopic ? topicCode : `${parentCode}.1`, paramCounter);
+      const baseSeed = Math.floor(Math.random() * 100);
+      for (let paramCounter = 1; paramCounter <= 10; paramCounter++) {
+        const paramQ = generateParametricQuestion(
+          parentCode,
+          isExactSubtopic ? topicCode : `${parentCode}.1`,
+          baseSeed + paramCounter,
+          effectiveTier
+        );
         if (paramQ) {
-          addToBucket(topicCode, {
+          pushCandidate({
             ...paramQ,
             topicTitle: meta.title,
             id: `param-${parentCode.toLowerCase()}-${uniqueToken}-${paramCounter}`
@@ -1227,6 +1351,69 @@ export function generateDynamicSyllabusQuestions(
         }
       }
     }
+
+    // 3f. Graceful parent fallback if an exact Supplement-only subtopic (e.g. B3.3) was queried in Core mode
+    if (isExactSubtopic && isCoreOnly && poolCandidates.length < quota) {
+      const fallbackTopicLib = TOPIC_QUESTION_LIBRARY[parentCode] || [];
+      for (let idx = 0; idx < fallbackTopicLib.length && poolCandidates.length < quota * 2; idx++) {
+        pushCandidate({
+          ...fallbackTopicLib[idx],
+          topicCode: parentCode,
+          topicTitle: meta.title,
+          id: `lib-fb-${parentCode.toLowerCase()}-${uniqueToken}-${idx + 1}`
+        });
+      }
+      for (let tIdx = 0; tIdx < templates.length && poolCandidates.length < quota * 2; tIdx++) {
+        const template = templates[tIdx];
+        if (template.tier === 'Extended') continue;
+        const vars = template.generateVars ? template.generateVars() : null;
+        const stem = typeof template.stem === 'function' ? template.stem(vars) : template.stem;
+        const correctAns = typeof template.correct === 'function' ? template.correct(vars) : template.correct;
+        const distractors = typeof template.distractors === 'function' ? template.distractors(vars) : template.distractors;
+        const explanation = typeof template.explanation === 'function' ? template.explanation(vars) : template.explanation;
+        const rawOptions = [correctAns, ...distractors.slice(0, 3)];
+        const shuffled = shuffleArray(rawOptions);
+        pushCandidate({
+          id: `tpl-fb-${parentCode.toLowerCase()}-${uniqueToken}-${tIdx}`,
+          subject: meta.subject,
+          topicCode: parentCode,
+          topicTitle: meta.title,
+          syllabusRef: template.ref || meta.syllabusRef,
+          tier: template.tier,
+          question: stem,
+          options: shuffled,
+          correctIndex: Math.max(0, shuffled.indexOf(correctAns)),
+          explanation
+        });
+      }
+    }
+
+    // Shuffle candidates so repeated attempts & Core vs Extended provide fresh coverage;
+    // for Extended, ensure both Core and Extended candidates are interleaved when both exist.
+    let orderedCandidates = shuffleArray(poolCandidates);
+    if (!isCoreOnly) {
+      const corePool = orderedCandidates.filter(q => q.tier !== 'Extended');
+      const extPool = orderedCandidates.filter(q => q.tier === 'Extended');
+      if (corePool.length > 0 && extPool.length > 0) {
+        const mixed: QuizQuestion[] = [];
+        const maxLen = Math.max(corePool.length, extPool.length);
+        for (let i = 0; i < maxLen; i++) {
+          if (i < extPool.length) mixed.push(extPool[i]);
+          if (i < corePool.length) mixed.push(corePool[i]);
+        }
+        orderedCandidates = mixed;
+      }
+    }
+
+    const bucket = topicBuckets.get(topicCode) || [];
+    for (const candidate of orderedCandidates) {
+      if (bucket.length >= quota) break;
+      const norm = normalizeStem(candidate.question);
+      if (globalSeenStems.has(norm)) continue;
+      globalSeenStems.add(norm);
+      bucket.push(candidate);
+    }
+    topicBuckets.set(topicCode, bucket);
   }
 
   // 4. Interleave questions round-robin across chosen topics for perfectly even progression

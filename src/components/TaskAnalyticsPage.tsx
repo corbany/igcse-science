@@ -144,7 +144,7 @@ export const TaskAnalyticsPage: React.FC<TaskAnalyticsPageProps> = ({
   const [studentSearch, setStudentSearch] = useState<string>('');
   const [overallFilter, setOverallFilter] = useState<'all' | 'complete' | 'in_progress' | 'not_started'>('all');
   const [taskSearch, setTaskSearch] = useState<string>('');
-  const [taskDueFilter, setTaskDueFilter] = useState<'all' | 'active' | 'overdue'>('all');
+  const [taskDueFilter, setTaskDueFilter] = useState<'all' | 'active' | 'overdue' | 'ended'>('all');
   const [taskColumnOrder, setTaskColumnOrder] = useState<'newest' | 'due_asc' | 'completion_desc' | 'completion_asc'>('newest');
   const [taskStatusFilters, setTaskStatusFilters] = useState<Record<string, 'all' | 'completed' | 'in_progress' | 'not_started'>>({});
 
@@ -282,10 +282,11 @@ export const TaskAnalyticsPage: React.FC<TaskAnalyticsPageProps> = ({
               ? 'in_progress'
               : 'not_started';
 
+        const isEnded = task.status === 'ended';
         row[task.id] = {
           status,
           submission: effectiveSub,
-          isOverdue: taskPastDue && status !== 'completed'
+          isOverdue: !isEnded && taskPastDue && status !== 'completed'
         };
       }
 
@@ -339,10 +340,12 @@ export const TaskAnalyticsPage: React.FC<TaskAnalyticsPageProps> = ({
   const visibleTasks = useMemo(() => {
     const q = taskSearch.trim().toLowerCase();
     const filtered = tasks.filter((task) => {
+      const isEnded = task.status === 'ended';
       const dueTs = new Date(task.dueDate).getTime();
-      const isOverdue = !Number.isNaN(dueTs) && dueTs < nowTs;
-      if (taskDueFilter === 'active' && isOverdue) return false;
-      if (taskDueFilter === 'overdue' && !isOverdue) return false;
+      const isOverdue = !isEnded && !Number.isNaN(dueTs) && dueTs < nowTs;
+      if (taskDueFilter === 'active' && (isEnded || isOverdue)) return false;
+      if (taskDueFilter === 'overdue' && (isEnded || !isOverdue)) return false;
+      if (taskDueFilter === 'ended' && !isEnded) return false;
 
       if (q) {
         const matchTitle = (task.title || '').toLowerCase().includes(q);
@@ -728,6 +731,7 @@ export const TaskAnalyticsPage: React.FC<TaskAnalyticsPageProps> = ({
               <option value="all">All Assigned Tasks ({tasks.length})</option>
               <option value="active">Active / Upcoming Only</option>
               <option value="overdue">Past Due Only</option>
+              <option value="ended">Ended Only ({tasks.filter(t => t.status === 'ended').length})</option>
             </select>
           </div>
 
@@ -1006,8 +1010,9 @@ export const TaskAnalyticsPage: React.FC<TaskAnalyticsPageProps> = ({
                           notStartedCount: 0,
                           completionPct: 0
                         };
+                        const isEnded = task.status === 'ended';
                         const dueTs = new Date(task.dueDate).getTime();
-                        const isOverdue = !Number.isNaN(dueTs) && dueTs < nowTs;
+                        const isOverdue = !isEnded && !Number.isNaN(dueTs) && dueTs < nowTs;
                         const subtopicLabel =
                           (task.targetSubtopics || []).length > 0
                             ? task.targetSubtopics.slice(0, 3).join(', ') +
@@ -1055,9 +1060,9 @@ export const TaskAnalyticsPage: React.FC<TaskAnalyticsPageProps> = ({
                                   </>
                                 )}
                                 <span aria-hidden="true">·</span>
-                                <span className={isOverdue ? 'text-rose-600 dark:text-rose-400 font-semibold' : ''}>
-                                  {isOverdue ? 'Past due ' : 'Due '}
-                                  {formatShortDate(task.dueDate)}
+                                <span className={isEnded ? 'text-slate-500 dark:text-slate-400 font-semibold' : isOverdue ? 'text-rose-600 dark:text-rose-400 font-semibold' : ''}>
+                                  {isEnded ? 'Ended ' : isOverdue ? 'Past due ' : 'Due '}
+                                  {formatShortDate(isEnded && task.endedAt ? task.endedAt : task.dueDate)}
                                 </span>
                               </div>
 

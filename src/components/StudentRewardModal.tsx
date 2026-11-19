@@ -19,7 +19,8 @@ import { ALL_FANTASY_SKINS } from '../data/fantasySkinsData';
 import {
   ALL_WEAPON_ITEMS,
   BOOSTER_PACKS,
-  RARITY_RANK
+  RARITY_RANK,
+  hasWeaponInInventory
 } from '../data/gameCatalogData';
 import { UserProfile } from '../types';
 
@@ -77,7 +78,7 @@ export const StudentRewardModal: React.FC<StudentRewardModalProps> = ({
   const [selectedWeaponId, setSelectedWeaponId] = useState<string>(
     initialRewardType === 'weapon' && initialItemId
       ? initialItemId
-      : ALL_WEAPON_ITEMS[2]?.id || ALL_WEAPON_ITEMS[0].id
+      : ALL_WEAPON_ITEMS[1]?.id || ALL_WEAPON_ITEMS[0].id
   );
   const [itemSearch, setItemSearch] = useState<string>('');
   const [note, setNote] = useState<string>('');
@@ -453,10 +454,7 @@ export const StudentRewardModal: React.FC<StudentRewardModalProps> = ({
                 {sortedWeapons.map((weapon) => {
                   const isSelected = selectedWeaponId === weapon.id;
                   const alreadyOwned = singleProfile
-                    ? singleProfile.inventory.includes(weapon.id) ||
-                      weapon.price === 0 ||
-                      weapon.id === 'wpn_starter_blaster' ||
-                      weapon.id === 'bunsen_burner'
+                    ? hasWeaponInInventory(singleProfile.inventory, weapon.id)
                     : false;
                   const rankInfo = RARITY_RANK[weapon.rarity];
 

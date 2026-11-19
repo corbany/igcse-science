@@ -37,8 +37,13 @@ import {
   ShieldAlert,
   Dna,
   FlaskConical,
-  Zap
+  Zap,
+  Swords
 } from 'lucide-react';
+import { QuizChallenge } from '../types';
+import { subscribeToUserChallenges } from '../services/challengeService';
+import { LeaderboardChallengeSection } from './LeaderboardChallengeSection';
+import { LiveChallengeArena } from './LiveChallengeArena';
 import { 
   MedalTierIcon, 
   MedalCountsSummary, 
@@ -55,6 +60,19 @@ interface StudentLeaderboardProps {
   onNavigateToQuizzes?: (topicCode?: string) => void;
   onNavigateToProfile?: () => void;
   onNavigateToTeachingHub?: () => void;
+  challenges?: QuizChallenge[];
+  activeChallenge?: QuizChallenge | null;
+  onEnterChallenge?: (challenge: QuizChallenge) => void;
+  onExitChallenge?: () => void;
+  onChallengeCompleted?: (summary: {
+    challengeId: string;
+    myScore: number;
+    opponentScore: number;
+    correctCount: number;
+    totalQuestions: number;
+    won: boolean;
+    isDraw: boolean;
+  }) => void;
 }
 
 export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
@@ -64,7 +82,12 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
   onNavigateToLessons,
   onNavigateToQuizzes,
   onNavigateToProfile,
-  onNavigateToTeachingHub
+  onNavigateToTeachingHub,
+  challenges: externalChallenges,
+  activeChallenge: externalActiveChallenge,
+  onEnterChallenge,
+  onExitChallenge,
+  onChallengeCompleted
 }) => {
   const [enrolledClasses, setEnrolledClasses] = useState<ClassItem[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string>(
@@ -86,6 +109,47 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
 
   const [inspectedStudent, setInspectedStudent] = useState<LeaderboardEntry | null>(null);
   const [inspectedBadgeCategory, setInspectedBadgeCategory] = useState<'all' | 'streak' | 'topic_module' | 'quiz'>('all');
+  const [localChallenges, setLocalChallenges] = useState<QuizChallenge[]>([]);
+  const [localActiveChallenge, setLocalActiveChallenge] = useState<QuizChallenge | null>(null);
+  const [preselectedOpponentId, setPreselectedOpponentId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (externalChallenges !== undefined) return;
+    if (!user?.id || user.role !== 'student') return;
+    const unsub = subscribeToUserChallenges(
+      user.id,
+      (list) => setLocalChallenges(list),
+      (err) => console.warn('Leaderboard challenges listener notice:', err)
+    );
+    return () => unsub();
+  }, [user?.id, user?.role, externalChallenges]);
+
+  const effectiveChallenges = externalChallenges ?? localChallenges;
+  const effectiveActiveChallenge = externalActiveChallenge !== undefined ? externalActiveChallenge : localActiveChallenge;
+
+  const handleEnterMatch = (challenge: QuizChallenge) => {
+    if (onEnterChallenge) {
+      onEnterChallenge(challenge);
+    } else {
+      setLocalActiveChallenge(challenge);
+    }
+  };
+
+  const handleExitMatch = () => {
+    if (onExitChallenge) {
+      onExitChallenge();
+    } else {
+      setLocalActiveChallenge(null);
+    }
+  };
+
+  const handleChallengeClassmateClick = (studentId: string) => {
+    setPreselectedOpponentId(studentId);
+    const el = document.getElementById('leaderboard-challenge-section');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
 
   // Load user's classes (support both students and instructors)
   useEffect(() => {
@@ -238,6 +302,17 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
           Please ask your instructor for your 8-character class join code to join your class and compare rankings with your classmates.
         </p>
       </div>
+    );
+  }
+
+  if (effectiveActiveChallenge) {
+    return (
+      <LiveChallengeArena
+        challenge={effectiveActiveChallenge}
+        user={user}
+        onExit={handleExitMatch}
+        onMatchCompleted={onChallengeCompleted}
+      />
     );
   }
 
@@ -473,6 +548,19 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
                 </button>
               )}
 
+              {user.role === 'student' && (
+                <button
+                  onClick={() => {
+                    const el = document.getElementById('leaderboard-challenge-section');
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl bg-amber-300 hover:bg-amber-400 text-slate-950 font-bold text-xs transition flex items-center gap-1.5 border-2 border-black shadow-xs cursor-pointer whitespace-nowrap"
+                >
+                  <Swords className="w-3.5 h-3.5" />
+                  <span>1v1 Challenge</span>
+                </button>
+              )}
+
               {onNavigateToQuizzes && (
                 <button
                   onClick={() => onNavigateToQuizzes()}
@@ -628,6 +716,19 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {/* 2B. 1V1 LIVE QUIZ CHALLENGE SECTION */}
+      {user.role === 'student' && currentClass && (
+        <LeaderboardChallengeSection
+          user={user}
+          classId={currentClass.id}
+          className={currentClass.name}
+          classmates={sortedEntries}
+          challenges={effectiveChallenges}
+          preselectedOpponentId={preselectedOpponentId}
+          onEnterMatch={handleEnterMatch}
+        />
       )}
 
       {/* 3. FULL CLASS LEADERBOARD TABLE & FILTER CONTROLS */}
@@ -861,16 +962,30 @@ export const StudentLeaderboard: React.FC<StudentLeaderboardProps> = ({
 
                     {/* Action / View */}
                     <td className="py-3.5 px-3 text-center">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setInspectedStudent(student);
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-50 text-slate-800 text-[11px] font-bold transition flex items-center justify-center gap-1 mx-auto border border-slate-300 cursor-pointer shadow-xs active:scale-95"
-                      >
-                        <Medal className="w-3 h-3 text-amber-600" />
-                        <span>Inspect</span>
-                      </button>
+                      <div className="flex items-center justify-center gap-1.5">
+                        {!isCurrent && user.role === 'student' && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleChallengeClassmateClick(student.studentId);
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-amber-300 hover:bg-amber-400 text-slate-950 text-[11px] font-bold transition flex items-center justify-center gap-1 border border-black cursor-pointer whitespace-nowrap"
+                          >
+                            <Swords className="w-3 h-3" />
+                            <span>Challenge</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setInspectedStudent(student);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-50 text-slate-800 text-[11px] font-bold transition flex items-center justify-center gap-1 border border-slate-300 cursor-pointer shadow-xs active:scale-95"
+                        >
+                          <Medal className="w-3 h-3 text-amber-600" />
+                          <span>Inspect</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );

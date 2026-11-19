@@ -1468,36 +1468,70 @@ export const TOPIC_QUESTION_LIBRARY: Record<string, QuizQuestion[]> = {
 
 /**
  * Generates dynamic, parametric calculation questions with realistic random values.
- * Gives genuine variety on repeated attempts.
+ * Gives genuine variety on repeated attempts and respects Core vs Extended syllabus boundaries.
  */
-export function generateParametricQuestion(topicCode: string, subtopicCode: string, seed: number): QuizQuestion | null {
+export function generateParametricQuestion(
+  topicCode: string,
+  subtopicCode: string,
+  seed: number,
+  tier: string = 'Extended'
+): QuizQuestion | null {
   const code = subtopicCode.toUpperCase();
-  const subject: ScienceSubject = topicCode.startsWith('B') ? 'biology' : topicCode.startsWith('C') ? 'chemistry' : 'physics';
+  const normTier = (tier || 'Extended').trim().toLowerCase();
+  const isCoreOnly = normTier === 'core' || normTier === 'foundation';
 
   // 1. Biology Magnification (B2)
+  // Core: M = I / A using consistent units (mm -> mm)
+  // Supplement: Converting mm <-> μm
   if (topicCode === 'B2' || code.startsWith('B2')) {
-    const actualUmPool = [15, 20, 25, 40, 50, 75, 80, 120];
-    const magPool = [200, 250, 400, 500, 800, 1000];
-    const actualUm = actualUmPool[seed % actualUmPool.length];
-    const mag = magPool[(seed + 2) % magPool.length];
-    const imageMm = (actualUm * mag) / 1000;
-    const correct = `${actualUm} μm`;
-    const opts = [
-      correct,
-      `${(actualUm * 10).toFixed(0)} μm`,
-      `${(actualUm / 10).toFixed(1)} μm`,
-      `${(imageMm * mag).toFixed(0)} μm`
-    ];
-    return {
-      id: `param-b2-${seed}`,
-      subject: 'biology',
-      topicCode: 'B2',
-      question: `Under a microscope, a diagram of a plant cell measures ${imageMm} mm in length. If the magnification is ×${mag}, what is the actual length of the cell?`,
-      options: opts,
-      correctIndex: 0,
-      explanation: `Actual size A = Image size I ÷ Magnification M. Convert Image to μm: ${imageMm} mm × 1000 = ${imageMm * 1000} μm. A = ${imageMm * 1000} ÷ ${mag} = ${actualUm} μm.`,
-      syllabusRef: code
-    };
+    if (isCoreOnly || seed % 2 === 1) {
+      const actualMmPool = [0.05, 0.08, 0.1, 0.12, 0.15, 0.2, 0.25, 0.3];
+      const magPool = [100, 150, 200, 250, 300, 400, 500];
+      const actualMm = actualMmPool[seed % actualMmPool.length];
+      const mag = magPool[(seed + 1) % magPool.length];
+      const imageMm = Number((actualMm * mag).toFixed(1));
+      const correct = `${actualMm} mm`;
+      return {
+        id: `param-b2-core-${seed}`,
+        subject: 'biology',
+        topicCode: 'B2',
+        tier: 'Core',
+        question: `Under a light microscope, a drawing of a cell has an image length of ${imageMm} mm. If the magnification is ×${mag}, what is the actual length of the cell in millimetres?`,
+        options: [
+          correct,
+          `${Number((actualMm * 10).toFixed(2))} mm`,
+          `${Number((actualMm / 10).toFixed(3))} mm`,
+          `${Number((imageMm * mag).toFixed(1))} mm`
+        ],
+        correctIndex: 0,
+        explanation: `Using Magnification M = Image size I ÷ Actual size A: Actual size A = I ÷ M = ${imageMm} mm ÷ ${mag} = ${actualMm} mm.`,
+        syllabusRef: code
+      };
+    } else {
+      const actualUmPool = [15, 20, 25, 40, 50, 75, 80, 120];
+      const magPool = [200, 250, 400, 500, 800, 1000];
+      const actualUm = actualUmPool[seed % actualUmPool.length];
+      const mag = magPool[(seed + 2) % magPool.length];
+      const imageMm = (actualUm * mag) / 1000;
+      const correct = `${actualUm} μm`;
+      const opts = [
+        correct,
+        `${(actualUm * 10).toFixed(0)} μm`,
+        `${(actualUm / 10).toFixed(1)} μm`,
+        `${(imageMm * mag).toFixed(0)} μm`
+      ];
+      return {
+        id: `param-b2-${seed}`,
+        subject: 'biology',
+        topicCode: 'B2',
+        tier: 'Extended',
+        question: `Under a microscope, a diagram of a plant cell measures ${imageMm} mm in length. If the magnification is ×${mag}, what is the actual length of the cell?`,
+        options: opts,
+        correctIndex: 0,
+        explanation: `Actual size A = Image size I ÷ Magnification M. Convert Image to μm: ${imageMm} mm × 1000 = ${imageMm * 1000} μm. A = ${imageMm * 1000} ÷ ${mag} = ${actualUm} μm.`,
+        syllabusRef: code
+      };
+    }
   }
 
   // 2. Chemistry Law of Conservation of Mass & Reacting Masses (C3) - STRICTLY NO MOLES
@@ -1516,6 +1550,7 @@ export function generateParametricQuestion(topicCode: string, subtopicCode: stri
       id: `param-c3-${seed}`,
       subject: 'chemistry',
       topicCode: 'C3',
+      tier: 'Core',
       question: `A student ignites ${mgMass} g of magnesium ribbon in a closed crucible with excess air. The magnesium reacts completely with ${oMass} g of oxygen gas. According to the Law of Conservation of Mass, what mass of magnesium oxide is formed?`,
       options: opts,
       correctIndex: 0,
@@ -1524,10 +1559,71 @@ export function generateParametricQuestion(topicCode: string, subtopicCode: stri
     };
   }
 
-  // 3. Physics Speed, Acceleration & Dynamics (P1)
+  // 3. Physics Motion, Forces, Density & Pressure (P1)
+  // Core: v = s/t, W = mg, ρ = m/V, p = F/A
+  // Extended: also includes a = (v - u)/t and F = ma
   if (topicCode === 'P1' || code.startsWith('P1')) {
-    const isAcceleration = seed % 2 === 0;
-    if (isAcceleration) {
+    const mode = isCoreOnly ? (seed % 4) : (seed % 6);
+    if (mode === 0) {
+      const time = 10 + (seed % 5) * 5;
+      const speed = 4 + (seed % 6) * 2;
+      const dist = speed * time;
+      return {
+        id: `param-p1-spd-${seed}`,
+        subject: 'physics',
+        topicCode: 'P1',
+        tier: 'Core',
+        question: `A cyclist travels a distance of ${dist} m along a straight track in ${time} seconds. What is the cyclist's average speed?`,
+        options: [`${speed} m/s`, `${speed * 2} m/s`, `${(speed / 2).toFixed(1)} m/s`, `${dist + time} m/s`],
+        correctIndex: 0,
+        explanation: `Using Average speed v = distance s ÷ time t = ${dist} m ÷ ${time} s = ${speed} m/s.`,
+        syllabusRef: 'P1.2'
+      };
+    } else if (mode === 1) {
+      const vol = [20, 25, 40, 50, 80][seed % 5];
+      const rho = [2.5, 2.7, 7.8, 8.9, 1.5][seed % 5];
+      const mass = Number((vol * rho).toFixed(0));
+      return {
+        id: `param-p1-rho-${seed}`,
+        subject: 'physics',
+        topicCode: 'P1',
+        tier: 'Core',
+        question: `A solid metal block has a mass of ${mass} g and a volume of ${vol} cm³. What is the density of the metal?`,
+        options: [`${rho} g/cm³`, `${Number((rho * 2).toFixed(1))} g/cm³`, `${Number((rho / 2).toFixed(2))} g/cm³`, `${mass - vol} g/cm³`],
+        correctIndex: 0,
+        explanation: `Using Density ρ = mass m ÷ volume V = ${mass} g ÷ ${vol} cm³ = ${rho} g/cm³.`,
+        syllabusRef: 'P1.4'
+      };
+    } else if (mode === 2) {
+      const area = [0.2, 0.4, 0.5, 0.8, 1.0][seed % 5];
+      const pressure = [150, 200, 250, 400, 500][seed % 5];
+      const force = Number((pressure * area).toFixed(0));
+      return {
+        id: `param-p1-pres-${seed}`,
+        subject: 'physics',
+        topicCode: 'P1',
+        tier: 'Core',
+        question: `A crate exerts a perpendicular force of ${force} N on a floor surface area of ${area} m². What pressure does the crate exert on the floor?`,
+        options: [`${pressure} Pa`, `${pressure * 2} Pa`, `${Math.round(pressure / 2)} Pa`, `${Math.round(force * area)} Pa`],
+        correctIndex: 0,
+        explanation: `Using Pressure p = Force F ÷ Area A = ${force} N ÷ ${area} m² = ${pressure} Pa.`,
+        syllabusRef: 'P1.7'
+      };
+    } else if (mode === 3) {
+      const mass = [5, 12, 15, 25, 40][seed % 5];
+      const weight = Number((mass * 9.8).toFixed(1));
+      return {
+        id: `param-p1-wt-${seed}`,
+        subject: 'physics',
+        topicCode: 'P1',
+        tier: 'Core',
+        question: `On Earth where the gravitational field strength g = 9.8 N/kg, what is the weight of a scientific instrument of mass ${mass} kg?`,
+        options: [`${weight} N`, `${mass} N`, `${Number((mass / 9.8).toFixed(2))} N`, `${Number((weight * 10).toFixed(0))} N`],
+        correctIndex: 0,
+        explanation: `Using Weight W = mass m × gravitational field strength g = ${mass} kg × 9.8 N/kg = ${weight} N.`,
+        syllabusRef: 'P1.3'
+      };
+    } else if (mode === 4) {
       const u = 0;
       const t = 4 + (seed % 4);
       const v = t * (2 + (seed % 3));
@@ -1537,6 +1633,7 @@ export function generateParametricQuestion(topicCode: string, subtopicCode: stri
         id: `param-p1-acc-${seed}`,
         subject: 'physics',
         topicCode: 'P1',
+        tier: 'Extended',
         question: `A racing drone accelerates uniformly from rest to a speed of ${v} m/s in a time of ${t} seconds. What is its acceleration?`,
         options: [correct, `${(a * 2).toFixed(1)} m/s²`, `${(v * t).toFixed(0)} m/s²`, `${(a / 2).toFixed(1)} m/s²`],
         correctIndex: 0,
@@ -1552,6 +1649,7 @@ export function generateParametricQuestion(topicCode: string, subtopicCode: stri
         id: `param-p1-force-${seed}`,
         subject: 'physics',
         topicCode: 'P1',
+        tier: 'Extended',
         question: `What resultant force is required to accelerate a trolley of mass ${mass} kg at an acceleration of ${acc} m/s²?`,
         options: [correct, `${(mass / acc).toFixed(1)} N`, `${(force * 2)} N`, `${(force - mass)} N`],
         correctIndex: 0,
@@ -1571,6 +1669,7 @@ export function generateParametricQuestion(topicCode: string, subtopicCode: stri
       id: `param-p3-${seed}`,
       subject: 'physics',
       topicCode: 'P3',
+      tier: 'Core',
       question: `A loudspeaker emits a sound wave with a frequency of ${f} Hz through air. If the speed of sound is ${v} m/s, what is the wavelength of the sound wave?`,
       options: [correct, `${(lambda * 2).toFixed(2)} m`, `${(f / v).toFixed(2)} m`, `${(f * v).toFixed(0)} m`],
       correctIndex: 0,
@@ -1589,6 +1688,7 @@ export function generateParametricQuestion(topicCode: string, subtopicCode: stri
       id: `param-p4-${seed}`,
       subject: 'physics',
       topicCode: 'P4',
+      tier: 'Core',
       question: `A current of ${i.toFixed(1)} A flows through a fixed resistor of resistance ${r} Ω. What is the potential difference across the resistor?`,
       options: [correct, `${(r / i).toFixed(1)} V`, `${(v * 2).toFixed(1)} V`, `${(v / 2).toFixed(1)} V`],
       correctIndex: 0,
@@ -1597,9 +1697,9 @@ export function generateParametricQuestion(topicCode: string, subtopicCode: stri
     };
   }
 
-  // 6. Physics Space Physics: Orbital Speed & Light Travel Time (P5)
+  // 6. Physics Space Physics: Light Travel Time (Core) & Orbital Speed (Extended) (P5)
   if (topicCode === 'P5' || code.startsWith('P5')) {
-    if (seed % 2 === 0) {
+    if (!isCoreOnly && seed % 2 === 0) {
       const radiiKm = [7000, 8400, 10500, 14000, 21000, 42000];
       const periodsS = [5600, 7200, 9000, 12000, 18000, 28000];
       const rKm = radiiKm[seed % radiiKm.length];
@@ -1611,6 +1711,7 @@ export function generateParametricQuestion(topicCode: string, subtopicCode: stri
         id: `param-p5-orbit-${seed}`,
         subject: 'physics',
         topicCode: 'P5',
+        tier: 'Extended',
         question: `An artificial satellite moves in a circular orbit of average radius ${rKm.toLocaleString()} km (${rMeters.toExponential(1)} m) around a planet with an orbital period of ${T.toLocaleString()} s. Using v = 2πr / T, what is its orbital speed?`,
         options: [
           correct,
@@ -1632,6 +1733,7 @@ export function generateParametricQuestion(topicCode: string, subtopicCode: stri
         id: `param-p5-light-${seed}`,
         subject: 'physics',
         topicCode: 'P5',
+        tier: 'Core',
         question: `Light travels through the vacuum of space at 3.0 × 10⁸ m/s. How long does it take light from the Sun to reach a spacecraft orbiting at a distance of ${expStr} m?`,
         options: [
           correct,
@@ -1641,10 +1743,11 @@ export function generateParametricQuestion(topicCode: string, subtopicCode: stri
         ],
         correctIndex: 0,
         explanation: `Time t = distance ÷ speed = (${expStr} m) ÷ (3.0 × 10⁸ m/s) = ${timeSec} s.`,
-        syllabusRef: 'P5.2.1'
+        syllabusRef: 'P5.1.1'
       };
     }
   }
 
   return null;
 }
+

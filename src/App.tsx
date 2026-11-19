@@ -28,12 +28,19 @@ import {
   BattleEventState,
   awardQuizAndLevelGold,
   ensureRewardedLevelBaseline,
-  QuizAndLevelRewardResult
+  QuizAndLevelRewardResult,
+  recordDailyEngagementStreak,
+  DailyStreakResult
 } from './services/firebaseGameService';
-import { ScienceSubject, UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, SubtopicSlideProgress, QuizLengthRecord, TaskWithSubmission, ClassTask } from './types';
+import {  ScienceSubject, UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, SubtopicSlideProgress, QuizLengthRecord, TaskWithSubmission, ClassTask, QuizChallenge } from './types';
+import {
+  subscribeToUserChallenges,
+  acceptQuizChallenge,
+  declineQuizChallenge
+} from './services/challengeService';
 import { resolveSubtopicByQuery } from './data/subtopicSlidesData';
 import { logCompletedActivity } from './services/activityService';
-import { evaluateStudentBadges, calculateStudentLevel } from './services/badgeService';
+import { evaluateStudentBadges, calculateStudentLevel, calculateStreak, getLocalDateKey } from './services/badgeService';
 import { 
   Users,
   ShieldAlert,
@@ -45,6 +52,8 @@ import {
   ArrowRight,
   Coins,
   Sparkles,
+  Flame,
+  Swords,
   X
 } from 'lucide-react';
 import { auth, logout } from './services/firebaseAuth';
@@ -200,6 +209,11 @@ export default function App() {
   // Live real-time student tasks state
   const [studentTasks, setStudentTasks] = useState<TaskWithSubmission[]>([]);
 
+  // Live 1v1 Leaderboard Quiz Challenges state
+  const [userChallenges, setUserChallenges] = useState<QuizChallenge[]>([]);
+  const [activeLiveChallenge, setActiveLiveChallenge] = useState<QuizChallenge | null>(null);
+  const dismissedLiveChallengeIdsRef = useRef<Set<string>>(new Set());
+
   // Effective student status and synthetic profile for preview mode
   const isEffectiveStudent = user ? (user.role === 'student' || isPreviewingAsStudent) : false;
   const effectiveUser: UserProfile | null = user
@@ -208,14 +222,48 @@ export default function App() {
         : user)
     : null;
 
-  // Quiz & Level-Up Gold reward state + toast
+  useEffect(() => {
+    if (!user?.id || !isEffectiveStudent) {
+      setUserChallenges([]);
+      setActiveLiveChallenge(null);
+      return;
+    }
+    const unsub = subscribeToUserChallenges(
+      user.id,
+      (list) => {
+        setUserChallenges(list);
+        const liveMatch = list.find(
+          (c) =>
+            (c.status === 'accepted' || c.status === 'in_progress') &&
+            !dismissedLiveChallengeIdsRef.current.has(c.id)
+        );
+        if (liveMatch) {
+          setActiveLiveChallenge((prev) => {
+            if (prev?.id === liveMatch.id) return prev;
+            return liveMatch;
+          });
+          setCurrentTab('leaderboard');
+        }
+      },
+      (err) => console.warn('Challenge subscription notice:', err)
+    );
+    return () => unsub();
+  }, [user?.id, isEffectiveStudent]);
+
+  const incomingPendingChallenges = user
+    ? userChallenges.filter((c) => c.status === 'pending' && c.challengedId === user.id)
+    : [];
+
+  // Quiz, Level-Up & Daily Streak Gold reward state + toast
   const [lastQuizReward, setLastQuizReward] = useState<QuizAndLevelRewardResult | null>(null);
   const [rewardToast, setRewardToast] = useState<{
     title: string;
     subtitle: string;
     isLevelUp: boolean;
+    variant?: 'quiz' | 'level' | 'streak';
   } | null>(null);
   const rewardToastTimerRef = useRef<any>(null);
+  const lastStreakCheckedKeyRef = useRef<string>('');
 
   const showRewardToast = (res: QuizAndLevelRewardResult, sourceLabel: string) => {
     if (res.totalGoldAdded <= 0 && res.xpAdded <= 0 && res.levelsGained <= 0) return;
@@ -232,11 +280,100 @@ export default function App() {
         ? `Level Up! +${res.totalGoldAdded} Gold Earned`
         : `${sourceLabel}: +${res.totalGoldAdded} Gold`,
       subtitle: parts.join(' • '),
-      isLevelUp
+      isLevelUp,
+      variant: isLevelUp ? 'level' : 'quiz'
     });
     rewardToastTimerRef.current = setTimeout(() => {
       setRewardToast(null);
     }, 5500);
+  };
+
+  const showStreakRewardToast = (res: DailyStreakResult) => {
+    if (res.goldAwarded <= 0) return;
+    if (rewardToastTimerRef.current) clearTimeout(rewardToastTimerRef.current);
+
+    setRewardToast({
+      title: `${res.currentStreak}-Day Study Streak! +${res.goldAwarded} Gold`,
+      subtitle: `Consecutive daily engagement bonus • Tomorrow: +${res.nextDayBonus} Gold`,
+      isLevelUp: false,
+      variant: 'streak'
+    });
+    rewardToastTimerRef.current = setTimeout(() => {
+      setRewardToast(null);
+    }, 5500);
+  };
+
+  const withDailyStreakProgress = (candidate: StudentProgress): StudentProgress => {
+    const streakEval = calculateStreak(candidate);
+    return {
+      ...candidate,
+      currentStreak: streakEval.currentStreak,
+      longestStreak: streakEval.longestStreak,
+      lastStreakDate: streakEval.lastStreakDate,
+      activeDates: streakEval.activeDates
+    };
+  };
+
+  const triggerDailyEngagementTracking = (seedProgress?: StudentProgress) => {
+    if (!user?.id || user.role !== 'student' || isPreviewingAsStudent || enrolledClassIds.length === 0) return;
+    if (hydratedUidRef.current !== user.id) return;
+
+    const todayKey = getLocalDateKey();
+    const dedupeKey = `${user.id}:${todayKey}`;
+    if (lastStreakCheckedKeyRef.current === dedupeKey) return;
+    lastStreakCheckedKeyRef.current = dedupeKey;
+
+    const source = seedProgress || progressRef.current;
+    const localStreakEval = calculateStreak(source);
+    if (
+      source.lastStreakDate !== localStreakEval.lastStreakDate ||
+      source.currentStreak !== localStreakEval.currentStreak ||
+      source.longestStreak !== localStreakEval.longestStreak
+    ) {
+      const nextLocal = applyMonotonicBadgesAndXP({
+        ...source,
+        currentStreak: localStreakEval.currentStreak,
+        longestStreak: localStreakEval.longestStreak,
+        lastStreakDate: localStreakEval.lastStreakDate,
+        activeDates: localStreakEval.activeDates
+      }, user);
+      progressRef.current = nextLocal;
+      setProgress(nextLocal);
+      try {
+        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(nextLocal));
+      } catch {}
+    }
+
+    recordDailyEngagementStreak(user.id, {
+      isInstructorPreview: isPreviewingAsStudent,
+      seedStreak: source.currentStreak,
+      seedLongestStreak: source.longestStreak,
+      seedLastStreakDate: source.lastStreakDate
+    }).then((res) => {
+      const cur = progressRef.current;
+      const mergedDates = Array.from(new Set([...(cur.activeDates || []), res.lastStreakDate])).sort();
+      if (
+        cur.currentStreak !== res.currentStreak ||
+        cur.longestStreak !== res.longestStreak ||
+        cur.lastStreakDate !== res.lastStreakDate
+      ) {
+        const synced = applyMonotonicBadgesAndXP({
+          ...cur,
+          currentStreak: res.currentStreak,
+          longestStreak: Math.max(cur.longestStreak || 0, res.longestStreak),
+          lastStreakDate: res.lastStreakDate,
+          activeDates: mergedDates
+        }, user);
+        progressRef.current = synced;
+        setProgress(synced);
+        try {
+          localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(synced));
+        } catch {}
+      }
+      if (res.goldAwarded > 0) {
+        showStreakRewardToast(res);
+      }
+    }).catch(() => {});
   };
 
   useEffect(() => {
@@ -244,6 +381,13 @@ export default function App() {
     const currentScholarLv = calculateStudentLevel(progress.bestTotalXP || 0).level;
     ensureRewardedLevelBaseline(user.id, currentScholarLv);
   }, [user?.id, user?.role]);
+
+  // Record daily active engagement once hydrated student session is active
+  useEffect(() => {
+    if (!user?.id || user.role !== 'student' || isPreviewingAsStudent || enrolledClassIds.length === 0) return;
+    if (hydratedUidRef.current !== user.id) return;
+    triggerDailyEngagementTracking(progressRef.current);
+  }, [user?.id, user?.role, isPreviewingAsStudent, enrolledClassIds.length]);
 
   // Real-time live subscription for student tasks
   useEffect(() => {
@@ -257,7 +401,7 @@ export default function App() {
     return () => unsubscribe();
   }, [effectiveUser?.id, effectiveUser?.role, isEffectiveStudent, enrolledClassIds.length, progress]);
 
-  const pendingTasksCount = studentTasks.filter(t => t.submission?.status !== 'completed').length;
+  const pendingTasksCount = studentTasks.filter(t => t.status !== 'ended' && t.submission?.status !== 'completed').length;
 
   // Firebase Auth listener
   useEffect(() => {
@@ -469,7 +613,7 @@ export default function App() {
     if (slideProgress.allSlidesRead) {
       completedSet.add(subtopicCode);
     }
-    const updated = applyMonotonicBadgesAndXP({
+    const updated = applyMonotonicBadgesAndXP(withDailyStreakProgress({
       ...base,
       completedLessons: Array.from(completedSet),
       slidesReadBySubtopic: {
@@ -477,7 +621,7 @@ export default function App() {
         [subtopicCode]: slideProgress
       },
       lastActive: new Date().toISOString()
-    }, effectiveUser || user);
+    }), effectiveUser || user);
     const newScholarLevel = calculateStudentLevel(updated.bestTotalXP || 0).level;
 
     progressRef.current = updated;
@@ -485,6 +629,7 @@ export default function App() {
     try {
       localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
     } catch {}
+    triggerDailyEngagementTracking(updated);
     if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
       syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
       autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'slides', subtopicCode, { progress: updated });
@@ -512,12 +657,13 @@ export default function App() {
     const newCompleted = isCompleted
       ? base.completedLessons.filter(id => id !== lessonId)
       : [...base.completedLessons, lessonId];
-    const updated: StudentProgress = { ...base, completedLessons: newCompleted, lastActive: new Date().toISOString() };
+    const updated: StudentProgress = withDailyStreakProgress({ ...base, completedLessons: newCompleted, lastActive: new Date().toISOString() });
     progressRef.current = updated;
     setProgress(updated);
     try {
       localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
     } catch {}
+    triggerDailyEngagementTracking(updated);
     if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
       syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
       autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'slides', lessonId, { progress: updated });
@@ -526,26 +672,27 @@ export default function App() {
 
   const handleUpdateConfidence = (topicCode: string, rating: number) => {
     const base = progressRef.current;
-    const updated: StudentProgress = {
+    const updated: StudentProgress = withDailyStreakProgress({
       ...base,
       topicConfidence: {
         ...base.topicConfidence,
         [topicCode]: rating
       },
       lastActive: new Date().toISOString()
-    };
+    });
     progressRef.current = updated;
     setProgress(updated);
     try {
       localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
     } catch {}
+    triggerDailyEngagementTracking(updated);
     if (user && user.role === 'student' && enrolledClassIds.length > 0) {
       syncStudentProgressToClasses(user, updated, enrolledClassIds);
     }
   };
 
   const handleUpdateNote = (topicCode: string, noteContent: string) => {
-    setProgress(prev => ({
+    setProgress(prev => withDailyStreakProgress({
       ...prev,
       savedNotes: {
         ...prev.savedNotes,
@@ -553,6 +700,7 @@ export default function App() {
       },
       lastActive: new Date().toISOString()
     }));
+    triggerDailyEngagementTracking();
   };
 
   const handleQuizCompleted = (
@@ -613,7 +761,7 @@ export default function App() {
       newPct > existingPct ||
       (newPct === existingPct && score >= existingSubjectScore.score);
 
-    const updated = applyMonotonicBadgesAndXP({
+    const updated = applyMonotonicBadgesAndXP(withDailyStreakProgress({
       ...base,
       quizScores: {
         ...base.quizScores,
@@ -626,7 +774,7 @@ export default function App() {
       cumulativeQuizPoints: prevBaselinePoints + score,
       cumulativeQuizzesCount: prevBaselineCount + 1,
       lastActive: nowIso
-    }, effectiveUser || user);
+    }), effectiveUser || user);
 
     const newScholarLevel = calculateStudentLevel(updated.bestTotalXP || 0).level;
 
@@ -635,6 +783,7 @@ export default function App() {
     try {
       localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
     } catch {}
+    triggerDailyEngagementTracking(updated);
     if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
       syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
     }
@@ -675,19 +824,20 @@ export default function App() {
 
   const handleUpdateTrafficLight = (subtopicCode: string, status: TrafficLightStatus) => {
     const base = progressRef.current;
-    const updated: StudentProgress = {
+    const updated: StudentProgress = withDailyStreakProgress({
       ...base,
       trafficLights: {
         ...(base.trafficLights || {}),
         [subtopicCode]: status
       },
       lastActive: new Date().toISOString()
-    };
+    });
     progressRef.current = updated;
     setProgress(updated);
     try {
       localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
     } catch {}
+    triggerDailyEngagementTracking(updated);
     if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
       syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
       autoCheckTaskCompletion(effectiveUser || user, enrolledClassIds, 'traffic_light', subtopicCode, {
@@ -729,7 +879,7 @@ export default function App() {
       prevSubScores.length + prevLengthRecords.length + prevUnrecordedMain.length
     );
 
-    const updated = applyMonotonicBadgesAndXP({
+    const updated = applyMonotonicBadgesAndXP(withDailyStreakProgress({
       ...base,
       completedLessons: Array.from(completedSet),
       trafficLights: {
@@ -743,7 +893,7 @@ export default function App() {
       cumulativeQuizPoints: prevBaselinePoints + (result.score || 0),
       cumulativeQuizzesCount: prevBaselineCount + 1,
       lastActive: new Date().toISOString()
-    }, effectiveUser || user);
+    }), effectiveUser || user);
 
     const newScholarLevel = calculateStudentLevel(updated.bestTotalXP || 0).level;
 
@@ -752,6 +902,7 @@ export default function App() {
     try {
       localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(updated));
     } catch {}
+    triggerDailyEngagementTracking(updated);
     if (user && isEffectiveStudent && enrolledClassIds.length > 0) {
       syncStudentProgressToClasses(effectiveUser || user, updated, enrolledClassIds);
     }
@@ -975,6 +1126,7 @@ export default function App() {
           setShopInitialTab('shop');
           setCurrentTab('shop');
         }}
+        pendingChallengesCount={incomingPendingChallenges.length}
       />
 
       {/* Role Distinction Sub-bar */}
@@ -1072,6 +1224,50 @@ export default function App() {
         />
       )}
 
+      {/* INCOMING 1V1 QUIZ CHALLENGE ALERT BANNER (when browsing other tabs) */}
+      {isEffectiveStudent && incomingPendingChallenges.length > 0 && currentTab !== 'leaderboard' && !activeLiveChallenge && (
+        <div className="bg-amber-50 border-b border-amber-300 px-4 sm:px-6 lg:px-8 py-2.5 text-xs text-slate-900">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <Swords className="w-4 h-4 text-amber-800 shrink-0" />
+              <span className="truncate">
+                <strong>{incomingPendingChallenges[0].challengerName}</strong> challenged you to a{' '}
+                <strong className="font-mono tabular-nums">{incomingPendingChallenges[0].questionCount}-question</strong> live quiz ({incomingPendingChallenges[0].topics.join(', ')})!
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={async () => {
+                  const target = incomingPendingChallenges[0];
+                  try {
+                    await acceptQuizChallenge(target.id);
+                    setActiveLiveChallenge({ ...target, status: 'accepted' });
+                    setCurrentTab('leaderboard');
+                  } catch (e) {
+                    console.error('Accept challenge failed:', e);
+                  }
+                }}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer whitespace-nowrap"
+              >
+                Accept & Start Live Quiz
+              </button>
+              <button
+                onClick={() => setCurrentTab('leaderboard')}
+                className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 font-bold cursor-pointer whitespace-nowrap"
+              >
+                View in Leaderboard
+              </button>
+              <button
+                onClick={() => declineQuizChallenge(incomingPendingChallenges[0].id).catch(() => {})}
+                className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-rose-50 border border-slate-300 text-rose-700 font-bold cursor-pointer whitespace-nowrap"
+              >
+                Decline
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODULE 1: USER PROFILE & LOADOUT BANNER */}
       {isEffectiveStudent && (
         <div className="border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-8 py-3 shadow-xs">
@@ -1080,6 +1276,8 @@ export default function App() {
               user={effectiveUser || user}
               theme={theme}
               battleState={battleState}
+              streakDays={progress.currentStreak || calculateStreak(progress).currentStreak}
+              longestStreak={progress.longestStreak || calculateStreak(progress).longestStreak}
               onOpenShop={() => {
                 setShopInitialTab('shop');
                 setCurrentTab('shop');
@@ -1209,6 +1407,63 @@ export default function App() {
             onNavigateToQuizzes={() => setCurrentTab('quizzes')}
             onNavigateToProfile={() => setCurrentTab('profile')}
             onNavigateToTeachingHub={() => setCurrentTab('instructor')}
+            challenges={isEffectiveStudent ? userChallenges : undefined}
+            activeChallenge={isEffectiveStudent ? activeLiveChallenge : null}
+            onEnterChallenge={(c) => {
+              dismissedLiveChallengeIdsRef.current.delete(c.id);
+              setActiveLiveChallenge(c);
+            }}
+            onExitChallenge={() => {
+              if (activeLiveChallenge) {
+                dismissedLiveChallengeIdsRef.current.add(activeLiveChallenge.id);
+              }
+              setActiveLiveChallenge(null);
+            }}
+            onChallengeCompleted={(summary) => {
+              if (!user || !isEffectiveStudent) return;
+              const rewardKey = `igcse_challenge_rewarded_${user.id}_${summary.challengeId}`;
+              try {
+                if (localStorage.getItem(rewardKey)) return;
+                localStorage.setItem(rewardKey, '1');
+              } catch {}
+
+              const prevScholarLevel = calculateStudentLevel(progressRef.current.bestTotalXP || 0).level;
+              const nextProgress = applyMonotonicBadgesAndXP(
+                withDailyStreakProgress({
+                  ...progressRef.current,
+                  cumulativeQuizPoints: (progressRef.current.cumulativeQuizPoints || 0) + summary.correctCount,
+                  cumulativeQuizzesCount: (progressRef.current.cumulativeQuizzesCount || 0) + 1,
+                  lastActive: new Date().toISOString()
+                }),
+                effectiveUser || user
+              );
+              const newScholarLevel = calculateStudentLevel(nextProgress.bestTotalXP || 0).level;
+              progressRef.current = nextProgress;
+              setProgress(nextProgress);
+              try {
+                localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(nextProgress));
+              } catch {}
+              triggerDailyEngagementTracking(nextProgress);
+              if (enrolledClassIds.length > 0) {
+                syncStudentProgressToClasses(effectiveUser || user, nextProgress, enrolledClassIds);
+              }
+
+              awardQuizAndLevelGold({
+                uid: user.id,
+                quizQuestionsCompleted: summary.totalQuestions,
+                quizScore: summary.correctCount + (summary.won ? 2 : 0),
+                prevScholarLevel,
+                newScholarLevel,
+                isInstructorPreview: isPreviewingAsStudent
+              })
+                .then((rewardRes) => {
+                  showRewardToast(
+                    rewardRes,
+                    summary.won ? '1v1 Live Challenge Victory' : '1v1 Live Challenge Completed'
+                  );
+                })
+                .catch(() => {});
+            }}
           />
         )}
 
@@ -1465,15 +1720,23 @@ export default function App() {
         )}
       </main>
 
-      {/* Gold & Level-Up Reward Notification Toast */}
+      {/* Gold, Daily Streak & Level-Up Reward Notification Toast */}
       {rewardToast && (
         <div className="fixed bottom-5 right-5 z-50 max-w-sm bg-white border-2 border-slate-800 rounded-xl shadow-lg p-4 flex items-start gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
           <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border ${
             rewardToast.isLevelUp
               ? 'bg-emerald-50 border-emerald-400 text-emerald-700'
-              : 'bg-amber-50 border-amber-400 text-amber-700'
+              : rewardToast.variant === 'streak'
+                ? 'bg-amber-50 border-amber-400 text-amber-600'
+                : 'bg-amber-50 border-amber-400 text-amber-700'
           }`}>
-            {rewardToast.isLevelUp ? <Sparkles className="w-5 h-5" /> : <Coins className="w-5 h-5" />}
+            {rewardToast.isLevelUp ? (
+              <Sparkles className="w-5 h-5" />
+            ) : rewardToast.variant === 'streak' ? (
+              <Flame className="w-5 h-5 fill-amber-500 text-amber-600" />
+            ) : (
+              <Coins className="w-5 h-5" />
+            )}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold text-slate-900 leading-tight">{rewardToast.title}</p>

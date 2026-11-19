@@ -23,9 +23,10 @@ export const StudentTaskProgressBar: React.FC<StudentTaskProgressBarProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
 
-  const totalTasks = tasks.length;
-  const completedTasks = tasks.filter(t => t.submission?.status === 'completed').length;
-  const pendingTasks = tasks.filter(t => t.submission?.status !== 'completed');
+  const activeOrCompletedTasks = tasks.filter(t => t.status !== 'ended' || t.submission?.status === 'completed');
+  const totalTasks = activeOrCompletedTasks.length;
+  const completedTasks = activeOrCompletedTasks.filter(t => t.submission?.status === 'completed').length;
+  const pendingTasks = tasks.filter(t => t.status !== 'ended' && t.submission?.status !== 'completed');
   const percentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
   const isAllComplete = totalTasks > 0 && completedTasks === totalTasks;
 

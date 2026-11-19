@@ -8,7 +8,7 @@ import { CURATED_BIO_QUESTIONS } from './curatedQuestionsBio';
 import { CURATED_CHEM_QUESTIONS } from './curatedQuestionsChem';
 import { CURATED_PHY_QUESTIONS } from './curatedQuestionsPhy';
 import { predefinedSubtopicQuizzes } from './predefinedSubtopicQuizzes';
-import { isValidQuizQuestion } from './quizSanitizer';
+import { isValidQuizQuestion, isExtendedOnlyQuestion, matchesExamTier } from './quizSanitizer';
 import { march2026Paper12Core } from './examPapers/march2026Paper12Core';
 import { march2026Paper22Extended } from './examPapers/march2026Paper22Extended';
 import { specimen2025Paper2 } from './examPapers/specimen2025Paper2';
@@ -1140,11 +1140,13 @@ Object.entries(PHYSICS_SUBTOPIC_QUESTIONS).forEach(([k, list]) => {
  * 1. Zero cross-topic contamination (questions only come from this exact subtopic).
  * 2. Questions derived from slide decks, learning objectives, and authentic Cambridge MCQs.
  */
-export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuestion[] {
+export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup, tier: string = 'Extended'): QuizQuestion[] {
   const code = subtopic.subtopicCode.toUpperCase();
   const subject = subtopic.subject;
   const topicCode = subtopic.topicCode;
   const title = subtopic.title;
+  const normTier = (tier || 'Extended').trim().toLowerCase();
+  const isCoreOnly = normTier === 'core' || normTier === 'foundation';
 
   const questions: QuizQuestion[] = [];
   const seenStems = new Set<string>();
@@ -1152,16 +1154,21 @@ export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuesti
   const normalize = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
 
   const addQ = (q: QuizQuestion): boolean => {
-    if (!isValidQuizQuestion(q)) return false;
-    const norm = normalize(q.question);
-    if (norm.length < 15 || seenStems.has(norm)) return false;
-    seenStems.add(norm);
-    questions.push({
+    const candidate: QuizQuestion = {
       ...q,
       subject,
       topicCode,
       topicTitle: subtopic.topicName || title,
-      syllabusRef: code
+      syllabusRef: q.syllabusRef || code
+    };
+    if (!isValidQuizQuestion(candidate)) return false;
+    if (!matchesExamTier(candidate, tier)) return false;
+    const norm = normalize(candidate.question);
+    if (norm.length < 15 || seenStems.has(norm)) return false;
+    seenStems.add(norm);
+    questions.push({
+      ...candidate,
+      tier: isExtendedOnlyQuestion(candidate) ? 'Extended' : (candidate.tier || 'Core')
     });
     return true;
   };
@@ -1181,7 +1188,9 @@ export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuesti
   }
 
   // 2. Authentic Past Paper Examination Questions matching this exact subtopic
-  const examPapers = [march2026Paper12Core, march2026Paper22Extended, specimen2025Paper2];
+  const examPapers = isCoreOnly
+    ? [march2026Paper12Core]
+    : [march2026Paper12Core, march2026Paper22Extended, specimen2025Paper2];
   for (const paper of examPapers) {
     for (const q of paper.questions) {
       const qCode = q.syllabusCode?.trim().toUpperCase();
@@ -1218,6 +1227,24 @@ export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuesti
 
   // 4. Subtopic-Specific Quantitative Calculations (strictly for formula-based subtopics)
   if (code === 'B2.2') {
+    // Core: same-unit M = I / A in mm
+    [100, 200, 300, 400].forEach((mag, idx) => {
+      const actMm = [0.08, 0.15, 0.12, 0.2][idx];
+      const imgMm = Number((actMm * mag).toFixed(1));
+      addQ({
+        id: `calc-mag-core-${idx}`,
+        subject: 'biology',
+        topicCode: 'B2',
+        topicTitle: title,
+        syllabusRef: code,
+        tier: 'Core',
+        question: `A drawing of a root hair cell measures ${imgMm} mm under magnification ×${mag}. What is the actual length of the cell in millimetres?`,
+        options: [`${actMm} mm`, `${Number((actMm * 10).toFixed(2))} mm`, `${Number((actMm / 10).toFixed(3))} mm`, `${Number((imgMm * mag).toFixed(1))} mm`],
+        correctIndex: 0,
+        explanation: `Using Magnification M = Image size I / Actual size A: A = I / M = ${imgMm} mm / ${mag} = ${actMm} mm.`
+      });
+    });
+    // Extended (Supplement): converting mm to μm
     [100, 200, 400, 500].forEach((mag, idx) => {
       const act = [20, 25, 40, 50][idx];
       const imgMm = (act * mag) / 1000;
@@ -1227,7 +1254,7 @@ export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuesti
         topicCode: 'B2',
         topicTitle: title,
         syllabusRef: code,
-        tier: 'Core',
+        tier: 'Extended',
         question: `A diagram of a plant cell measures ${imgMm} mm under magnification ×${mag}. What is the actual width of the cell?`,
         options: [`${act} μm`, `${act * 10} μm`, `${(act / 10).toFixed(1)} μm`, `${imgMm * mag} μm`],
         correctIndex: 0,
@@ -1311,7 +1338,7 @@ export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuesti
         topicCode: 'P1',
         topicTitle: title,
         syllabusRef: code,
-        tier: 'Core',
+        tier: 'Extended',
         question: `An object of mass ${m} kg is lifted to a vertical height of ${h} m above the ground (g = 9.8 N/kg). What is the increase in its gravitational potential energy?`,
         options: [`${ep} J`, `${ep * 2} J`, `${(ep / 2).toFixed(1)} J`, `${m * h} J`],
         correctIndex: 0,
@@ -1328,7 +1355,7 @@ export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuesti
         topicCode: 'P1',
         topicTitle: title,
         syllabusRef: code,
-        tier: 'Core',
+        tier: 'Extended',
         question: `A machine has a total energy input of ${tin} J and delivers ${tout} J of useful energy output. What is its efficiency?`,
         options: [`${eff}%`, `${100 - eff}%`, `${Math.round(eff / 2)}%`, `${eff + 10}%`],
         correctIndex: 0,
@@ -1468,7 +1495,7 @@ export function buildSubtopicQuestions(subtopic: SubtopicTopicGroup): QuizQuesti
 
     // 5d. Quantitative parametric variations for mathematical parent topics (B2, C3, P1, P3, P4, P5)
     for (let seed = 1; seed <= 6 && questions.length < 10; seed++) {
-      const paramQ = generateParametricQuestion(topicCode, code, seed);
+      const paramQ = generateParametricQuestion(topicCode, code, seed, tier);
       if (paramQ) addQ(paramQ);
     }
   }
@@ -1492,13 +1519,17 @@ export function getSubtopicQuiz(
     attemptNumber?: number;
     count?: number;
     resetHistory?: boolean;
+    tier?: string;
   }
 ): QuizQuestion[] {
   const norm = subtopicCode.trim().toUpperCase();
   const count = options?.count || 10;
+  const activeTier = options?.tier || 'Extended';
+  const tierKey = activeTier.trim().toLowerCase() === 'core' ? 'CORE' : 'EXT';
+  const seenKey = `${norm}:${tierKey}`;
 
   if (options?.resetHistory) {
-    delete subtopicSeenMap[norm];
+    delete subtopicSeenMap[seenKey];
   }
 
   // Find subtopic data
@@ -1506,28 +1537,30 @@ export function getSubtopicQuiz(
   
   let pool: QuizQuestion[] = [];
   if (subtopic) {
-    pool = buildSubtopicQuestions(subtopic);
+    pool = buildSubtopicQuestions(subtopic, activeTier);
   } else {
-    pool = SUBTOPIC_QUESTION_DATABASE[norm] || SUBTOPIC_QUESTION_DATABASE['C1.1'] || [];
+    pool = (SUBTOPIC_QUESTION_DATABASE[norm] || SUBTOPIC_QUESTION_DATABASE['C1.1'] || []).filter(q =>
+      matchesExamTier(q, activeTier)
+    );
   }
 
   if (pool.length === 0) {
-    pool = SUBTOPIC_QUESTION_DATABASE['C1.1'] || [];
+    pool = (SUBTOPIC_QUESTION_DATABASE['C1.1'] || []).filter(q => matchesExamTier(q, activeTier));
   }
 
   // Filter seen questions for fresh attempts
-  const seenIds = new Set(subtopicSeenMap[norm] || []);
+  const seenIds = new Set(subtopicSeenMap[seenKey] || []);
   let available = pool.filter(q => !seenIds.has(q.id));
 
   if (available.length < count) {
-    subtopicSeenMap[norm] = [];
+    subtopicSeenMap[seenKey] = [];
     available = [...pool];
   }
 
   const shuffled = shuffle(available);
   let selected = shuffled.slice(0, count);
 
-  // Guarantee exactly `count` (10) questions if pool was small
+  // Guarantee exactly `count` questions if pool was small
   if (selected.length < count) {
     const fillerNeeded = count - selected.length;
     const fillers = pool.slice(0, fillerNeeded).map((q, idx) => ({
@@ -1539,7 +1572,7 @@ export function getSubtopicQuiz(
 
   // Record seen IDs
   const newlySeen = selected.map(q => q.id);
-  subtopicSeenMap[norm] = Array.from(new Set([...(subtopicSeenMap[norm] || []), ...newlySeen])).slice(-60);
+  subtopicSeenMap[seenKey] = Array.from(new Set([...(subtopicSeenMap[seenKey] || []), ...newlySeen])).slice(-60);
 
   // Balance and randomize options A, B, C, D
   return balanceQuizOptions(selected);

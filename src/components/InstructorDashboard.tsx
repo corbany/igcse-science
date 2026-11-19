@@ -62,7 +62,7 @@ import {
   calculateLevelFromXP
 } from '../services/firebaseGameService';
 import { ALL_FANTASY_SKINS, getFantasySkin, FANTASY_SKIN_ALIASES } from '../data/fantasySkinsData';
-import { ALL_WEAPON_ITEMS, BOOSTER_PACKS, RARITY_RANK, resolveWeaponItem } from '../data/gameCatalogData';
+import { ALL_WEAPON_ITEMS, BOOSTER_PACKS, RARITY_RANK, resolveWeaponItem, hasWeaponInInventory, resolveArenaWeaponId } from '../data/gameCatalogData';
 import { 
   getActiveGoogleSlideSubtopics, 
   saveGoogleSlidesOverride, 
@@ -934,7 +934,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         s => s.id === 'cultist' || (gameProfile?.unlockedSkins || []).includes(s.id)
       ).length;
       const unlockedWeaponsCount = ALL_WEAPON_ITEMS.filter(
-        w => w.price === 0 || w.id === 'wpn_starter_blaster' || w.id === 'bunsen_burner' || (gameProfile?.inventory || []).includes(w.id)
+        w => hasWeaponInInventory(gameProfile?.inventory, w.id)
       ).length;
       const pendingPacksCount = Object.values(gameProfile?.giftedPacks || {}).reduce(
         (sum, n) => sum + Math.max(0, Number(n) || 0),
@@ -3678,7 +3678,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
         const effectiveLevel = Math.max(activeGameProfile?.level || 1, xpProgress.level);
         const studentGold = activeGameProfile?.gold ?? 100;
         const studentUnlockedSkins = activeGameProfile?.unlockedSkins || ['cultist'];
-        const studentInventory = activeGameProfile?.inventory || ['cultist', 'wpn_starter_blaster', 'bunsen_burner'];
+        const studentInventory = activeGameProfile?.inventory || ['cultist', 'bunsen_burner'];
         const equippedSkinId = activeGameProfile?.equippedSkin || activeGameProfile?.avatar || 'cultist';
         const equippedSkinDef = getFantasySkin(equippedSkinId);
         const equippedWeaponDef = resolveWeaponItem(activeGameProfile?.equippedWeapon);
@@ -3703,7 +3703,7 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
           (a, b) => (RARITY_RANK[a.rarity]?.rank ?? 99) - (RARITY_RANK[b.rarity]?.rank ?? 99)
         );
         const unlockedWeaponCountModal = sortedWeaponsForModal.filter(
-          w => w.price === 0 || w.id === 'wpn_starter_blaster' || w.id === 'bunsen_burner' || studentInventory.includes(w.id)
+          w => hasWeaponInInventory(studentInventory, w.id)
         ).length;
 
         return (
@@ -4320,8 +4320,8 @@ export const InstructorDashboard: React.FC<InstructorDashboardProps> = ({
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                       {sortedWeaponsForModal.map((weapon) => {
-                        const isOwned = weapon.price === 0 || weapon.id === 'wpn_starter_blaster' || weapon.id === 'bunsen_burner' || studentInventory.includes(weapon.id);
-                        const isEquipped = activeGameProfile?.equippedWeapon === weapon.id;
+                        const isOwned = hasWeaponInInventory(studentInventory, weapon.id);
+                        const isEquipped = resolveArenaWeaponId(activeGameProfile?.equippedWeapon) === weapon.id;
                         const rankInfo = RARITY_RANK[weapon.rarity];
 
                         return (

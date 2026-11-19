@@ -79,6 +79,7 @@ export function getQuizForSubtopic(
     attemptNumber?: number;
     count?: number;
     resetHistory?: boolean;
+    tier?: string;
   }
 ): QuizQuestion[] {
   return getSubtopicQuiz(subtopicCode, options);

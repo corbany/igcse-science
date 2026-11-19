@@ -234,6 +234,24 @@ export const BADGE_DEFINITIONS: Omit<StudentBadge, 'unlockedAt' | 'progress'>[] 
 ];
 
 /**
+ * Returns local calendar date key in YYYY-MM-DD format so daily streaks match the student's calendar day.
+ */
+export function getLocalDateKey(date: Date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Returns the previous local calendar date key in YYYY-MM-DD format (DST-safe).
+ */
+export function getYesterdayDateKey(now: Date = new Date()): string {
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  return getLocalDateKey(yesterday);
+}
+
+/**
  * Calculates current study streak based on last active dates
  */
 export function calculateStreak(progress: StudentProgress): {
@@ -241,9 +259,12 @@ export function calculateStreak(progress: StudentProgress): {
   longestStreak: number;
   lastStreakDate: string;
   activeDates: string[];
+  isNewDay: boolean;
+  isConsecutive: boolean;
 } {
-  const today = new Date().toISOString().split('T')[0];
-  const yesterdayDate = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+  const now = new Date();
+  const today = getLocalDateKey(now);
+  const yesterdayDate = getYesterdayDateKey(now);
 
   const existingDates = new Set(progress.activeDates || []);
   existingDates.add(today);
@@ -252,17 +273,21 @@ export function calculateStreak(progress: StudentProgress): {
   let currentStreak = progress.currentStreak || 0;
   let longestStreak = progress.longestStreak || 0;
   const lastDate = progress.lastStreakDate;
+  let isNewDay = true;
+  let isConsecutive = false;
 
   if (!lastDate) {
-    currentStreak = 1;
+    currentStreak = Math.max(1, currentStreak);
   } else if (lastDate === today) {
     // Already counted today
     currentStreak = Math.max(1, currentStreak);
+    isNewDay = false;
   } else if (lastDate === yesterdayDate) {
     // Consecutive day
-    currentStreak += 1;
+    currentStreak = Math.max(1, currentStreak) + 1;
+    isConsecutive = true;
   } else {
-    // Gap day
+    // Gap day - reset streak to 1
     currentStreak = 1;
   }
 
@@ -272,7 +297,9 @@ export function calculateStreak(progress: StudentProgress): {
     currentStreak,
     longestStreak,
     lastStreakDate: today,
-    activeDates
+    activeDates,
+    isNewDay,
+    isConsecutive
   };
 }
 

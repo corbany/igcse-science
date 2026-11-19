@@ -31,6 +31,7 @@ import {
   setLobbyReady,
   SHOP_ITEMS 
 } from '../services/firebaseGameService';
+import { resolveWeaponItem } from '../data/gameCatalogData';
 
 interface GameLobbyProps {
   user: UserProfile;
@@ -166,7 +167,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
   };
 
   const equippedSkin = SHOP_ITEMS.find(i => i.id === (gameProfile?.avatar || 'cyber_scientist')) || SHOP_ITEMS[0];
-  const equippedWeapon = SHOP_ITEMS.find(i => i.id === (gameProfile?.equippedWeapon || 'bunsen_burner')) || SHOP_ITEMS[6];
+  const equippedWeapon = resolveWeaponItem(gameProfile?.equippedWeapon);
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-12 text-left">
@@ -373,7 +374,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {lobbyPlayers.map((player, idx) => {
                 const skin = SHOP_ITEMS.find(i => i.id === player.avatar) || SHOP_ITEMS[0];
-                const weapon = SHOP_ITEMS.find(i => i.id === player.equippedWeapon) || SHOP_ITEMS[6];
+                const weapon = resolveWeaponItem(player.equippedWeapon);
                 const isMe = player.uid === user.id;
 
                 return (

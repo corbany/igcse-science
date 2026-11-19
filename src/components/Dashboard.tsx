@@ -42,7 +42,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onNavigateToClasses
 }) => {
   const completedLessonsCount = (progress.completedLessons || []).length;
-  const pendingTasks = tasks.filter(t => t.submission?.status !== 'completed');
+  const pendingTasks = tasks.filter(t => t.status !== 'ended' && t.submission?.status !== 'completed');
   const completedTasks = tasks.filter(t => t.submission?.status === 'completed');
 
   // Calculate high-level traffic light counts

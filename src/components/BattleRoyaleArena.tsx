@@ -406,6 +406,16 @@ type WeaponVFX =
       x: number;
       y: number;
       radius: number;
+      ownerId?: string;
+      implodeDamage?: number;
+      startedAt: number;
+      durationMs: number;
+    }
+  | {
+      id: string;
+      kind: 'chain_arc';
+      points: Array<{ x: number; y: number }>;
+      color: string;
       startedAt: number;
       durationMs: number;
     }
@@ -3539,6 +3549,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const speedBoostUntilRef = useRef<number>(0);
   const frostSlowUntilRef = useRef<number>(0);
   const enemyFrostSlowUntilRef = useRef<Record<string, number>>({});
+  const lastVortexPullNoticeRef = useRef<number>(0);
   const lastShotTimeRef = useRef<number>(0);
 
   // Skin Special Ability Refs (High-Frequency Loop Safe)
@@ -3749,6 +3760,35 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     brittleGuardTriggered?: boolean;
     bricksGained?: number;
   }> => {
+    if (targetUid.startsWith('dummy_')) {
+      const target = playerByUidRef.current.get(targetUid);
+      if (target && target.isAlive) {
+        let rem = Math.max(1, Math.round(damage));
+        let sh = target.shield || 0;
+        let hp = target.hp ?? 100;
+        if (!isStorm && sh > 0) {
+          if (sh >= rem) {
+            sh -= rem;
+            rem = 0;
+          } else {
+            rem -= sh;
+            sh = 0;
+          }
+        }
+        hp = Math.max(0, hp - rem);
+        target.shield = sh;
+        target.hp = hp;
+        target.isAlive = hp > 0;
+        if (chillMs > 0 && hp > 0) {
+          target.frostSlowUntil = Math.max(target.frostSlowUntil || 0, Date.now() + chillMs);
+        }
+        if (hp <= 0) {
+          setArenaPlayers([...arenaPlayersRef.current]);
+        }
+        return { newHp: hp, newShield: sh, killed: hp <= 0 };
+      }
+      return { newHp: 0, newShield: 0, killed: false };
+    }
     if (wsConnectedRef.current && wsClientRef.current) {
       wsClientRef.current.sendHit(targetUid, damage, attackerUid, isStorm, chillMs);
       const target = playerByUidRef.current.get(targetUid);
@@ -4442,7 +4482,12 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           if (motion) {
             motion.attackUntil = nowMs + 260;
           }
-          soundEngine.playSpatialShoot(shot.weaponId, shot.x, shot.y, playerPosRef.current.x, playerPosRef.current.y);
+          const isChainImpactOnly = !Array.isArray(shot.projectiles) && Array.isArray(shot.vfx) && shot.vfx.some(v => v?.kind === 'chain_arc');
+          if (isChainImpactOnly) {
+            soundEngine.playSpatialHit(shot.x, shot.y, playerPosRef.current.x, playerPosRef.current.y);
+          } else {
+            soundEngine.playSpatialShoot(shot.weaponId, shot.x, shot.y, playerPosRef.current.x, playerPosRef.current.y);
+          }
           if (Array.isArray(shot.vfx)) {
             for (const v of shot.vfx) {
               pushWeaponVfx({ ...v, startedAt: nowMs });
@@ -6144,19 +6189,6 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               vfx: [vortexMuzzle]
             });
           }
-
-          arenaPlayersRef.current.forEach(p => {
-            if (p.uid !== user.id && p.isAlive && (p.hp === undefined || p.hp > 0)) {
-              const d = Math.hypot(p.x - worldMouseX, p.y - worldMouseY);
-              if (d < 180) {
-                spawnParticles(p.x, p.y, '#a855f7', 'spark', 10, 5);
-                emitDamagePlayer(p.uid, altDmg, user.id).then(res => {
-                  if (!wsConnectedRef.current && res.killed) setKills(k => k + 1);
-                });
-                addFloatingText(p.x, p.y - 30, `-${altDmg} VORTEX CRUSH`, '#c084fc');
-              }
-            }
-          });
           break;
         }
 
@@ -6247,7 +6279,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             y: worldMouseY,
             radius: 160,
             startedAt: now,
-            durationMs: 260
+            durationMs: 550
           };
           pushWeaponVfx(lockVfx);
           if (wsConnectedRef.current && wsClientRef.current) {
@@ -6322,7 +6354,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 }
               }
             });
-          }, 250);
+          }, 550);
           break;
         }
       }
@@ -6709,6 +6741,41 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           }
         } else {
           isLocallyMovingRef.current = false;
+        }
+
+        // Gravitational Vortex gravity-well pull: drags enemies within radius toward vortex center until it fades
+        for (let vi = 0; vi < weaponVfxRef.current.length; vi++) {
+          const vfx = weaponVfxRef.current[vi];
+          if (vfx.kind !== 'vortex') continue;
+          if (now - vfx.startedAt >= vfx.durationMs) continue;
+          if (vfx.ownerId === user.id) continue;
+          const vDist = Math.hypot(vfx.x - px, vfx.y - py);
+          if (vDist < vfx.radius && vDist > 8) {
+            const pullSpeed = 190 + (1 - vDist / vfx.radius) * 165;
+            const pullDx = ((vfx.x - px) / vDist) * pullSpeed * dt;
+            const pullDy = ((vfx.y - py) / vDist) * pullSpeed * dt;
+            if (pullDx !== 0) {
+              const candX = Math.max(35, Math.min(MAP_SIZE - 35, px + pullDx));
+              if (!isPositionBlocked(candX, py, pullDx, 0)) {
+                px = candX;
+              }
+            }
+            if (pullDy !== 0) {
+              const candY = Math.max(35, Math.min(MAP_SIZE - 35, py + pullDy));
+              if (!isPositionBlocked(px, candY, 0, pullDy)) {
+                py = candY;
+              }
+            }
+            playerPosRef.current.x = px;
+            playerPosRef.current.y = py;
+            if (Math.random() < 0.38 * frameScale) {
+              spawnParticles(px, py, '#c084fc', 'electric', 1, 1.8);
+            }
+            if (now - lastVortexPullNoticeRef.current > 1400) {
+              lastVortexPullNoticeRef.current = now;
+              addFloatingText(px, py - 30, '🌀 GRAVITY WELL!', '#e879f9');
+            }
+          }
         }
 
         // Unstuck safeguard: building walls/roofs & city walls (via SpatialWorldIndex)
@@ -7450,6 +7517,79 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                     }
                   });
                 }
+
+                // Tesla Arc Disruptor: jump lightning between up to 3 consecutive targets within 215px perimeter
+                if (p.weaponId === 'tesla_coil' && !p.isAlt) {
+                  const CHAIN_PERIMETER_PX = 215;
+                  const chainMultipliers = [0.8, 0.65];
+                  const chainedUids = new Set<string>([enemy.uid]);
+                  const chainPoints: Array<{ x: number; y: number }> = [{ x: enemy.x, y: enemy.y }];
+                  let anchorX = enemy.x;
+                  let anchorY = enemy.y;
+
+                  for (let hop = 0; hop < 2; hop++) {
+                    let bestTarget: ArenaPlayer | null = null;
+                    let bestDist = CHAIN_PERIMETER_PX;
+                    for (const cand of arenaPlayersRef.current) {
+                      if (
+                        cand.uid !== p.ownerId &&
+                        cand.isAlive &&
+                        (cand.hp === undefined || cand.hp > 0) &&
+                        !chainedUids.has(cand.uid)
+                      ) {
+                        const d = Math.hypot(cand.x - anchorX, cand.y - anchorY);
+                        if (d <= bestDist) {
+                          bestDist = d;
+                          bestTarget = cand;
+                        }
+                      }
+                    }
+                    if (!bestTarget) break;
+
+                    chainedUids.add(bestTarget.uid);
+                    chainPoints.push({ x: bestTarget.x, y: bestTarget.y });
+                    const arcDmg = Math.max(1, Math.round(p.damage * chainMultipliers[hop]));
+                    spawnParticles(bestTarget.x, bestTarget.y, '#38bdf8', 'electric', 10, 4.5);
+                    addFloatingText(bestTarget.x, bestTarget.y - 32, `-${arcDmg} ⚡ ARC #${hop + 2}`, '#38bdf8');
+
+                    if (isMyShot || !wsConnectedRef.current) {
+                      const chainedEnemy = bestTarget;
+                      emitDamagePlayer(chainedEnemy.uid, arcDmg, p.ownerId).then(res => {
+                        if (!wsConnectedRef.current && res.killed && isMyShot) {
+                          setKills(prev => prev + 1);
+                          addFloatingText(chainedEnemy.x, chainedEnemy.y - 48, 'ELIMINATED! ⚡', '#fbbf24');
+                        }
+                      });
+                    }
+                    anchorX = bestTarget.x;
+                    anchorY = bestTarget.y;
+                  }
+
+                  if (chainPoints.length >= 2) {
+                    const chainVfx = {
+                      id: `vfx_tesla_chain_${now}_${Math.random()}`,
+                      kind: 'chain_arc' as const,
+                      points: chainPoints,
+                      color: '#38bdf8',
+                      startedAt: now,
+                      durationMs: 300
+                    };
+                    pushWeaponVfx(chainVfx);
+                    if (isMyShot && wsConnectedRef.current && wsClientRef.current) {
+                      wsClientRef.current.sendShot({
+                        ownerId: user.id,
+                        weaponId: 'tesla_coil',
+                        isAlt: false,
+                        x: enemy.x,
+                        y: enemy.y,
+                        angle: 0,
+                        color: '#38bdf8',
+                        vfx: [chainVfx]
+                      });
+                    }
+                  }
+                }
+
                 if (!canPierceEnemies) break;
               }
             }
@@ -7533,21 +7673,26 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               });
               spawnParticles(p.x, p.y, '#67e8f9', 'spark', 12, 5);
             } else if (p.altType === 'vortex') {
+              const vortexRadius = 205;
+              const openDmg = Math.max(15, Math.round(p.damage * 0.35));
+              const implodeDmg = Math.max(25, Math.round(p.damage * 0.65));
               pushWeaponVfx({
                 id: `vfx_vortex_hole_${now}_${Math.random()}`,
                 kind: 'vortex',
                 x: p.x,
                 y: p.y,
-                radius: 175,
+                radius: vortexRadius,
+                ownerId: p.ownerId,
+                implodeDamage: implodeDmg,
                 startedAt: now,
-                durationMs: 1850
+                durationMs: 2500
               });
               pushWeaponVfx({
                 id: `vfx_vortex_burst_${now}_${Math.random()}`,
                 kind: 'shockwave',
                 x: p.x,
                 y: p.y,
-                maxRadius: 180,
+                maxRadius: vortexRadius,
                 color: '#a855f7',
                 secondaryColor: '#f0abfc',
                 ringCount: 3,
@@ -7555,7 +7700,20 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 startedAt: now,
                 durationMs: 420
               });
-              spawnParticles(p.x, p.y, '#c084fc', 'electric', 20, 6);
+              spawnParticles(p.x, p.y, '#c084fc', 'electric', 22, 6);
+              if (isMyShot || !wsConnectedRef.current) {
+                arenaPlayersRef.current.forEach(en => {
+                  if (en.uid !== p.ownerId && en.isAlive && (en.hp === undefined || en.hp > 0)) {
+                    if (Math.hypot(en.x - p.x, en.y - p.y) <= vortexRadius) {
+                      emitDamagePlayer(en.uid, openDmg, p.ownerId).then(res => {
+                        if (!wsConnectedRef.current && res.killed && isMyShot) setKills(k => k + 1);
+                      });
+                      spawnParticles(en.x, en.y, '#a855f7', 'spark', 8, 4.5);
+                      addFloatingText(en.x, en.y - 30, `-${openDmg} 🌀 VORTEX`, '#c084fc');
+                    }
+                  }
+                });
+              }
             }
           } else if (hit) {
             // Signature Primary Impact Bursts per weapon
@@ -7625,10 +7783,44 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
       projectilesRef.current = activeProjectiles;
 
-      // Update active WeaponVFX (process persistent hazard pool ticks & vortex wisps, prune expired)
+      // Update active WeaponVFX (process persistent hazard pool ticks, gravity well pulls, & implosion)
       const activeWeaponVfx: WeaponVFX[] = [];
       for (const vfx of weaponVfxRef.current) {
-        if (now - vfx.startedAt >= vfx.durationMs) continue;
+        if (now - vfx.startedAt >= vfx.durationMs) {
+          if (vfx.kind === 'vortex') {
+            activeWeaponVfx.push({
+              id: `vfx_vortex_implode_${now}_${Math.random()}`,
+              kind: 'shockwave',
+              x: vfx.x,
+              y: vfx.y,
+              maxRadius: vfx.radius * 0.92,
+              color: '#a855f7',
+              secondaryColor: '#ffffff',
+              ringCount: 3,
+              lineWidth: 5,
+              startedAt: now,
+              durationMs: 360
+            });
+            spawnParticles(vfx.x, vfx.y, '#e879f9', 'electric', 24, 6.5);
+            if (vfx.ownerId === user.id || (!wsConnectedRef.current && vfx.ownerId)) {
+              const implodeDmg = vfx.implodeDamage || 40;
+              arenaPlayersRef.current.forEach(en => {
+                if (en.uid !== vfx.ownerId && en.isAlive && (en.hp === undefined || en.hp > 0)) {
+                  if (Math.hypot(en.x - vfx.x, en.y - vfx.y) <= vfx.radius + 10) {
+                    emitDamagePlayer(en.uid, implodeDmg, vfx.ownerId).then(res => {
+                      if (!wsConnectedRef.current && res.killed && vfx.ownerId === user.id) {
+                        setKills(prev => prev + 1);
+                      }
+                    });
+                    spawnParticles(en.x, en.y, '#a855f7', 'electric', 10, 4.5);
+                    addFloatingText(en.x, en.y - 30, `-${implodeDmg} 🌀 IMPLOSION!`, '#e879f9');
+                  }
+                }
+              });
+            }
+          }
+          continue;
+        }
         if (vfx.kind === 'hazard_pool') {
           if (Math.random() < 0.32) {
             const ang = Math.random() * Math.PI * 2;
@@ -7660,23 +7852,50 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               }
             });
           }
-        } else if (vfx.kind === 'vortex' && Math.random() < 0.45) {
-          const ang = Math.random() * Math.PI * 2;
-          const r = vfx.radius * 0.85;
-          const sx = vfx.x + Math.cos(ang) * r;
-          const sy = vfx.y + Math.sin(ang) * r;
-          particlesRef.current.push({
-            x: sx,
-            y: sy,
-            vx: -Math.cos(ang) * 4.5,
-            vy: -Math.sin(ang) * 4.5,
-            life: 0,
-            maxLife: 18,
-            color: '#c084fc',
-            size: 2.5,
-            alpha: 0.9,
-            type: 'electric'
-          });
+        } else if (vfx.kind === 'vortex') {
+          // Pull training dummies / offline enemies smoothly toward the gravity well center until it fades
+          for (const en of arenaPlayersRef.current) {
+            if (
+              en.uid !== vfx.ownerId &&
+              en.isAlive &&
+              (en.hp === undefined || en.hp > 0) &&
+              (en.uid.startsWith('dummy_') || !wsConnectedRef.current)
+            ) {
+              const ed = Math.hypot(vfx.x - en.x, vfx.y - en.y);
+              if (ed < vfx.radius && ed > 8) {
+                const pullSpd = 190 + (1 - ed / vfx.radius) * 165;
+                const pdx = ((vfx.x - en.x) / ed) * pullSpd * dt;
+                const pdy = ((vfx.y - en.y) / ed) * pullSpd * dt;
+                if (pdx !== 0 && !isPositionBlocked(en.x + pdx, en.y, pdx, 0)) {
+                  en.x += pdx;
+                }
+                if (pdy !== 0 && !isPositionBlocked(en.x, en.y + pdy, 0, pdy)) {
+                  en.y += pdy;
+                }
+                if (Math.random() < 0.25 * frameScale) {
+                  spawnParticles(en.x, en.y, '#c084fc', 'electric', 1, 1.5);
+                }
+              }
+            }
+          }
+          if (Math.random() < 0.45) {
+            const ang = Math.random() * Math.PI * 2;
+            const r = vfx.radius * 0.85;
+            const sx = vfx.x + Math.cos(ang) * r;
+            const sy = vfx.y + Math.sin(ang) * r;
+            particlesRef.current.push({
+              x: sx,
+              y: sy,
+              vx: -Math.cos(ang) * 4.5,
+              vy: -Math.sin(ang) * 4.5,
+              life: 0,
+              maxLife: 18,
+              color: '#c084fc',
+              size: 2.5,
+              alpha: 0.9,
+              type: 'electric'
+            });
+          }
         }
         activeWeaponVfx.push(vfx);
       }
@@ -9856,6 +10075,41 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           ctx.beginPath();
           ctx.ellipse(vfx.x, vfx.y, beamHalfW * 1.45, beamHalfW * 0.65, 0, 0, Math.PI * 2);
           ctx.fill();
+        } else if (vfx.kind === 'chain_arc' && vfx.points.length >= 2) {
+          ctx.globalAlpha = alpha;
+          ctx.shadowColor = vfx.color || '#38bdf8';
+          ctx.shadowBlur = 14;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          for (let pass = 0; pass < 2; pass++) {
+            ctx.strokeStyle = pass === 0 ? (vfx.color || '#38bdf8') : '#ffffff';
+            ctx.lineWidth = pass === 0 ? 5.5 * alpha + 1.5 : 2.2 * alpha + 0.6;
+            ctx.beginPath();
+            for (let pi = 0; pi < vfx.points.length - 1; pi++) {
+              const a = vfx.points[pi];
+              const b = vfx.points[pi + 1];
+              const dx = b.x - a.x;
+              const dy = b.y - a.y;
+              const len = Math.hypot(dx, dy) || 1;
+              const nx = -dy / len;
+              const ny = dx / len;
+              if (pi === 0) ctx.moveTo(a.x, a.y);
+              const segs = 4;
+              for (let s = 1; s < segs; s++) {
+                const f = s / segs;
+                const jitter = Math.sin(now / 22 + pi * 7 + s * 11 + pass * 3) * 14 * alpha;
+                ctx.lineTo(a.x + dx * f + nx * jitter, a.y + dy * f + ny * jitter);
+              }
+              ctx.lineTo(b.x, b.y);
+            }
+            ctx.stroke();
+          }
+          for (const pt of vfx.points) {
+            ctx.fillStyle = '#e0f2fe';
+            ctx.beginPath();
+            ctx.arc(pt.x, pt.y, 5.5 * alpha + 1.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
         ctx.restore();
       });

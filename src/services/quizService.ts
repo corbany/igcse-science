@@ -1,6 +1,6 @@
 import { QuizQuestion, ScienceSubject } from '../types';
 import { generateDynamicSyllabusQuestions } from '../data/syllabusQuestionsBank';
-import { isValidQuizQuestion } from '../data/quizSanitizer';
+import { isValidQuizQuestion, matchesExamTier } from '../data/quizSanitizer';
 
 export interface SyllabusTopicOption {
   code: string;
@@ -70,7 +70,7 @@ export interface GenerateQuizParams {
   topics: string[];
   subtopics?: string[];
   numQuestions: number;
-  tier?: 'Extended' | 'Core' | 'Mixed';
+  tier?: 'Extended' | 'Core';
   attemptNumber?: number;
 }
 
@@ -111,6 +111,7 @@ export async function generateAIQuiz(params: GenerateQuizParams): Promise<QuizGe
   const clampedNum = Math.min(40, Math.max(1, Math.round(params.numQuestions || 10)));
   const targetTopics = params.topics.length > 0 ? params.topics : ALL_SYLLABUS_TOPICS.map(t => t.code);
   const targetSubtopics = params.subtopics && params.subtopics.length > 0 ? params.subtopics : [];
+  const selectedTier: 'Extended' | 'Core' = params.tier === 'Core' ? 'Core' : 'Extended';
   const sessionSeed = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}-att-${params.attemptNumber || 1}`;
 
   // If subtopics are specified, combine them into targetTopics for fallback/backend
@@ -126,7 +127,7 @@ export async function generateAIQuiz(params: GenerateQuizParams): Promise<QuizGe
         topics: targetTopics,
         subtopics: targetSubtopics,
         numQuestions: clampedNum,
-        tier: params.tier || 'Extended',
+        tier: selectedTier,
         seed: sessionSeed
       })
     });
@@ -134,15 +135,17 @@ export async function generateAIQuiz(params: GenerateQuizParams): Promise<QuizGe
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.quiz) && data.quiz.length > 0) {
-        // Enforce strict syllabus compliance & filter malformed questions
-        const filtered = (data.quiz as QuizQuestion[]).filter(q => !isGeneticsQuestion(q) && isValidQuizQuestion(q));
+        // Enforce strict syllabus & curriculum tier compliance & filter malformed questions
+        const filtered = (data.quiz as QuizQuestion[]).filter(
+          q => !isGeneticsQuestion(q) && isValidQuizQuestion(q) && matchesExamTier(q, selectedTier)
+        );
         const unique = deduplicateQuestionsList(filtered);
 
         if (unique.length < clampedNum) {
           const needed = clampedNum - unique.length;
           const seenStems = new Set(unique.map(q => q.question.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()));
-          const supplement = generateClientFallbackQuiz(effectiveRequestTopics, needed * 2, params.tier)
-            .filter(q => !isGeneticsQuestion(q) && isValidQuizQuestion(q));
+          const supplement = generateClientFallbackQuiz(effectiveRequestTopics, needed * 2, selectedTier)
+            .filter(q => !isGeneticsQuestion(q) && isValidQuizQuestion(q) && matchesExamTier(q, selectedTier));
           
           for (const sq of supplement) {
             const norm = sq.question.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -165,8 +168,8 @@ export async function generateAIQuiz(params: GenerateQuizParams): Promise<QuizGe
   }
 
   // Fallback to high-fidelity client-side generation covering all 33 topics
-  const fallbackQuestions = generateClientFallbackQuiz(effectiveRequestTopics, clampedNum, params.tier)
-    .filter(q => !isGeneticsQuestion(q) && isValidQuizQuestion(q));
+  const fallbackQuestions = generateClientFallbackQuiz(effectiveRequestTopics, clampedNum, selectedTier)
+    .filter(q => !isGeneticsQuestion(q) && isValidQuizQuestion(q) && matchesExamTier(q, selectedTier));
   return {
     questions: deduplicateQuestionsList(fallbackQuestions).slice(0, clampedNum),
     source: 'syllabus-engine'
@@ -178,9 +181,12 @@ export async function generateAIQuiz(params: GenerateQuizParams): Promise<QuizGe
  */
 export function generateClientFallbackQuiz(topics: string[], count: number, tier: string = 'Extended'): QuizQuestion[] {
   const cleanTopics = topics.length > 0 ? topics : ALL_SYLLABUS_TOPICS.map(t => t.code);
+  const effectiveTier: 'Extended' | 'Core' = String(tier || 'Extended').trim().toLowerCase() === 'core' ? 'Core' : 'Extended';
   const uniqueSeed = `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-  const questions = generateDynamicSyllabusQuestions(cleanTopics, count, tier, uniqueSeed);
-  return deduplicateQuestionsList(questions.filter(q => !isGeneticsQuestion(q) && isValidQuizQuestion(q)));
+  const questions = generateDynamicSyllabusQuestions(cleanTopics, count, effectiveTier, uniqueSeed);
+  return deduplicateQuestionsList(
+    questions.filter(q => !isGeneticsQuestion(q) && isValidQuizQuestion(q) && matchesExamTier(q, effectiveTier))
+  );
 }
 
 function createQuestionTemplate(

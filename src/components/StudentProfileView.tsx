@@ -13,6 +13,7 @@ import {
   calculateStudentLevel, 
   calculateStreak 
 } from '../services/badgeService';
+import { calculateStreakGoldBonus } from '../services/firebaseGameService';
 import { VirtualMedalBadge } from './VirtualMedalBadge';
 import { 
   MedalTierIcon, 
@@ -275,7 +276,9 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Current Streak</span>
             </div>
             <div className="text-xl font-black text-slate-900">{streakInfo.currentStreak} <span className="text-xs font-normal text-slate-500">Days</span></div>
-            <p className="text-[10px] text-slate-500 mt-0.5 font-medium">Best record: {streakInfo.longestStreak} days</p>
+            <p className="text-[10px] text-slate-500 mt-0.5 font-medium">
+              Best: {streakInfo.longestStreak}d • Next day: <span className="text-amber-700 font-bold">+{calculateStreakGoldBonus(Math.max(1, streakInfo.currentStreak) + 1)} Gold</span>
+            </p>
           </div>
 
           <div className="bg-[#FDFBF7] rounded-2xl p-3.5 border border-slate-200 shadow-xs">
