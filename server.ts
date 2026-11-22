@@ -7,7 +7,7 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
 import { WebSocketServer } from 'ws';
-import { createBattleWebSocketServer, applyServerBattleControl } from './battleRoom.ts';
+import { createBattleWebSocketServer, applyServerBattleControl, getServerBattleState } from './battleRoom.ts';
 import { attachChallengeWebSocketHandlers } from './challengeRoom.ts';
 
 dotenv.config();
@@ -128,13 +128,26 @@ app.get(['/healthz', '/api/health'], (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.get('/api/battle/state', (_req, res) => {
+  res.json(getServerBattleState());
+});
+
 app.post('/api/battle/control', (req, res) => {
   try {
-    const { action, state, players, crates, crate } = req.body || {};
-    if (action !== 'start' && action !== 'end' && action !== 'reset' && action !== 'crate_drop') {
+    const { action, state, players, crates, crate, lobbyPlayer, config } = req.body || {};
+    if (
+      action !== 'start' &&
+      action !== 'end' &&
+      action !== 'reset' &&
+      action !== 'crate_drop' &&
+      action !== 'lobby_open' &&
+      action !== 'lobby_join' &&
+      action !== 'lobby_leave' &&
+      action !== 'config_update'
+    ) {
       return res.status(400).json({ error: 'Invalid battle control action' });
     }
-    applyServerBattleControl({ action, state, players, crates, crate });
+    applyServerBattleControl({ action, state, players, crates, crate, lobbyPlayer, config });
     return res.json({ ok: true });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message || 'Battle control sync failed' });

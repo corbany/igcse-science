@@ -86,18 +86,20 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
   useEffect(() => {
     const unsubConfig = subscribeToBattleConfig((cfg) => {
       setConfig(cfg);
-      if (cfg.nextEventDate) {
-        // Format for datetime-local input: YYYY-MM-DDTHH:mm
-        try {
-          const d = new Date(cfg.nextEventDate);
-          const pad = (n: number) => String(n).padStart(2, '0');
-          const localIso = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-          setEditDate(localIso);
-        } catch {
-          // ignore
+      try {
+        const d = cfg.nextEventDate
+          ? new Date(cfg.nextEventDate)
+          : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        if (!cfg.nextEventDate) {
+          d.setHours(15, 0, 0, 0);
         }
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const localIso = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        setEditDate(localIso);
+      } catch {
+        // ignore
       }
-      setEditTitle(cfg.title || '');
+      setEditTitle(cfg.title || 'Monthly Cambridge 0653 Revision Royale');
       setEditSeason(cfg.season || 1);
     });
 
@@ -135,16 +137,35 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
 
   const handleSaveSchedule = async (e: React.FormEvent) => {
     e.preventDefault();
+    const parsedDate = editDate ? new Date(editDate) : null;
+    if (!parsedDate || isNaN(parsedDate.getTime())) {
+      setFeedback('Please choose a valid event date and time.');
+      return;
+    }
     try {
       await updateBattleConfig({
-        nextEventDate: new Date(editDate).toISOString(),
-        title: editTitle,
-        season: Number(editSeason)
+        nextEventDate: parsedDate.toISOString(),
+        title: editTitle.trim() || 'Monthly Cambridge 0653 Revision Royale',
+        season: Number(editSeason) || 1,
+        isScheduled: true
       });
-      setFeedback('Tournament schedule updated successfully!');
-      setTimeout(() => setFeedback(null), 3000);
+      setFeedback('Monthly tournament scheduled! Countdown timer is now locked to the top of the website.');
+      setTimeout(() => setFeedback(null), 4000);
     } catch (e: any) {
       setFeedback(`Failed to update schedule: ${e.message}`);
+    }
+  };
+
+  const handleClearSchedule = async () => {
+    try {
+      await updateBattleConfig({
+        isScheduled: false,
+        nextEventDate: ''
+      });
+      setFeedback('Monthly tournament schedule cleared. Top countdown timer hidden.');
+      setTimeout(() => setFeedback(null), 4000);
+    } catch (e: any) {
+      setFeedback(`Failed to clear schedule: ${e.message}`);
     }
   };
 
@@ -495,11 +516,20 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
         
         {/* Event Schedule Editor */}
         <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
-          <div className="flex items-center gap-2.5 border-b border-slate-200 pb-3">
-            <Calendar className="w-5 h-5 text-slate-700" />
-            <h2 className="text-base font-bold text-slate-900 tracking-tight">
-              Schedule Next Monthly Tournament
-            </h2>
+          <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-3 flex-wrap">
+            <div className="flex items-center gap-2.5">
+              <Calendar className="w-5 h-5 text-slate-700" />
+              <h2 className="text-base font-bold text-slate-900 tracking-tight">
+                Schedule Next Monthly Tournament
+              </h2>
+            </div>
+            <span className={`text-[10px] font-bold uppercase px-2.5 py-0.5 rounded-full border ${
+              config?.isScheduled && config?.nextEventDate
+                ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                : 'bg-slate-100 text-slate-600 border-slate-300'
+            }`}>
+              {config?.isScheduled && config?.nextEventDate ? 'Countdown Active on Top Bar' : 'Not Scheduled'}
+            </span>
           </div>
 
           <form onSubmit={handleSaveSchedule} className="space-y-3 text-xs">
@@ -538,12 +568,23 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
               </div>
             </div>
 
-            <button
-              type="submit"
-              className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold transition shadow-xs mt-2 cursor-pointer border border-black"
-            >
-              Update Scheduled Date
-            </button>
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="submit"
+                className="flex-1 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold transition shadow-xs cursor-pointer border border-black"
+              >
+                {config?.isScheduled && config?.nextEventDate ? 'Update Scheduled Date' : 'Schedule Monthly Tournament'}
+              </button>
+              {config?.isScheduled && config?.nextEventDate && (
+                <button
+                  type="button"
+                  onClick={handleClearSchedule}
+                  className="px-3.5 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 font-bold transition cursor-pointer"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           </form>
         </div>
 

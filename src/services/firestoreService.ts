@@ -892,15 +892,17 @@ export async function joinClassWithCode(
 /**
  * Fetch all classes a student is enrolled in
  */
-export async function fetchStudentEnrolledClasses(studentId: string): Promise<ClassItem[]> {
+export async function fetchStudentEnrolledClasses(studentId: string, studentEmail?: string): Promise<ClassItem[]> {
   const enrolledKey = `${LOCAL_ENROLLED_PREFIX}${studentId}`;
   const localEnrolled = getLocalItem<ClassItem[]>(enrolledKey, [])
     .filter(c => c && c.id && c.id !== 'class_default_0653');
+  const cleanEmail = (studentEmail || '').toLowerCase().trim();
 
   try {
     const userRef = doc(db, 'users', studentId);
     const userSnap = await getDoc(userRef);
     const enrolledIds: string[] = (userSnap.exists() && userSnap.data()?.enrolledClassIds) || [];
+    const profileEmail = cleanEmail || (userSnap.exists() ? String(userSnap.data()?.email || '').toLowerCase().trim() : '');
     
     // Filter out any invalid default class IDs
     const validEnrolledIds = enrolledIds.filter(id => id && id !== 'class_default_0653');
@@ -918,22 +920,57 @@ export async function fetchStudentEnrolledClasses(studentId: string): Promise<Cl
       } catch {}
     }
 
-    // Also check if student exists in any class's students subcollection
+    // Also check if student exists in any class's students subcollection (by doc ID, studentId field, or email)
+    let discoveredNewClass = false;
     try {
       const allClassSnap = await getDocs(collection(db, 'classes'));
       for (const cd of allClassSnap.docs) {
         if (cd.id === 'class_default_0653') continue;
         if (!classes.some(c => c.id === cd.id)) {
-          const studentDoc = await getDoc(doc(db, 'classes', cd.id, 'students', studentId));
-          if (studentDoc.exists()) {
+          let matchedDocData: Record<string, any> | null = null;
+          const directStudentDoc = await getDoc(doc(db, 'classes', cd.id, 'students', studentId));
+          if (directStudentDoc.exists()) {
+            matchedDocData = directStudentDoc.data();
+          } else {
+            // Fallback: check subcollection entries in case student was recorded under a prior UID or email
+            const subSnap = await getDocs(collection(db, 'classes', cd.id, 'students'));
+            for (const sd of subSnap.docs) {
+              const sData = sd.data();
+              const docEmail = String(sData?.email || '').toLowerCase().trim();
+              if (
+                sd.id === studentId ||
+                sData?.studentId === studentId ||
+                (profileEmail && docEmail && docEmail === profileEmail)
+              ) {
+                matchedDocData = sData;
+                break;
+              }
+            }
+          }
+
+          if (matchedDocData) {
             const cData = cd.data() as ClassItem;
             if (cData && cData.id && cData.id !== 'class_default_0653') {
               classes.push(cData);
+              discoveredNewClass = true;
+              // Auto-heal direct enrollment doc under current auth UID if missing
+              if (!directStudentDoc.exists()) {
+                setDoc(
+                  doc(db, 'classes', cd.id, 'students', studentId),
+                  { ...matchedDocData, studentId },
+                  { merge: true }
+                ).catch(() => {});
+              }
             }
           }
         }
       }
     } catch {}
+
+    if (discoveredNewClass && userSnap.exists()) {
+      const mergedIds = Array.from(new Set([...validEnrolledIds, ...classes.map(c => c.id)]));
+      updateDoc(userRef, { enrolledClassIds: mergedIds }).catch(() => {});
+    }
 
     setLocalItem(enrolledKey, classes);
     return classes;

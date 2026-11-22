@@ -56,12 +56,33 @@ export interface RoomCrate {
   claimedBy?: string;
 }
 
+export interface RoomLobbyPlayer {
+  uid: string;
+  name: string;
+  avatar: string;
+  equippedWeapon: string;
+  wood: number;
+  brick: number;
+  metal: number;
+  isReady: boolean;
+  joinedAt: string;
+  isSpectator?: boolean;
+}
+
 export interface RoomMatchState {
   status: 'LOBBY' | 'IN_PROGRESS' | 'ENDED';
   isLobbyOpen: boolean;
   startedAt: string | null;
   stormFinalCenter?: { x: number; y: number } | null;
   currentWinner?: { uid: string; name: string; avatar: string } | null;
+}
+
+export interface RoomEventConfig {
+  nextEventDate: string;
+  title: string;
+  description?: string;
+  season: number;
+  isScheduled?: boolean;
 }
 
 interface AttachedSocket extends WebSocket {
@@ -77,10 +98,53 @@ const roomState: RoomMatchState = {
   currentWinner: null
 };
 
+let roomConfig: RoomEventConfig | null = null;
+
 const roomPlayers = new Map<string, RoomPlayer>();
 const roomStructures = new Map<string, RoomStructure>();
 const roomCrates = new Map<string, RoomCrate>();
+const roomLobby = new Map<string, RoomLobbyPlayer>();
 const connectedClients = new Set<AttachedSocket>();
+
+export function getServerBattleState() {
+  return {
+    ...roomState,
+    lobbyPlayers: Array.from(roomLobby.values()),
+    config: roomConfig
+  };
+}
+
+function resolveFullShieldCap(avatarId?: string): number {
+  return getFantasySkin(avatarId || 'cultist').id === 'knight_hero' ? 120 : 100;
+}
+
+function buildSpawnFromLobby(l: RoomLobbyPlayer, idx: number, count: number): RoomPlayer {
+  const angle = (idx / Math.max(1, count)) * 2 * Math.PI;
+  const arenaCenter = 2500;
+  const spawnRadius = 1400;
+  const fullShield = resolveFullShieldCap(l.avatar);
+  return {
+    uid: l.uid,
+    name: l.name || 'Hero',
+    avatar: l.avatar || 'cultist',
+    equippedWeapon: l.equippedWeapon || 'bunsen_burner',
+    x: Math.round(arenaCenter + Math.cos(angle) * spawnRadius),
+    y: Math.round(arenaCenter + Math.sin(angle) * spawnRadius),
+    angle: angle + Math.PI,
+    hp: 100,
+    maxHp: 100,
+    shield: fullShield,
+    maxShield: fullShield,
+    wood: Math.max(10, l.wood || 20),
+    brick: Math.max(10, l.brick || 10),
+    metal: Math.max(5, l.metal || 5),
+    isAlive: true,
+    isSpectator: false,
+    kills: 0,
+    dirty: false,
+    lastUpdateAt: Date.now()
+  };
+}
 
 function computeServerDamageOutcome(
   target: RoomPlayer,
@@ -200,13 +264,30 @@ function maybeCheckLastStandingWinner() {
  * when the instructor clicks Start, End, or Reset from AdminBattleControl or Arena HUD.
  */
 export function applyServerBattleControl(input: {
-  action: 'start' | 'end' | 'reset' | 'crate_drop';
+  action: 'start' | 'end' | 'reset' | 'crate_drop' | 'lobby_open' | 'lobby_join' | 'lobby_leave' | 'config_update';
   state?: Partial<RoomMatchState>;
   players?: RoomPlayer[];
   crates?: RoomCrate[];
   crate?: RoomCrate;
+  lobbyPlayer?: RoomLobbyPlayer;
+  config?: Partial<RoomEventConfig> | null;
 }) {
-  const { action, state, players, crates, crate } = input;
+  const { action, state, players, crates, crate, lobbyPlayer, config } = input;
+  if (action === 'config_update') {
+    if (config) {
+      roomConfig = {
+        nextEventDate: typeof config.nextEventDate === 'string' ? config.nextEventDate : (roomConfig?.nextEventDate || ''),
+        title: typeof config.title === 'string' && config.title ? config.title : (roomConfig?.title || 'Monthly Cambridge 0653 Revision Royale'),
+        description: typeof config.description === 'string' ? config.description : roomConfig?.description,
+        season: typeof config.season === 'number' ? config.season : (roomConfig?.season || 1),
+        isScheduled: config.isScheduled !== undefined ? Boolean(config.isScheduled) : Boolean(config.nextEventDate)
+      };
+    } else {
+      roomConfig = null;
+    }
+    return;
+  }
+
   if (action === 'crate_drop' && crate && crate.id) {
     if (roomCrates.size < 14) {
       roomCrates.set(crate.id, { ...crate, isClaimed: false });
@@ -215,10 +296,50 @@ export function applyServerBattleControl(input: {
     return;
   }
 
+  if (action === 'lobby_open') {
+    const nextOpen = Boolean(state?.isLobbyOpen);
+    roomState.isLobbyOpen = nextOpen;
+    if (!nextOpen && roomState.status !== 'IN_PROGRESS') {
+      roomLobby.clear();
+    }
+    broadcastJson({
+      type: 'match_state',
+      state: { ...roomState }
+    });
+    broadcastJson({
+      type: 'lobby_state',
+      players: Array.from(roomLobby.values())
+    });
+    return;
+  }
+
+  if (action === 'lobby_join' && lobbyPlayer && lobbyPlayer.uid && !lobbyPlayer.isSpectator) {
+    roomLobby.set(lobbyPlayer.uid, {
+      ...lobbyPlayer,
+      isReady: true,
+      joinedAt: lobbyPlayer.joinedAt || new Date().toISOString()
+    });
+    broadcastJson({
+      type: 'lobby_state',
+      players: Array.from(roomLobby.values())
+    });
+    return;
+  }
+
+  if (action === 'lobby_leave' && lobbyPlayer?.uid) {
+    roomLobby.delete(lobbyPlayer.uid);
+    broadcastJson({
+      type: 'lobby_state',
+      players: Array.from(roomLobby.values())
+    });
+    return;
+  }
+
   if (action === 'reset') {
     roomPlayers.clear();
     roomStructures.clear();
     roomCrates.clear();
+    roomLobby.clear();
     roomState.status = state?.status || 'LOBBY';
     roomState.isLobbyOpen = Boolean(state?.isLobbyOpen);
     roomState.startedAt = null;
@@ -228,27 +349,50 @@ export function applyServerBattleControl(input: {
       type: 'match_reset',
       state: { ...roomState }
     });
+    broadcastJson({
+      type: 'lobby_state',
+      players: []
+    });
     return;
   }
 
   if (action === 'start') {
+    const incomingStartedAt = state?.startedAt || new Date().toISOString();
+    const startNow = Date.now();
     roomPlayers.clear();
     roomStructures.clear();
     roomCrates.clear();
+
     if (Array.isArray(players)) {
       for (const p of players) {
         if (p && p.uid && !p.isSpectator) {
+          const fullShield = resolveFullShieldCap(p.avatar);
           roomPlayers.set(p.uid, {
             ...p,
+            hp: 100,
+            maxHp: 100,
+            shield: fullShield,
+            maxShield: fullShield,
             isAlive: true,
             isSpectator: false,
-            hp: Math.max(1, p.hp || 100),
+            kills: 0,
             dirty: false,
-            lastUpdateAt: Date.now()
+            lastUpdateAt: startNow
           });
         }
       }
     }
+
+    // Ensure every student locked in roomLobby also enters alive with full HP & full shields
+    const missingLobby = Array.from(roomLobby.values()).filter(
+      l => l.uid && !l.isSpectator && !roomPlayers.has(l.uid)
+    );
+    const baseOffset = roomPlayers.size;
+    const totalCount = Math.max(1, baseOffset + missingLobby.length);
+    missingLobby.forEach((l, i) => {
+      roomPlayers.set(l.uid, buildSpawnFromLobby(l, baseOffset + i, totalCount));
+    });
+
     if (Array.isArray(crates)) {
       for (const c of crates) {
         if (c && c.id) {
@@ -258,7 +402,7 @@ export function applyServerBattleControl(input: {
     }
     roomState.status = 'IN_PROGRESS';
     roomState.isLobbyOpen = state?.isLobbyOpen ?? true;
-    roomState.startedAt = state?.startedAt || new Date().toISOString();
+    roomState.startedAt = incomingStartedAt;
     roomState.stormFinalCenter = state?.stormFinalCenter || null;
     roomState.currentWinner = null;
     broadcastJson({
@@ -431,13 +575,24 @@ export function createBattleWebSocketServer() {
 
           if (!isSpectator && msg.player && msg.player.uid) {
             const p = msg.player as RoomPlayer;
-            const existing = roomPlayers.get(p.uid);
+            const startedAtMs = roomState.startedAt ? new Date(roomState.startedAt).getTime() : 0;
+            const existingRaw = roomPlayers.get(p.uid);
+            // If an existing entry belongs to a previous match (stale timestamp), reset them fresh
+            const isStaleExisting = Boolean(
+              existingRaw && startedAtMs > 0 && (existingRaw.lastUpdateAt || 0) < startedAtMs - 2000
+            );
+            const existing = isStaleExisting ? undefined : existingRaw;
+            const fullShield = resolveFullShieldCap(p.avatar);
             if (!existing) {
               const created: RoomPlayer = {
                 ...p,
                 isAlive: true,
                 isSpectator: false,
-                hp: Math.max(1, p.hp || 100),
+                hp: 100,
+                maxHp: 100,
+                maxShield: fullShield,
+                shield: fullShield,
+                kills: 0,
                 dirty: true,
                 lastUpdateAt: now
               };
@@ -447,6 +602,7 @@ export function createBattleWebSocketServer() {
               existing.name = p.name || existing.name;
               existing.avatar = p.avatar || existing.avatar;
               existing.equippedWeapon = p.equippedWeapon || existing.equippedWeapon;
+              existing.lastUpdateAt = now;
               existing.dirty = true;
             }
           }
@@ -457,7 +613,8 @@ export function createBattleWebSocketServer() {
               state: { ...roomState },
               players: Array.from(roomPlayers.values()),
               structures: Array.from(roomStructures.values()),
-              crates: Array.from(roomCrates.values())
+              crates: Array.from(roomCrates.values()),
+              lobbyPlayers: Array.from(roomLobby.values())
             })
           );
           break;
@@ -678,12 +835,22 @@ export function createBattleWebSocketServer() {
         }
 
         case 'match_control': {
-          if (msg.action === 'start' || msg.action === 'end' || msg.action === 'reset') {
+          if (
+            msg.action === 'start' ||
+            msg.action === 'end' ||
+            msg.action === 'reset' ||
+            msg.action === 'lobby_open' ||
+            msg.action === 'lobby_join' ||
+            msg.action === 'lobby_leave' ||
+            msg.action === 'config_update'
+          ) {
             applyServerBattleControl({
               action: msg.action,
               state: msg.state,
               players: msg.players,
-              crates: msg.crates
+              crates: msg.crates,
+              lobbyPlayer: msg.lobbyPlayer,
+              config: msg.config
             });
           }
           break;

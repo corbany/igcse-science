@@ -14,7 +14,8 @@ import {
   AlertCircle,
   LogOut,
   Zap,
-  Award
+  Award,
+  Lock
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { 
@@ -52,6 +53,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
 }) => {
   const handleBattleStart = onEnterBattle || onBattleStart || (() => {});
   const handleBackToStudy = onBack || onBackToStudy || (() => {});
+  const isStudentLocked = user.role !== 'instructor';
   const [config, setConfig] = useState<BattleEventConfig | null>(null);
   const [battleState, setBattleState] = useState<BattleEventState | null>(null);
   const [lobbyPlayers, setLobbyPlayers] = useState<LobbyPlayer[]>([]);
@@ -100,12 +102,60 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
     return () => unsub();
   }, [user?.id]);
 
+  // 5. Auto-join & keep locked students registered + ready in the waiting room
+  useEffect(() => {
+    if (!user?.id || !isStudentLocked) return;
+    if (battleState && (battleState.status === 'IN_PROGRESS' || battleState.isLobbyOpen === false)) return;
+
+    let cancelled = false;
+    const syncMembership = () => {
+      if (cancelled) return;
+      joinLobby({
+        uid: user.id,
+        name: user.name || 'Science Scholar',
+        avatar: gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist',
+        equippedWeapon: gameProfile?.equippedWeapon || 'bunsen_burner',
+        wood: gameProfile?.wood || 20,
+        brick: gameProfile?.brick || 10,
+        metal: gameProfile?.metal || 5,
+        isReady: true,
+        joinedAt: new Date().toISOString()
+      }).catch(() => {});
+    };
+
+    syncMembership();
+    const retryInterval = setInterval(syncMembership, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(retryInterval);
+    };
+  }, [
+    user?.id,
+    user?.name,
+    isStudentLocked,
+    battleState?.status,
+    battleState?.isLobbyOpen,
+    gameProfile?.equippedSkin,
+    gameProfile?.avatar,
+    gameProfile?.equippedWeapon,
+    gameProfile?.wood,
+    gameProfile?.brick,
+    gameProfile?.metal
+  ]);
+
   // Live countdown timer targeting next scheduled monthly event date
   useEffect(() => {
-    if (!config?.nextEventDate) return;
-    
+    if (!config?.isScheduled || !config?.nextEventDate) {
+      setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+      return;
+    }
+
     const updateCountdown = () => {
       const targetTime = new Date(config.nextEventDate).getTime();
+      if (!Number.isFinite(targetTime)) {
+        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+        return;
+      }
       const now = Date.now();
       const diff = Math.max(0, targetTime - now);
 
@@ -120,11 +170,11 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
     updateCountdown();
     const interval = setInterval(updateCountdown, 1000);
     return () => clearInterval(interval);
-  }, [config?.nextEventDate]);
+  }, [config?.isScheduled, config?.nextEventDate]);
 
   const isInLobby = lobbyPlayers.some(p => p.uid === user.id);
   const myLobbyEntry = lobbyPlayers.find(p => p.uid === user.id);
-  const isReady = myLobbyEntry?.isReady ?? false;
+  const isReady = myLobbyEntry?.isReady ?? isStudentLocked;
 
   const handleJoin = async () => {
     if (!user?.id || isJoining) return;
@@ -133,7 +183,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
       await joinLobby({
         uid: user.id,
         name: user.name || 'Science Scholar',
-        avatar: gameProfile?.avatar || 'cyber_scientist',
+        avatar: gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist',
         equippedWeapon: gameProfile?.equippedWeapon || 'bunsen_burner',
         wood: gameProfile?.wood || 20,
         brick: gameProfile?.brick || 10,
@@ -149,7 +199,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
   };
 
   const handleLeave = async () => {
-    if (!user?.id) return;
+    if (!user?.id || isStudentLocked) return;
     try {
       await leaveLobby(user.id);
     } catch (e) {
@@ -158,7 +208,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
   };
 
   const handleToggleReady = async () => {
-    if (!user?.id) return;
+    if (!user?.id || isStudentLocked) return;
     try {
       await setLobbyReady(user.id, !isReady);
     } catch (e) {
@@ -166,7 +216,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
     }
   };
 
-  const equippedSkin = SHOP_ITEMS.find(i => i.id === (gameProfile?.avatar || 'cyber_scientist')) || SHOP_ITEMS[0];
+  const equippedSkin = SHOP_ITEMS.find(i => i.id === (gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist')) || SHOP_ITEMS[0];
   const equippedWeapon = resolveWeaponItem(gameProfile?.equippedWeapon);
 
   return (
@@ -244,26 +294,33 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
             </span>
             <span className="text-xs sm:text-sm font-bold text-slate-800">
               {battleState?.status === 'IN_PROGRESS' 
-                ? 'Battle is live! Redirecting players into the arena...' 
-                : 'Waiting for Teacher to Start the Battle...'}
+                ? 'Battle is live! Deploying you into the arena with full health & shields...' 
+                : 'Locked in Waiting Room — Auto-deploying alive with full HP & shields when Teacher starts match.'}
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onOpenShop}
-              className="text-xs px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-800 border border-black font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-            >
-              <ShoppingBag className="w-3.5 h-3.5 text-amber-600" />
-              <span>Customize Loadout</span>
-            </button>
-            <button
-              onClick={onBackToStudy}
-              className="text-xs px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-semibold transition"
-            >
-              Back to Study
-            </button>
-          </div>
+          {isStudentLocked ? (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-bold shrink-0">
+              <Lock className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Lobby Locked Until Match Starts</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onOpenShop}
+                className="text-xs px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-800 border border-black font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              >
+                <ShoppingBag className="w-3.5 h-3.5 text-amber-600" />
+                <span>Customize Loadout</span>
+              </button>
+              <button
+                onClick={handleBackToStudy}
+                className="text-xs px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-semibold transition"
+              >
+                Back to Study
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -286,14 +343,30 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-600">
-                All connected students will be deployed into the 2D arena simultaneously when host launches.
+                All connected students are locked in and will spawn alive with 100 HP & full shields as soon as the host presses Start.
               </p>
             </div>
           </div>
 
-          {/* Action buttons: Join / Leave / Ready */}
+          {/* Action / Locked Ready Indicator */}
           <div className="flex items-center gap-2.5 shrink-0">
-            {!isInLobby ? (
+            {isStudentLocked ? (
+              isInLobby ? (
+                <div className="px-4 py-2.5 rounded-xl bg-emerald-600 text-white border border-emerald-700 text-xs sm:text-sm font-bold flex items-center gap-2 shadow-xs">
+                  <Lock className="w-4 h-4" />
+                  <span>Locked & Ready for Battle</span>
+                </div>
+              ) : (
+                <button
+                  onClick={handleJoin}
+                  disabled={isJoining}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm flex items-center gap-2 border border-emerald-700 shadow-xs transition cursor-pointer"
+                >
+                  <Swords className="w-4 h-4 text-white" />
+                  <span>{isJoining ? 'Syncing Lobby...' : 'Syncing Lobby Spot...'}</span>
+                </button>
+              )
+            ) : !isInLobby ? (
               <button
                 onClick={handleJoin}
                 disabled={isJoining}
@@ -329,7 +402,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
         </div>
 
         {/* My Current Loadout Preview */}
-        {isInLobby && (
+        {(isInLobby || isStudentLocked) && (
           <div className="bg-[#FDFBF7] border border-slate-300 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-3">
               <span className="text-3xl">{equippedSkin.icon}</span>

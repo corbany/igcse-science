@@ -24,14 +24,17 @@ import { StudentTaskProgressBar } from './components/StudentTaskProgressBar';
 import { TaskView } from './components/TaskView';
 import { Dashboard } from './components/Dashboard';
 import { 
-  subscribeToBattleState, 
+  subscribeToBattleState,
+  subscribeToBattleConfig,
   BattleEventState,
+  BattleEventConfig,
   awardQuizAndLevelGold,
   ensureRewardedLevelBaseline,
   QuizAndLevelRewardResult,
   recordDailyEngagementStreak,
   DailyStreakResult
 } from './services/firebaseGameService';
+import { fetchServerBattleState } from './services/battleRealtimeClient';
 import {  ScienceSubject, UserProfile, StudentProgress, TrafficLightStatus, SubtopicQuizResult, SubtopicSlideProgress, QuizLengthRecord, TaskWithSubmission, ClassTask, QuizChallenge } from './types';
 import {
   subscribeToUserChallenges,
@@ -132,19 +135,36 @@ export default function App() {
   // Revision Royale Tournament & Arena State
   const [battleArenaActive, setBattleArenaActive] = useState<boolean>(false);
   const [battleState, setBattleState] = useState<BattleEventState | null>(null);
+  const [battleConfig, setBattleConfig] = useState<BattleEventConfig | null>(null);
   const [shopInitialTab, setShopInitialTab] = useState<'shop' | 'collection' | 'armory'>('shop');
+  const currentTabRef = useRef<string>(currentTab);
+  currentTabRef.current = currentTab;
 
   useEffect(() => {
-    const unsub = subscribeToBattleState((state) => {
+    const unsubState = subscribeToBattleState((state) => {
       setBattleState(state);
-      if (state.status === 'IN_PROGRESS' && currentTab === 'royale') {
+      if (state.status === 'IN_PROGRESS' && currentTabRef.current === 'royale') {
         setBattleArenaActive(true);
       } else if (state.status !== 'IN_PROGRESS') {
         setBattleArenaActive(false);
       }
     });
-    return () => unsub();
-  }, [currentTab]);
+    const unsubConfig = subscribeToBattleConfig((cfg) => {
+      setBattleConfig(cfg);
+    });
+    return () => {
+      unsubState();
+      unsubConfig();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (battleState?.status === 'IN_PROGRESS' && currentTab === 'royale') {
+      setBattleArenaActive(true);
+    } else if (battleState && battleState.status !== 'IN_PROGRESS') {
+      setBattleArenaActive(false);
+    }
+  }, [battleState?.status, currentTab]);
 
   // Global Theme state (Light / Dark mode)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -221,6 +241,65 @@ export default function App() {
         ? { ...user, role: 'student', name: `${user.name} (Student View)` }
         : user)
     : null;
+  const isStudentLockedInLobby = Boolean(
+    isEffectiveStudent &&
+    currentTab === 'royale' &&
+    battleState?.isLobbyOpen &&
+    battleState?.status !== 'IN_PROGRESS'
+  );
+  const isStudentLockedInLobbyRef = useRef<boolean>(isStudentLockedInLobby);
+  isStudentLockedInLobbyRef.current = isStudentLockedInLobby;
+
+  const handleTabChange = (nextTab: string) => {
+    if (isStudentLockedInLobbyRef.current && nextTab !== 'royale') {
+      return;
+    }
+    setCurrentTab(nextTab);
+  };
+
+  // Fallback poll of server battle state when a student is waiting on the Royale tab
+  useEffect(() => {
+    if (!isEffectiveStudent || currentTab !== 'royale' || battleArenaActive || battleState?.status === 'IN_PROGRESS') {
+      return;
+    }
+    let cancelled = false;
+    const syncFromServer = async () => {
+      const srv = await fetchServerBattleState();
+      if (cancelled || !srv) return;
+      if (srv.config) {
+        setBattleConfig(srv.config);
+      }
+      if (!srv.status) return;
+      setBattleState((prev) => {
+        const nextStatus = srv.status!;
+        const nextLobby = Boolean(srv.isLobbyOpen);
+        const nextStartedAt = srv.startedAt || null;
+        if (
+          prev &&
+          prev.status === nextStatus &&
+          prev.isLobbyOpen === nextLobby &&
+          prev.startedAt === nextStartedAt
+        ) {
+          return prev;
+        }
+        return {
+          isLobbyOpen: nextLobby,
+          status: nextStatus,
+          startedAt: nextStartedAt,
+          stormRadius: srv.stormRadius ?? prev?.stormRadius ?? 3600,
+          stormCenter: srv.stormCenter ?? prev?.stormCenter ?? { x: 2560, y: 2560 },
+          stormFinalCenter: srv.stormFinalCenter ?? prev?.stormFinalCenter,
+          currentWinner: srv.currentWinner ?? prev?.currentWinner ?? null
+        };
+      });
+    };
+    syncFromServer();
+    const timer = setInterval(syncFromServer, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [isEffectiveStudent, currentTab, battleArenaActive, battleState?.status]);
 
   useEffect(() => {
     if (!user?.id || !isEffectiveStudent) {
@@ -237,7 +316,7 @@ export default function App() {
             (c.status === 'accepted' || c.status === 'in_progress') &&
             !dismissedLiveChallengeIdsRef.current.has(c.id)
         );
-        if (liveMatch) {
+        if (liveMatch && !isStudentLockedInLobbyRef.current) {
           setActiveLiveChallenge((prev) => {
             if (prev?.id === liveMatch.id) return prev;
             return liveMatch;
@@ -414,8 +493,8 @@ export default function App() {
             fbUser.email || ''
           );
 
-          // Load enrolled classes for progress sync
-          const classes = await fetchStudentEnrolledClasses(profile.id);
+          // Load enrolled classes for progress sync (match by UID or email for auto-heal)
+          const classes = await fetchStudentEnrolledClasses(profile.id, profile.email);
           const validClasses = classes.filter(c => c && c.id && c.id !== 'class_default_0653');
 
           // User requirement:
@@ -459,50 +538,13 @@ export default function App() {
           console.error('Error resolving user profile on auth change:', e);
         }
       } else {
-        const stored = localStorage.getItem(STORAGE_KEY_USER);
-        if (stored) {
-          try {
-            const profile = JSON.parse(stored);
-            if (profile && profile.id) {
-              const classes = await fetchStudentEnrolledClasses(profile.id);
-              const validClasses = classes.filter(c => c && c.id && c.id !== 'class_default_0653');
-              if (profile.role === 'student' && validClasses.length === 0) {
-                localStorage.removeItem(STORAGE_KEY_USER);
-                localStorage.removeItem('igcse_0653_offline_enrolled_' + profile.id);
-                setUser(null);
-                setEnrolledClassIds([]);
-                setSignOutNotice('Notice: The default class SCI-0653 has been retired. Students must enter an instructor-created class code to access revision materials. Please sign in and enter your teacher’s class code.');
-              } else {
-                const validIds = validClasses.map(c => c.id);
-                if (profile.role === 'student') {
-                  try {
-                    const merged = await hydrateStudentProgressFromFirestore(profile.id, validIds, progressRef.current);
-                    hydratedUidRef.current = profile.id;
-                    progressRef.current = merged;
-                    setProgress(merged);
-                    try {
-                      localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(merged));
-                    } catch {}
-                  } catch {
-                    hydratedUidRef.current = profile.id;
-                  }
-                } else {
-                  hydratedUidRef.current = profile.id;
-                }
-                setUser(profile);
-                setEnrolledClassIds(validIds);
-              }
-            } else {
-              setUser(null);
-              setEnrolledClassIds([]);
-            }
-          } catch {
-            setUser(null);
-            setEnrolledClassIds([]);
-          }
-        } else {
-          setUser(null);
-          setEnrolledClassIds([]);
+        const hadStoredUser = Boolean(localStorage.getItem(STORAGE_KEY_USER));
+        localStorage.removeItem(STORAGE_KEY_USER);
+        hydratedUidRef.current = null;
+        setUser(null);
+        setEnrolledClassIds([]);
+        if (hadStoredUser) {
+          setSignOutNotice('Your Google session expired. Please sign in with Google to reconnect to your class and Revision Royale lobby.');
         }
       }
       setAuthLoading(false);
@@ -1028,7 +1070,7 @@ export default function App() {
           setSignOutNotice(null);
           initialBootSession.current = false;
           try {
-            const classes = await fetchStudentEnrolledClasses(profile.id);
+            const classes = await fetchStudentEnrolledClasses(profile.id, profile.email);
             const validClasses = classes.filter(c => c && c.id && c.id !== 'class_default_0653');
             const validIds = validClasses.map(c => c.id);
             if (profile.role === 'student') {
@@ -1089,7 +1131,7 @@ export default function App() {
       {/* Top Navigation */}
       <Navbar
         currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
+        setCurrentTab={handleTabChange}
         selectedSubject={selectedSubject}
         setSelectedSubject={setSelectedSubject}
         searchQuery={searchQuery}
@@ -1109,7 +1151,7 @@ export default function App() {
           if (task) {
             handleOpenTaskInQuizzes(task);
           } else {
-            setCurrentTab('quizzes');
+            handleTabChange('quizzes');
           }
         }}
         isPreviewingAsStudent={isPreviewingAsStudent}
@@ -1122,11 +1164,14 @@ export default function App() {
           setCurrentTab('instructor');
         }}
         battleState={battleState}
+        battleConfig={battleConfig}
         onOpenShop={() => {
+          if (isStudentLockedInLobby) return;
           setShopInitialTab('shop');
           setCurrentTab('shop');
         }}
         pendingChallengesCount={incomingPendingChallenges.length}
+        lockedInLobby={isStudentLockedInLobby}
       />
 
       {/* Role Distinction Sub-bar */}
@@ -1202,7 +1247,7 @@ export default function App() {
             </div>
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setCurrentTab('classes')}
+                onClick={() => handleTabChange('classes')}
                 className="flex items-center gap-1 text-xs text-slate-800 hover:text-black font-bold transition cursor-pointer"
               >
                 <Users className="w-3.5 h-3.5" />
@@ -1216,16 +1261,16 @@ export default function App() {
       )}
 
       {/* STUDENT TASK PROGRESSION BAR (LOCKED TO TOP OF SCREEN) */}
-      {isEffectiveStudent && (
+      {isEffectiveStudent && !isStudentLockedInLobby && (
         <StudentTaskProgressBar
           tasks={studentTasks}
-          onNavigateToTasks={() => setCurrentTab('tasks')}
+          onNavigateToTasks={() => handleTabChange('tasks')}
           enrolledClassCount={enrolledClassIds.length}
         />
       )}
 
       {/* INCOMING 1V1 QUIZ CHALLENGE ALERT BANNER (when browsing other tabs) */}
-      {isEffectiveStudent && incomingPendingChallenges.length > 0 && currentTab !== 'leaderboard' && !activeLiveChallenge && (
+      {isEffectiveStudent && !isStudentLockedInLobby && incomingPendingChallenges.length > 0 && currentTab !== 'leaderboard' && !activeLiveChallenge && (
         <div className="bg-amber-50 border-b border-amber-300 px-4 sm:px-6 lg:px-8 py-2.5 text-xs text-slate-900">
           <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
             <div className="flex items-center gap-2 min-w-0">
@@ -1279,14 +1324,17 @@ export default function App() {
               streakDays={progress.currentStreak || calculateStreak(progress).currentStreak}
               longestStreak={progress.longestStreak || calculateStreak(progress).longestStreak}
               onOpenShop={() => {
+                if (isStudentLockedInLobby) return;
                 setShopInitialTab('shop');
                 setCurrentTab('shop');
               }}
               onOpenCollection={() => {
+                if (isStudentLockedInLobby) return;
                 setShopInitialTab('collection');
                 setCurrentTab('shop');
               }}
               onOpenRoyale={() => setCurrentTab('royale')}
+              lockedInLobby={isStudentLockedInLobby}
             />
           </div>
         </div>

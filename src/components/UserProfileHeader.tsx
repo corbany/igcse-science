@@ -33,6 +33,7 @@ interface UserProfileHeaderProps {
   onOpenArena?: () => void;
   onOpenRoyale?: () => void;
   compact?: boolean;
+  lockedInLobby?: boolean;
 }
 
 export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
@@ -43,7 +44,8 @@ export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
   onOpenShop,
   onOpenCollection,
   onOpenArena,
-  onOpenRoyale
+  onOpenRoyale,
+  lockedInLobby = false
 }) => {
   const handleOpenRoyale = onOpenRoyale || onOpenArena;
   const [gameProfile, setGameProfile] = useState<UserGameProfile | null>(null);
@@ -193,61 +195,70 @@ export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
 
           {/* Quick Action Buttons */}
           <div className="flex items-center gap-2 shrink-0">
-            {onOpenShop && (
-              <button
-                onClick={onOpenShop}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer ${
-                  totalGiftedPacks > 0
-                    ? 'bg-emerald-700 hover:bg-emerald-600 text-white border-emerald-700'
-                    : 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300'
-                }`}
-                title="Open Avatar & Booster Pack Shop"
-              >
-                <ShoppingBag className={`w-3.5 h-3.5 ${totalGiftedPacks > 0 ? 'text-white' : 'text-slate-700'}`} />
-                <span>Shop{totalGiftedPacks > 0 ? ` · ${totalGiftedPacks} Gift${totalGiftedPacks === 1 ? '' : 's'}` : ''}</span>
-              </button>
-            )}
+            {lockedInLobby ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-bold">
+                <Lock className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Locked in Waiting Room</span>
+              </div>
+            ) : (
+              <>
+                {onOpenShop && (
+                  <button
+                    onClick={onOpenShop}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer ${
+                      totalGiftedPacks > 0
+                        ? 'bg-emerald-700 hover:bg-emerald-600 text-white border-emerald-700'
+                        : 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300'
+                    }`}
+                    title="Open Avatar & Booster Pack Shop"
+                  >
+                    <ShoppingBag className={`w-3.5 h-3.5 ${totalGiftedPacks > 0 ? 'text-white' : 'text-slate-700'}`} />
+                    <span>Shop{totalGiftedPacks > 0 ? ` · ${totalGiftedPacks} Gift${totalGiftedPacks === 1 ? '' : 's'}` : ''}</span>
+                  </button>
+                )}
 
-            {onOpenCollection && (
-              <button
-                onClick={onOpenCollection}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold transition cursor-pointer"
-                title="View Character Collection"
-              >
-                <Layers className="w-3.5 h-3.5 text-slate-700" />
-                <span>Collection</span>
-              </button>
-            )}
+                {onOpenCollection && (
+                  <button
+                    onClick={onOpenCollection}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold transition cursor-pointer"
+                    title="View Character Collection"
+                  >
+                    <Layers className="w-3.5 h-3.5 text-slate-700" />
+                    <span>Collection</span>
+                  </button>
+                )}
 
-            {handleOpenRoyale && (
-              (user.role === 'instructor' || battleState?.status === 'IN_PROGRESS') ? (
-                <button
-                  onClick={handleOpenRoyale}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition cursor-pointer"
-                  title="Battle Arena is Live"
-                >
-                  <Gamepad2 className="w-3.5 h-3.5 text-white" />
-                  <span>Enter Arena (Live)</span>
-                </button>
-              ) : battleState?.isLobbyOpen ? (
-                <button
-                  onClick={handleOpenRoyale}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#EBF3F5] hover:bg-[#d8e9ec] text-slate-800 border border-slate-400 font-bold text-xs transition cursor-pointer"
-                  title="Tournament Lobby is Open"
-                >
-                  <Gamepad2 className="w-3.5 h-3.5 text-slate-800" />
-                  <span>Join Lobby</span>
-                </button>
-              ) : (
-                <button
-                  onClick={handleOpenRoyale}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-300 text-slate-600 text-xs font-semibold cursor-pointer hover:bg-slate-200"
-                  title="Royale tournament lobby is closed until opened by your instructor"
-                >
-                  <Lock className="w-3.5 h-3.5 text-slate-500" />
-                  <span>Arena Closed</span>
-                </button>
-              )
+                {handleOpenRoyale && (
+                  (user.role === 'instructor' || battleState?.status === 'IN_PROGRESS') ? (
+                    <button
+                      onClick={handleOpenRoyale}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition cursor-pointer"
+                      title="Battle Arena is Live"
+                    >
+                      <Gamepad2 className="w-3.5 h-3.5 text-white" />
+                      <span>Enter Arena (Live)</span>
+                    </button>
+                  ) : battleState?.isLobbyOpen ? (
+                    <button
+                      onClick={handleOpenRoyale}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#EBF3F5] hover:bg-[#d8e9ec] text-slate-800 border border-slate-400 font-bold text-xs transition cursor-pointer"
+                      title="Tournament Lobby is Open"
+                    >
+                      <Gamepad2 className="w-3.5 h-3.5 text-slate-800" />
+                      <span>Join Lobby</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleOpenRoyale}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-300 text-slate-600 text-xs font-semibold cursor-pointer hover:bg-slate-200"
+                      title="Royale tournament lobby is closed until opened by your instructor"
+                    >
+                      <Lock className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Arena Closed</span>
+                    </button>
+                  )
+                )}
+              </>
             )}
           </div>
 

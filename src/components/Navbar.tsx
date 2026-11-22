@@ -21,10 +21,12 @@ import {
   ClipboardCheck,
   Trophy,
   Lock,
-  ShoppingBag
+  ShoppingBag,
+  Swords,
+  Clock
 } from 'lucide-react';
 import { ScienceSubject, UserProfile, StudentProgress, ClassTask, TaskWithSubmission } from '../types';
-import { BattleEventState } from '../services/firebaseGameService';
+import { BattleEventConfig, BattleEventState } from '../services/firebaseGameService';
 import { TaskNotificationBell } from './TaskNotificationBell';
 
 interface NavbarProps {
@@ -48,8 +50,10 @@ interface NavbarProps {
   onEnterStudentPreview?: () => void;
   onExitStudentPreview?: () => void;
   battleState?: BattleEventState | null;
+  battleConfig?: BattleEventConfig | null;
   onOpenShop?: () => void;
   pendingChallengesCount?: number;
+  lockedInLobby?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -73,10 +77,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   onEnterStudentPreview,
   onExitStudentPreview,
   battleState,
+  battleConfig,
   onOpenShop,
-  pendingChallengesCount = 0
+  pendingChallengesCount = 0,
+  lockedInLobby = false
 }) => {
   const [showMoreTools, setShowMoreTools] = useState(false);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
@@ -90,16 +97,137 @@ export const Navbar: React.FC<NavbarProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Tick live timer for scheduled monthly tournament countdown
+  useEffect(() => {
+    if (!battleConfig?.isScheduled || !battleConfig?.nextEventDate) return;
+    setNowMs(Date.now());
+    const timer = setInterval(() => {
+      setNowMs(Date.now());
+    }, 10000);
+    return () => clearInterval(timer);
+  }, [battleConfig?.isScheduled, battleConfig?.nextEventDate]);
+
   const isStudent = user.role === 'student' || isPreviewingAsStudent;
   const isExtraStudentTab = currentTab === 'schedule' || currentTab === 'recommendations' || currentTab === 'guidelines';
 
+  const targetMs =
+    battleConfig?.isScheduled && battleConfig?.nextEventDate
+      ? new Date(battleConfig.nextEventDate).getTime()
+      : NaN;
+  const hasValidSchedule = Number.isFinite(targetMs);
+  const isExpiredStale =
+    hasValidSchedule &&
+    targetMs < nowMs - 12 * 60 * 60 * 1000 &&
+    battleState?.status !== 'IN_PROGRESS' &&
+    !battleState?.isLobbyOpen;
+  const showTournamentCountdown = hasValidSchedule && !isExpiredStale;
+  const diffMs = hasValidSchedule ? Math.max(0, targetMs - nowMs) : 0;
+  const countdownDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const countdownHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const countdownMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+  const isUnderOneMinute = diffMs > 0 && diffMs < 60 * 1000;
+  const isMatchLive = battleState?.status === 'IN_PROGRESS';
+
   return (
     <header className={`sticky top-0 z-50 border-b shadow-xs transition-colors duration-150 ${theme === 'dark' ? 'border-zinc-800 bg-black text-slate-100' : 'border-slate-200 bg-[#FDFBF7] text-slate-800'}`}>
+      {/* Locked Monthly Battle Royale Countdown Bar */}
+      {showTournamentCountdown && (
+        <div
+          className={`border-b px-4 sm:px-6 lg:px-8 py-2 text-xs ${
+            theme === 'dark'
+              ? 'bg-zinc-950 border-zinc-800 text-slate-100'
+              : 'bg-slate-900 border-slate-800 text-white'
+          }`}
+        >
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-7 h-7 rounded-lg bg-amber-400 text-slate-950 flex items-center justify-center shrink-0">
+                <Swords className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
+                <span className="px-2 py-0.5 rounded bg-amber-400/20 border border-amber-400/40 text-amber-300 font-bold uppercase tracking-wider text-[10px] shrink-0">
+                  Season {battleConfig?.season || 1} Monthly Tournament
+                </span>
+                <span className="font-bold text-white truncate max-w-[220px] sm:max-w-xs">
+                  {battleConfig?.title || 'Monthly Battle Royale'}
+                </span>
+                <span className="hidden md:inline-flex items-center gap-1 text-slate-300 text-[11px]">
+                  <Calendar className="w-3 h-3 text-slate-400" />
+                  {new Date(targetMs).toLocaleDateString(undefined, {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 ml-auto shrink-0">
+              {isMatchLive ? (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500 text-slate-950 font-black uppercase tracking-wider text-[11px]">
+                  <span className="w-2 h-2 rounded-full bg-slate-950 animate-pulse" />
+                  Battle Royale Live Now
+                </span>
+              ) : (
+                <div className="flex items-center gap-1.5" aria-label="Countdown to Battle Royale">
+                  <Clock className="w-3.5 h-3.5 text-amber-300 hidden sm:block mr-0.5" />
+                  <span className="text-[11px] font-semibold text-slate-300 hidden sm:inline mr-1">
+                    Starts in
+                  </span>
+                  <div className="flex items-center gap-1 font-mono tabular-nums">
+                    <div className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-center">
+                      <span className="font-black text-amber-300 text-xs">{String(countdownDays).padStart(2, '0')}</span>
+                      <span className="text-[10px] text-slate-300 ml-1 font-sans font-bold">d</span>
+                    </div>
+                    <span className="text-slate-500 font-bold">:</span>
+                    <div className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-center">
+                      <span className="font-black text-amber-300 text-xs">{String(countdownHours).padStart(2, '0')}</span>
+                      <span className="text-[10px] text-slate-300 ml-1 font-sans font-bold">h</span>
+                    </div>
+                    <span className="text-slate-500 font-bold">:</span>
+                    <div className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-center">
+                      <span className="font-black text-amber-300 text-xs">
+                        {isUnderOneMinute ? '<1' : String(countdownMinutes).padStart(2, '0')}
+                      </span>
+                      <span className="text-[10px] text-slate-300 ml-1 font-sans font-bold">m</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {!lockedInLobby && (
+                <button
+                  type="button"
+                  onClick={() => setCurrentTab('royale')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer shrink-0 ${
+                    battleState?.isLobbyOpen || isMatchLive
+                      ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
+                      : 'bg-white/10 hover:bg-white/20 text-white border border-white/20'
+                  }`}
+                >
+                  {!isStudent
+                    ? 'Host Controls'
+                    : isMatchLive
+                      ? 'Enter Arena'
+                      : battleState?.isLobbyOpen
+                        ? 'Join Lobby'
+                        : 'Battle Info'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {/* Top Banner with branding & role distinction */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 gap-3">
           {/* Logo & Syllabus identifier */}
-          <div className="flex items-center gap-3 cursor-pointer shrink-0" onClick={() => setCurrentTab('dashboard')}>
+          <div
+            className={`flex items-center gap-3 shrink-0 ${lockedInLobby ? 'cursor-default' : 'cursor-pointer'}`}
+            onClick={() => { if (!lockedInLobby) setCurrentTab('dashboard'); }}
+          >
             <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-[#EBF3F5] border border-slate-300 text-slate-800">
               {isStudent ? (
                 <GraduationCap className="w-6 h-6 text-slate-800" />
@@ -126,24 +254,26 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Search bar with crisp black border */}
           <div className="flex-1 max-w-md mx-2 hidden md:block">
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder={isStudent ? "Search topics or slides (e.g. B1, Cells, C2)..." : "Search topics, codes, slides..."}
-                className="w-full pl-9 pr-4 py-1.5 text-sm"
-              />
-              {searchQuery && (
-                <button 
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-600 hover:text-black font-bold"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
+            {!lockedInLobby && (
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder={isStudent ? "Search topics or slides (e.g. B1, Cells, C2)..." : "Search topics, codes, slides..."}
+                  className="w-full pl-9 pr-4 py-1.5 text-sm"
+                />
+                {searchQuery && (
+                  <button 
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-600 hover:text-black font-bold"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Right Action Bar */}
@@ -152,39 +282,43 @@ export const Navbar: React.FC<NavbarProps> = ({
             {isStudent ? (
               /* STUDENT */
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentTab('leaderboard')}
-                  title="View Class Leaderboard"
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer ${
-                    currentTab === 'leaderboard'
-                      ? 'bg-slate-800 text-white border-slate-800 shadow-xs'
-                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                  }`}
-                >
-                  <Trophy className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Leaderboard</span>
-                  {pendingChallengesCount > 0 && (
-                    <span className="ml-0.5 px-1.5 py-0.5 rounded bg-amber-300 text-slate-950 font-mono tabular-nums text-[10px] font-black leading-none border border-black">
-                      {pendingChallengesCount}
-                    </span>
-                  )}
-                </button>
+                {!lockedInLobby && (
+                  <>
+                    <button
+                      onClick={() => setCurrentTab('leaderboard')}
+                      title="View Class Leaderboard"
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer ${
+                        currentTab === 'leaderboard'
+                          ? 'bg-slate-800 text-white border-slate-800 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      <Trophy className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Leaderboard</span>
+                      {pendingChallengesCount > 0 && (
+                        <span className="ml-0.5 px-1.5 py-0.5 rounded bg-amber-300 text-slate-950 font-mono tabular-nums text-[10px] font-black leading-none border border-black">
+                          {pendingChallengesCount}
+                        </span>
+                      )}
+                    </button>
 
-                <button
-                  onClick={() => setCurrentTab('profile')}
-                  title="View Student Profile, Recent Activity & Virtual Medals"
-                  className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs ${
-                    currentTab === 'profile'
-                      ? 'bg-emerald-600 text-white border-emerald-500 font-black shadow-emerald-500/20'
-                      : theme === 'dark'
-                        ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-                        : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
-                  }`}
-                >
-                  <User className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="hidden sm:inline">My Profile</span>
-                  <span className="sm:hidden">Profile</span>
-                </button>
+                    <button
+                      onClick={() => setCurrentTab('profile')}
+                      title="View Student Profile, Recent Activity & Virtual Medals"
+                      className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs ${
+                        currentTab === 'profile'
+                          ? 'bg-emerald-600 text-white border-emerald-500 font-black shadow-emerald-500/20'
+                          : theme === 'dark'
+                            ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
+                      }`}
+                    >
+                      <User className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="hidden sm:inline">My Profile</span>
+                      <span className="sm:hidden">Profile</span>
+                    </button>
+                  </>
+                )}
 
                 {isPreviewingAsStudent && onExitStudentPreview && (
                   <button
@@ -243,15 +377,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
 
             {/* Task Notifications Bell */}
-            <TaskNotificationBell
-              user={user}
-              progress={progress}
-              enrolledClassIds={enrolledClassIds}
-              theme={theme}
-              onNavigateToTasks={() => setCurrentTab(isStudent ? 'classes' : 'instructor')}
-              onNavigateToLessons={onNavigateToLessons}
-              onNavigateToQuizzes={onNavigateToQuizzes}
-            />
+            {!lockedInLobby && (
+              <TaskNotificationBell
+                user={user}
+                progress={progress}
+                enrolledClassIds={enrolledClassIds}
+                theme={theme}
+                onNavigateToTasks={() => setCurrentTab(isStudent ? 'classes' : 'instructor')}
+                onNavigateToLessons={onNavigateToLessons}
+                onNavigateToQuizzes={onNavigateToQuizzes}
+              />
+            )}
 
             {/* Global Light / Dark Mode toggle */}
             <button
@@ -310,6 +446,14 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Main Navigation Bar: Symmetrical, responsive, zero-horizontal-scroll */}
+      {lockedInLobby ? (
+        <div className="border-t border-emerald-200 bg-emerald-50/90 px-4 sm:px-6 lg:px-8 py-2.5 text-xs text-emerald-950">
+          <div className="max-w-7xl mx-auto flex items-center justify-center gap-2 font-bold">
+            <Lock className="w-4 h-4 text-emerald-700 shrink-0" />
+            <span>Locked in Revision Royale Waiting Room — You will automatically enter alive with full health & shields when your instructor starts the match.</span>
+          </div>
+        </div>
+      ) : (
       <nav className={`border-t px-2 sm:px-4 lg:px-8 py-2 transition-colors duration-150 ${theme === 'dark' ? 'border-zinc-800 bg-black' : 'border-slate-200 bg-[#FDFBF7]'}`}>
         <div className="max-w-7xl mx-auto">
           {/* Navigation Grid */}
@@ -694,6 +838,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
       </nav>
+      )}
 
       {/* Active Study Tool Sub-Switcher (when in Schedule, AI Path, or Guidelines) */}
       {isExtraStudentTab && (

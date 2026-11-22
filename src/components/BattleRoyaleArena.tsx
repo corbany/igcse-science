@@ -3379,6 +3379,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   // Tracking animation transitions (damage, death, elimination lock, remote motion smoothing)
   const localDeathTimeRef = useRef<number>(0);
   const localEliminatedRef = useRef<boolean>(false);
+  const matchGraceUntilRef = useRef<number>(0);
+  const authoritativeKilledMatchRef = useRef<string | null>(null);
   const lastDamageTimeRef = useRef<number>(0);
   const prevLocalHpRef = useRef<number>(100);
   const hasProfileLoadedRef = useRef<boolean>(false);
@@ -3417,7 +3419,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const [localX, setLocalX] = useState<number>(2500);
   const [localY, setLocalY] = useState<number>(2500);
   const [localHp, setLocalHp] = useState<number>(100);
-  const [localShield, setLocalShield] = useState<number>(50);
+  const [localShield, setLocalShield] = useState<number>(100);
   const [localWood, setLocalWood] = useState<number>(30);
   const [localBrick, setLocalBrick] = useState<number>(20);
   const [localMetal, setLocalMetal] = useState<number>(15);
@@ -3535,7 +3537,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const isLocallyMovingRef = useRef<boolean>(false);
   const isAliveRef = useRef<boolean>(!isInstructor);
   const hpRef = useRef<number>(100);
-  const shieldRef = useRef<number>(50);
+  const shieldRef = useRef<number>(100);
   const woodRef = useRef<number>(30);
   const brickRef = useRef<number>(20);
   const metalRef = useRef<number>(15);
@@ -4208,7 +4210,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         angle: pt.angle,
         hp: 100,
         maxHp: 100,
-        shield: isKnight ? 70 : 50,
+        shield: isKnight ? 120 : 100,
         maxShield: isKnight ? 120 : 100,
         wood: Math.max(10, gameProfile?.wood ?? 20),
         brick: Math.max(10, gameProfile?.brick ?? 10),
@@ -4236,18 +4238,29 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       if (merged.status === 'IN_PROGRESS' && merged.startedAt) {
         if (lastMatchSeedKeyRef.current !== merged.startedAt || forceResetSpawn) {
           lastMatchSeedKeyRef.current = merged.startedAt;
+          matchGraceUntilRef.current = Date.now() + 3000;
+          authoritativeKilledMatchRef.current = null;
           localEliminatedRef.current = false;
           localDeathTimeRef.current = 0;
+          lastDamageTimeRef.current = 0;
           hasDeclaredWinnerRef.current = false;
           hasSpawnSynced.current = false;
           hasSpectatorFocusedRef.current = false;
           setShowEliminationToast(false);
           setSpectateTargetName(null);
 
-          // Instructor MUST stay an invisible spectator watching students play; students MUST start alive!
+          // Instructor MUST stay an invisible spectator watching students play; students MUST start alive with full HP & shields!
           const nextAlive = !isInstructorRef.current;
           isAliveRef.current = nextAlive;
           setIsAlive(nextAlive);
+          if (nextAlive) {
+            const fullSh = effectiveSkinDefRef.current.id === 'knight_hero' ? 120 : 100;
+            hpRef.current = 100;
+            prevLocalHpRef.current = 100;
+            shieldRef.current = fullSh;
+            setLocalHp(100);
+            setLocalShield(fullSh);
+          }
 
           worldDataRef.current = generateSuperAnimalStyleMap(hashSeedString(merged.startedAt));
           structuresRef.current = [];
@@ -4270,6 +4283,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       } else if (merged.status === 'LOBBY') {
         if (lastMatchSeedKeyRef.current !== null) {
           lastMatchSeedKeyRef.current = null;
+          matchGraceUntilRef.current = 0;
+          authoritativeKilledMatchRef.current = null;
           localEliminatedRef.current = false;
           localDeathTimeRef.current = 0;
           hasDeclaredWinnerRef.current = false;
@@ -4298,6 +4313,29 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         return false;
       }
 
+      const currentMatchKey = battleStateRef.current?.startedAt || 'live';
+      const inStartGrace =
+        Date.now() < matchGraceUntilRef.current &&
+        authoritativeKilledMatchRef.current !== currentMatchKey;
+      const matchIsInProgress = battleStateRef.current?.status === 'IN_PROGRESS';
+      const snapshotEliminated = matchIsInProgress && (!me.isAlive || (me.hp !== undefined && me.hp <= 0));
+
+      if (snapshotEliminated && inStartGrace) {
+        const fullSh = effectiveSkinDefRef.current.id === 'knight_hero' ? 120 : 100;
+        hpRef.current = 100;
+        prevLocalHpRef.current = 100;
+        setLocalHp(100);
+        if (lastDamageTimeRef.current === 0 && shieldRef.current < fullSh) {
+          shieldRef.current = fullSh;
+          setLocalShield(fullSh);
+        }
+        if (!isAliveRef.current) {
+          isAliveRef.current = true;
+          setIsAlive(true);
+        }
+        return false;
+      }
+
       if (me.hp < prevLocalHpRef.current) {
         lastDamageTimeRef.current = Date.now();
       }
@@ -4315,9 +4353,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         flashSkinAbility('Royal Absorption +Bricks!');
       }
 
-      const matchIsInProgress = battleStateRef.current?.status === 'IN_PROGRESS';
-      const snapshotEliminated = matchIsInProgress && (!me.isAlive || (me.hp !== undefined && me.hp <= 0));
       if (snapshotEliminated && !localEliminatedRef.current) {
+        authoritativeKilledMatchRef.current = currentMatchKey;
         localEliminatedRef.current = true;
         localDeathTimeRef.current = Date.now();
         selectedBuildTypeRef.current = null;
@@ -4333,18 +4370,22 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         setTimeout(() => setShowEliminationToast(false), 3800);
       }
 
-      prevLocalHpRef.current = me.hp;
+      const fullSh = effectiveSkinDefRef.current.id === 'knight_hero' ? 120 : 100;
+      const incomingHp = inStartGrace && lastDamageTimeRef.current === 0 ? Math.max(100, me.hp) : me.hp;
+      const incomingShield = inStartGrace && lastDamageTimeRef.current === 0 ? Math.max(fullSh, me.shield) : me.shield;
+
+      prevLocalHpRef.current = incomingHp;
       const resolvedAlive = !matchIsInProgress ? true : (localEliminatedRef.current ? false : me.isAlive);
-      const resolvedHp = resolvedAlive ? me.hp : 0;
+      const resolvedHp = resolvedAlive ? incomingHp : 0;
       const changedAlive = resolvedAlive !== isAliveRef.current;
 
       if (hpRef.current !== resolvedHp) {
         hpRef.current = resolvedHp;
         setLocalHp(resolvedHp);
       }
-      if (shieldRef.current !== me.shield) {
-        shieldRef.current = me.shield;
-        setLocalShield(me.shield);
+      if (shieldRef.current !== incomingShield) {
+        shieldRef.current = incomingShield;
+        setLocalShield(incomingShield);
       }
       if (isAliveRef.current !== resolvedAlive) {
         isAliveRef.current = resolvedAlive;
@@ -4421,7 +4462,16 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         },
         onWelcome: ({ state, players, structures: srvStructs, crates: srvCrates }) => {
           if (state && state.status) {
-            applyMatchStateTransition(state);
+            const curSt = battleStateRef.current;
+            const incomingStale =
+              curSt?.status === 'IN_PROGRESS' &&
+              curSt.startedAt &&
+              state.status === 'IN_PROGRESS' &&
+              state.startedAt &&
+              new Date(state.startedAt).getTime() < new Date(curSt.startedAt).getTime();
+            if (!incomingStale) {
+              applyMatchStateTransition(state);
+            }
           }
           if (Array.isArray(players)) {
             // Preserve existing names if Firestore had them; never include instructors/spectators
@@ -4486,6 +4536,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           frostSlowUntilRef.current = 0;
           setFrostSlowUntil(0);
           enemyFrostSlowUntilRef.current = {};
+          matchGraceUntilRef.current = Date.now() + 3000;
+          authoritativeKilledMatchRef.current = null;
           applyMatchStateTransition(state, true);
           const filteredPlayers = Array.isArray(players)
             ? players.filter(p => p && p.uid && !p.isSpectator && !(isInstructorRef.current && p.uid === user.id))
@@ -4500,16 +4552,24 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           } else {
             localEliminatedRef.current = false;
             localDeathTimeRef.current = 0;
+            setShowEliminationToast(false);
             const me = filteredPlayers.find(p => p.uid === user.id);
             if (me) {
-              hpRef.current = me.hp;
-              shieldRef.current = me.shield;
+              const fullSh = effectiveSkinDefRef.current.id === 'knight_hero' ? 120 : 100;
+              const startHp = Math.max(100, me.hp || 100);
+              const startShield = Math.max(fullSh, me.shield ?? fullSh);
+              me.hp = startHp;
+              me.shield = startShield;
+              me.isAlive = true;
+              hpRef.current = startHp;
+              prevLocalHpRef.current = startHp;
+              shieldRef.current = startShield;
               woodRef.current = Math.max(10, me.wood ?? 20);
               brickRef.current = Math.max(10, me.brick ?? 10);
               metalRef.current = Math.max(5, me.metal ?? 5);
               isAliveRef.current = true;
-              setLocalHp(me.hp);
-              setLocalShield(me.shield);
+              setLocalHp(startHp);
+              setLocalShield(startShield);
               setLocalWood(woodRef.current);
               setLocalBrick(brickRef.current);
               setLocalMetal(metalRef.current);
@@ -4598,7 +4658,11 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               existing.highGroundActive = hgNum === 1;
               existing.metalShieldActiveUntil = metalShieldUntilVal;
               existing.frostSlowUntil = frostSlowUntilVal || 0;
-              if (uid === user.id && !isInstructorRef.current && !isAliveBool && !localEliminatedRef.current && battleStateRef.current?.status === 'IN_PROGRESS') {
+              const currentMatchKey = battleStateRef.current?.startedAt || 'live';
+              const canProcessElimTick =
+                Date.now() >= matchGraceUntilRef.current ||
+                authoritativeKilledMatchRef.current === currentMatchKey;
+              if (uid === user.id && !isInstructorRef.current && !isAliveBool && !localEliminatedRef.current && battleStateRef.current?.status === 'IN_PROGRESS' && canProcessElimTick) {
                 syncLocalVitalsFromMe(existing);
               }
             } else {
@@ -4763,6 +4827,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             const resolvedHp = resolvedAlive ? dmg.hp : 0;
 
             if (!dmg.isAlive && !localEliminatedRef.current) {
+              authoritativeKilledMatchRef.current = battleStateRef.current?.startedAt || 'live';
               localEliminatedRef.current = true;
               localDeathTimeRef.current = Date.now();
               selectedBuildTypeRef.current = null;
@@ -4929,6 +4994,13 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         setLocalWood(p.wood);
         setLocalBrick(p.brick);
         setLocalMetal(p.metal);
+        if (!isInstructorRef.current && lastDamageTimeRef.current === 0) {
+          const fullSh = getFantasySkin(p.equippedSkin || p.avatar || 'cultist').id === 'knight_hero' ? 120 : 100;
+          if (shieldRef.current < fullSh) {
+            shieldRef.current = fullSh;
+            setLocalShield(fullSh);
+          }
+        }
       }
     });
     return () => unsub();
@@ -4970,7 +5042,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         angle: ang + Math.PI,
         hp: 100,
         maxHp: 100,
-        shield: isKnightHero ? 70 : 50,
+        shield: isKnightHero ? 120 : 100,
         maxShield: isKnightHero ? 120 : 100,
         wood: Math.max(10, gameProfile?.wood ?? 20),
         brick: Math.max(10, gameProfile?.brick ?? 10),
@@ -7310,6 +7382,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             hpRef.current = nextHp;
             setLocalHp(nextHp);
             if (nextHp <= 0) {
+              authoritativeKilledMatchRef.current = battleStateRef.current?.startedAt || 'live';
               localEliminatedRef.current = true;
               localDeathTimeRef.current = now;
               isAliveRef.current = false;
@@ -7322,6 +7395,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           }
           emitDamagePlayer(user.id, 8, undefined, true).then(res => {
             if (!wsConnectedRef.current && res.killed && !(activeSkinIdLoop === 'skeleton_warrior' && res.brittleGuardTriggered)) {
+              authoritativeKilledMatchRef.current = battleStateRef.current?.startedAt || 'live';
               localEliminatedRef.current = true;
               if (!localDeathTimeRef.current) localDeathTimeRef.current = Date.now();
               isAliveRef.current = false;

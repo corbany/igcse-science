@@ -183,7 +183,8 @@
         "nextEventDate": { "type": "string", "description": "Scheduled ISO timestamp of the monthly event" },
         "title": { "type": "string", "description": "Title of the tournament event" },
         "description": { "type": "string", "description": "Brief event instructions" },
-        "season": { "type": "number", "description": "Current tournament season" }
+        "season": { "type": "number", "description": "Current tournament season" },
+        "isScheduled": { "type": "boolean", "description": "Whether a monthly tournament countdown is actively scheduled" }
       }
     },
     "BattleEventState": {

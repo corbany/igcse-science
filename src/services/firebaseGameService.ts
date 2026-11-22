@@ -95,7 +95,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from './firebaseAuth';
 import { getFantasySkin } from '../data/fantasySkinsData';
-import { notifyServerBattleControl } from './battleRealtimeClient';
+import { notifyServerBattleControl, fetchServerBattleState } from './battleRealtimeClient';
 import { getRandomizedPracticeVaultQuestions } from '../data/syllabusQuestionsBank';
 import { getLocalDateKey, getYesterdayDateKey } from './badgeService';
 import { ALL_WEAPON_ITEMS, getBoosterPackById, resolveArenaWeaponId } from '../data/gameCatalogData';
@@ -177,6 +177,7 @@ export interface BattleEventConfig {
   title: string;
   description: string;
   season: number;
+  isScheduled?: boolean;
 }
 
 export interface BattleEventState {
@@ -1956,10 +1957,11 @@ export const claimModuleRevisionReward = async (
 // ============================================================================
 
 const DEFAULT_EVENT_CONFIG: BattleEventConfig = {
-  nextEventDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+  nextEventDate: '',
   title: 'Monthly Cambridge 0653 Revision Royale',
   description: 'Battle Royale arena tournament — build walls, dodge the shrinking storm, and answer Science Supply Crates!',
-  season: 1
+  season: 1,
+  isScheduled: false
 };
 
 const DEFAULT_EVENT_STATE: BattleEventState = {
@@ -1971,28 +1973,59 @@ const DEFAULT_EVENT_STATE: BattleEventState = {
   currentWinner: null
 };
 
+const normalizeEventConfig = (raw?: Partial<BattleEventConfig> | null): BattleEventConfig => {
+  if (!raw) return DEFAULT_EVENT_CONFIG;
+  const hasDate = typeof raw.nextEventDate === 'string' && raw.nextEventDate.trim().length > 0;
+  const isScheduled = raw.isScheduled !== undefined ? Boolean(raw.isScheduled && hasDate) : hasDate;
+  return {
+    nextEventDate: isScheduled ? raw.nextEventDate! : '',
+    title: raw.title || DEFAULT_EVENT_CONFIG.title,
+    description: raw.description || DEFAULT_EVENT_CONFIG.description,
+    season: Number(raw.season) || 1,
+    isScheduled
+  };
+};
+
 /**
  * Subscribe to the event schedule config (/battleEvent/config)
  */
 export const subscribeToBattleConfig = (
   callback: (config: BattleEventConfig) => void
 ): (() => void) => {
-  const cached = getLocalGameItem<BattleEventConfig>(LOCAL_BATTLE_CONFIG_KEY, DEFAULT_EVENT_CONFIG);
+  let firestoreResolved = false;
+  const cached = normalizeEventConfig(
+    getLocalGameItem<BattleEventConfig>(LOCAL_BATTLE_CONFIG_KEY, DEFAULT_EVENT_CONFIG)
+  );
   callback(cached);
+
+  // Corroborate with server memory only before Firestore responds or on error
+  fetchServerBattleState().then((srv) => {
+    if (!firestoreResolved && srv?.config) {
+      const normalizedSrv = normalizeEventConfig(srv.config);
+      setLocalGameItem(LOCAL_BATTLE_CONFIG_KEY, normalizedSrv);
+      callback(normalizedSrv);
+    }
+  }).catch(() => {});
 
   try {
     const configDoc = doc(db, 'battleEvent', 'config');
     return onSnapshot(configDoc, (snap) => {
+      firestoreResolved = true;
       if (snap.exists()) {
-        const data = snap.data() as BattleEventConfig;
+        const data = normalizeEventConfig(snap.data() as Partial<BattleEventConfig>);
         setLocalGameItem(LOCAL_BATTLE_CONFIG_KEY, data);
         callback(data);
       } else {
+        setLocalGameItem(LOCAL_BATTLE_CONFIG_KEY, DEFAULT_EVENT_CONFIG);
         callback(DEFAULT_EVENT_CONFIG);
       }
     }, (err) => {
       handleFirestoreError(err, 'subscribeToBattleConfig');
-      callback(getLocalGameItem<BattleEventConfig>(LOCAL_BATTLE_CONFIG_KEY, DEFAULT_EVENT_CONFIG));
+      callback(
+        normalizeEventConfig(
+          getLocalGameItem<BattleEventConfig>(LOCAL_BATTLE_CONFIG_KEY, DEFAULT_EVENT_CONFIG)
+        )
+      );
     });
   } catch (err) {
     handleFirestoreError(err, 'subscribeToBattleConfig');
@@ -2004,15 +2037,22 @@ export const subscribeToBattleConfig = (
  * Teacher control: Update tournament schedule
  */
 export const updateBattleConfig = async (config: Partial<BattleEventConfig>): Promise<void> => {
+  resetFirestoreQuotaState();
   const current = getLocalGameItem<BattleEventConfig>(LOCAL_BATTLE_CONFIG_KEY, DEFAULT_EVENT_CONFIG);
-  setLocalGameItem(LOCAL_BATTLE_CONFIG_KEY, { ...current, ...config });
+  const merged = normalizeEventConfig({ ...current, ...config });
+  setLocalGameItem(LOCAL_BATTLE_CONFIG_KEY, merged);
 
-  if (!canPerformFirestoreWrite()) return;
+  await notifyServerBattleControl({
+    action: 'config_update',
+    config: merged
+  }).catch(() => {});
+
   try {
     const configDoc = doc(db, 'battleEvent', 'config');
-    await setDoc(configDoc, config, { merge: true });
+    await setDoc(configDoc, merged, { merge: true });
   } catch (err) {
     handleFirestoreError(err, 'updateBattleConfig');
+    throw err;
   }
 };
 
@@ -2020,21 +2060,50 @@ export const updateBattleConfig = async (config: Partial<BattleEventConfig>): Pr
  * Teacher host control: Open or close the tournament lobby for students
  */
 export const setLobbyOpen = async (isOpen: boolean): Promise<void> => {
+  resetFirestoreQuotaState();
   const current = getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE);
   const updated: BattleEventState = { ...current, isLobbyOpen: isOpen };
   setLocalGameItem(LOCAL_BATTLE_STATE_KEY, updated);
 
-  if (!canPerformFirestoreWrite()) return;
-  try {
-    const stateDoc = doc(db, 'battleEvent', 'state');
-    await setDoc(stateDoc, { isLobbyOpen: isOpen }, { merge: true });
-  } catch (err) {
-    handleFirestoreError(err, 'setLobbyOpen');
+  if (!isOpen) {
+    setLocalGameItem(LOCAL_LOBBY_PLAYERS_KEY, []);
   }
+
+  const tasks: Promise<any>[] = [
+    notifyServerBattleControl({
+      action: 'lobby_open',
+      state: { isLobbyOpen: isOpen }
+    }).catch(() => {})
+  ];
+
+  const stateDoc = doc(db, 'battleEvent', 'state');
+  tasks.push(
+    setDoc(stateDoc, { isLobbyOpen: isOpen }, { merge: true }).catch((err) => {
+      handleFirestoreError(err, 'setLobbyOpen');
+    })
+  );
+
+  // When closing an idle lobby, clear stale lobby entries so ghost rosters don't remain
+  if (!isOpen && current.status !== 'IN_PROGRESS') {
+    tasks.push(
+      (async () => {
+        try {
+          const lobbySnap = await getDocs(collection(db, 'battleEvent', 'lobby', 'members'));
+          if (!lobbySnap.empty) {
+            const ops: BatchOp[] = [];
+            lobbySnap.forEach(d => ops.push({ type: 'delete', ref: d.ref }));
+            await commitBatchOpsInChunks(ops);
+          }
+        } catch {}
+      })()
+    );
+  }
+
+  await Promise.all(tasks);
 };
 
 /**
- * Subscribe to the live arena state (/battleEvent/state)
+ * Subscribe to the live arena state (/battleEvent/state) with server REST corroboration
  */
 export const subscribeToBattleState = (
   callback: (state: BattleEventState) => void
@@ -2042,9 +2111,41 @@ export const subscribeToBattleState = (
   const cached = getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE);
   callback(cached);
 
+  let disposed = false;
+  let hasFirestoreSnap = false;
+
+  // Corroborate immediately from Express battle room in case Firestore is throttled or delayed
+  fetchServerBattleState().then((srv) => {
+    if (disposed || !srv) return;
+    const cur = getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE);
+    const srvStartMs = srv.startedAt ? new Date(srv.startedAt).getTime() : 0;
+    const curStartMs = cur.startedAt ? new Date(cur.startedAt).getTime() : 0;
+    const serverHasNewerStart = srv.status === 'IN_PROGRESS' && srv.startedAt && srvStartMs >= curStartMs && srv.startedAt !== cur.startedAt;
+    const serverLobbyFallback = !hasFirestoreSnap && srv.isLobbyOpen !== undefined && srv.isLobbyOpen !== cur.isLobbyOpen;
+
+    if (serverHasNewerStart || serverLobbyFallback) {
+      const merged: BattleEventState = {
+        ...cur,
+        status: srv.status || cur.status,
+        isLobbyOpen: srv.isLobbyOpen ?? cur.isLobbyOpen,
+        startedAt: srv.startedAt !== undefined ? srv.startedAt : cur.startedAt,
+        stormFinalCenter: srv.stormFinalCenter || cur.stormFinalCenter,
+        currentWinner: srv.currentWinner !== undefined ? srv.currentWinner : cur.currentWinner
+      };
+      if (merged.status === 'LOBBY' || serverHasNewerStart) {
+        setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, []);
+        setLocalGameItem(LOCAL_STRUCTURES_KEY, []);
+        setLocalGameItem(LOCAL_CRATES_KEY, []);
+      }
+      setLocalGameItem(LOCAL_BATTLE_STATE_KEY, merged);
+      callback(merged);
+    }
+  }).catch(() => {});
+
   try {
     const stateDoc = doc(db, 'battleEvent', 'state');
-    return onSnapshot(stateDoc, (snap) => {
+    const unsub = onSnapshot(stateDoc, (snap) => {
+      hasFirestoreSnap = true;
       if (snap.exists()) {
         const data = snap.data() as BattleEventState;
         const prev = getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE);
@@ -2060,11 +2161,36 @@ export const subscribeToBattleState = (
       }
     }, (err) => {
       handleFirestoreError(err, 'subscribeToBattleState');
-      callback(getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE));
+      fetchServerBattleState().then((srv) => {
+        if (disposed || !srv) {
+          callback(getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE));
+          return;
+        }
+        const merged: BattleEventState = {
+          ...DEFAULT_EVENT_STATE,
+          ...getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE),
+          status: srv.status || 'LOBBY',
+          isLobbyOpen: Boolean(srv.isLobbyOpen),
+          startedAt: srv.startedAt ?? null,
+          stormFinalCenter: srv.stormFinalCenter || undefined,
+          currentWinner: srv.currentWinner ?? null
+        };
+        setLocalGameItem(LOCAL_BATTLE_STATE_KEY, merged);
+        callback(merged);
+      }).catch(() => {
+        callback(getLocalGameItem<BattleEventState>(LOCAL_BATTLE_STATE_KEY, DEFAULT_EVENT_STATE));
+      });
     });
+
+    return () => {
+      disposed = true;
+      unsub();
+    };
   } catch (err) {
     handleFirestoreError(err, 'subscribeToBattleState');
-    return () => {};
+    return () => {
+      disposed = true;
+    };
   }
 };
 
@@ -2085,7 +2211,7 @@ export const subscribeToLobby = (
       snap.forEach((docSnap) => {
         const data = docSnap.data() as Partial<LobbyPlayer>;
         const resolvedUid = (data.uid || docSnap.id || '').trim();
-        if (!resolvedUid || seenUids.has(resolvedUid)) return;
+        if (!resolvedUid || seenUids.has(resolvedUid) || (data as any).isSpectator) return;
         seenUids.add(resolvedUid);
         list.push({ ...(data as LobbyPlayer), uid: resolvedUid });
       });
@@ -2093,7 +2219,16 @@ export const subscribeToLobby = (
       callback(list);
     }, (err) => {
       handleFirestoreError(err, 'subscribeToLobby');
-      callback(getLocalGameItem<LobbyPlayer[]>(LOCAL_LOBBY_PLAYERS_KEY, []));
+      fetchServerBattleState().then((srv) => {
+        if (srv?.lobbyPlayers && Array.isArray(srv.lobbyPlayers)) {
+          setLocalGameItem(LOCAL_LOBBY_PLAYERS_KEY, srv.lobbyPlayers);
+          callback(srv.lobbyPlayers);
+        } else {
+          callback(getLocalGameItem<LobbyPlayer[]>(LOCAL_LOBBY_PLAYERS_KEY, []));
+        }
+      }).catch(() => {
+        callback(getLocalGameItem<LobbyPlayer[]>(LOCAL_LOBBY_PLAYERS_KEY, []));
+      });
     });
   } catch (err) {
     handleFirestoreError(err, 'subscribeToLobby');
@@ -2102,24 +2237,31 @@ export const subscribeToLobby = (
 };
 
 /**
- * Student action: Join Lobby
+ * Student action: Join Lobby (never dropped by gameplay quota backoff, synced to Firestore + server)
  */
 export const joinLobby = async (player: LobbyPlayer): Promise<void> => {
   if (!player.uid) return;
+  resetFirestoreQuotaState();
+  const payload: LobbyPlayer = {
+    ...player,
+    isReady: true,
+    joinedAt: player.joinedAt || new Date().toISOString()
+  };
+
   const currentLobby = getLocalGameItem<LobbyPlayer[]>(LOCAL_LOBBY_PLAYERS_KEY, []);
-  const nextLobby = [...currentLobby.filter(p => p.uid !== player.uid), { ...player, joinedAt: new Date().toISOString() }];
+  const nextLobby = [...currentLobby.filter(p => p.uid !== payload.uid), payload];
   setLocalGameItem(LOCAL_LOBBY_PLAYERS_KEY, nextLobby);
 
-  if (!canPerformFirestoreWrite()) return;
-  try {
-    const playerDoc = doc(db, 'battleEvent', 'lobby', 'members', player.uid);
-    await setDoc(playerDoc, {
-      ...player,
-      joinedAt: new Date().toISOString()
-    });
-  } catch (err) {
-    handleFirestoreError(err, 'joinLobby');
-  }
+  const playerDoc = doc(db, 'battleEvent', 'lobby', 'members', payload.uid);
+  await Promise.all([
+    setDoc(playerDoc, payload, { merge: true }).catch((err) => {
+      handleFirestoreError(err, 'joinLobby');
+    }),
+    notifyServerBattleControl({
+      action: 'lobby_join',
+      lobbyPlayer: payload
+    }).catch(() => {})
+  ]);
 };
 
 /**
@@ -2130,13 +2272,16 @@ export const leaveLobby = async (uid: string): Promise<void> => {
   const currentLobby = getLocalGameItem<LobbyPlayer[]>(LOCAL_LOBBY_PLAYERS_KEY, []);
   setLocalGameItem(LOCAL_LOBBY_PLAYERS_KEY, currentLobby.filter(p => p.uid !== uid));
 
-  if (!canPerformFirestoreWrite()) return;
-  try {
-    const playerDoc = doc(db, 'battleEvent', 'lobby', 'members', uid);
-    await deleteDoc(playerDoc);
-  } catch (err) {
-    handleFirestoreError(err, 'leaveLobby');
-  }
+  const playerDoc = doc(db, 'battleEvent', 'lobby', 'members', uid);
+  await Promise.all([
+    deleteDoc(playerDoc).catch((err) => {
+      handleFirestoreError(err, 'leaveLobby');
+    }),
+    notifyServerBattleControl({
+      action: 'lobby_leave',
+      lobbyPlayer: { uid } as LobbyPlayer
+    }).catch(() => {})
+  ]);
 };
 
 /**
@@ -2177,49 +2322,67 @@ const commitBatchOpsInChunks = async (ops: BatchOp[], chunkSize: number = 400): 
 
 /**
  * Teacher host action: START BATTLE ROYALE
- * Sets status to "IN_PROGRESS", initializes arena players from lobby,
+ * Sets status to "IN_PROGRESS", initializes arena players from lobby with FULL health & FULL shields,
  * clears old map structures, and spawns randomized science supply crates.
  */
 export const startBattleRoyale = async (): Promise<void> => {
   resetFirestoreQuotaState();
   const stateDoc = doc(db, 'battleEvent', 'state');
 
-  // 1. Fetch connected lobby players and old arena entities in parallel (4x faster startup)
+  // 1. Fetch connected lobby players, server lobby backup, and old arena entities in parallel
   const lobbyColl = collection(db, 'battleEvent', 'lobby', 'members');
   const structuresColl = collection(db, 'battleEvent', 'structures', 'items');
   const cratesColl = collection(db, 'battleEvent', 'crates', 'items');
   const playersColl = collection(db, 'battleEvent', 'players', 'items');
 
-  const [lobbySnap, structSnap, cratesSnap, playersSnap] = await Promise.all([
+  const [lobbySnap, structSnap, cratesSnap, playersSnap, serverState] = await Promise.all([
     getDocs(lobbyColl),
     getDocs(structuresColl),
     getDocs(cratesColl),
-    getDocs(playersColl)
+    getDocs(playersColl),
+    fetchServerBattleState().catch(() => null)
   ]);
 
-  const ops: BatchOp[] = [];
-  structSnap.forEach(s => ops.push({ type: 'delete', ref: s.ref }));
-  cratesSnap.forEach(c => ops.push({ type: 'delete', ref: c.ref }));
-  playersSnap.forEach(p => ops.push({ type: 'delete', ref: p.ref }));
+  const entityOps: BatchOp[] = [];
+  structSnap.forEach(s => entityOps.push({ type: 'delete', ref: s.ref }));
+  cratesSnap.forEach(c => entityOps.push({ type: 'delete', ref: c.ref }));
+  playersSnap.forEach(p => entityOps.push({ type: 'delete', ref: p.ref }));
 
-  // 2. Initialize Arena Players with circular spawn distribution
-  const count = lobbySnap.size || 1;
-  let idx = 0;
+  // Merge Firestore lobby members + server lobby members, skipping instructors/spectators
+  const lobbyMap = new Map<string, LobbyPlayer>();
+  lobbySnap.forEach((docSnap) => {
+    const l = docSnap.data() as Partial<LobbyPlayer> & { role?: string; isSpectator?: boolean };
+    const resolvedUid = (l.uid || docSnap.id || '').trim();
+    if (!resolvedUid || l.isSpectator || l.role === 'instructor') return;
+    lobbyMap.set(resolvedUid, { ...(l as LobbyPlayer), uid: resolvedUid });
+  });
+  if (Array.isArray(serverState?.lobbyPlayers)) {
+    for (const sl of serverState.lobbyPlayers) {
+      const slMeta = sl as LobbyPlayer & { isSpectator?: boolean; role?: string };
+      if (sl && sl.uid && !slMeta.isSpectator && slMeta.role !== 'instructor' && !lobbyMap.has(sl.uid)) {
+        lobbyMap.set(sl.uid, sl);
+      }
+    }
+  }
+
+  // 2. Initialize Arena Players with circular spawn distribution & FULL HP + FULL SHIELDS
+  const lobbyList = Array.from(lobbyMap.values());
+  const count = lobbyList.length || 1;
   const arenaCenter = 2500;
   const spawnRadius = 1400;
   const initializedPlayers: ArenaPlayer[] = [];
 
-  lobbySnap.forEach((docSnap) => {
-    const l = docSnap.data() as LobbyPlayer;
+  lobbyList.forEach((l, idx) => {
     const angle = (idx / count) * 2 * Math.PI;
     const x = Math.round(arenaCenter + Math.cos(angle) * spawnRadius);
     const y = Math.round(arenaCenter + Math.sin(angle) * spawnRadius);
     const resolvedSkin = getFantasySkin(l.avatar || 'cultist');
     const isKnightHero = resolvedSkin.id === 'knight_hero';
+    const maxShieldCap = isKnightHero ? 120 : 100;
 
     const arenaPlayer: ArenaPlayer = {
       uid: l.uid,
-      name: l.name,
+      name: l.name || 'Science Scholar',
       avatar: l.avatar || 'cultist',
       equippedWeapon: l.equippedWeapon || 'bunsen_burner',
       x,
@@ -2227,23 +2390,22 @@ export const startBattleRoyale = async (): Promise<void> => {
       angle: angle + Math.PI, // look toward center
       hp: 100,
       maxHp: 100,
-      shield: isKnightHero ? 70 : 50,
-      maxShield: isKnightHero ? 120 : 100,
+      shield: maxShieldCap,
+      maxShield: maxShieldCap,
       wood: Math.max(10, l.wood || 20),
       brick: Math.max(10, l.brick || 10),
       metal: Math.max(5, l.metal || 5),
       isAlive: true,
+      isSpectator: false,
       kills: 0
     };
 
     initializedPlayers.push(arenaPlayer);
     const targetDoc = doc(db, 'battleEvent', 'players', 'items', l.uid);
-    ops.push({ type: 'set', ref: targetDoc, data: arenaPlayer });
-    idx++;
+    entityOps.push({ type: 'set', ref: targetDoc, data: arenaPlayer });
   });
 
   // 3. Spawn 10 initial Science Supply Crates randomly within the opening Eye of the Storm
-  // Questions come directly from the randomized Practice Quiz Question Vault
   const initialVaultQuestions = getRandomizedPracticeVaultQuestions(10);
   const initialCrates: SupplyCrate[] = [];
   for (let c = 0; c < 10; c++) {
@@ -2261,7 +2423,7 @@ export const startBattleRoyale = async (): Promise<void> => {
     };
     initialCrates.push(crateData);
     const crateRef = doc(db, 'battleEvent', 'crates', 'items', crateId);
-    ops.push({ type: 'set', ref: crateRef, data: crateData });
+    entityOps.push({ type: 'set', ref: crateRef, data: crateData });
   }
 
   // 4. Set state to IN_PROGRESS with 3600px border radius and randomized finish center
@@ -2281,20 +2443,23 @@ export const startBattleRoyale = async (): Promise<void> => {
   setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, initializedPlayers);
   setLocalGameItem(LOCAL_STRUCTURES_KEY, []);
   setLocalGameItem(LOCAL_CRATES_KEY, initialCrates);
-  ops.push({ type: 'set', ref: stateDoc, data: liveState });
 
-  // Commit Firestore deletions/spawns BEFORE notifying WS room & flipping state so late/joining students never read stale dead docs
-  await commitBatchOpsInChunks(ops);
+  // Strict 3-step launch ordering:
+  // (a) Commit fresh alive player docs & crates to Firestore first
+  await commitBatchOpsInChunks(entityOps);
+  // (b) Seed WebSocket battle room & broadcast match_start before flipping Firestore battleEvent/state
   await notifyServerBattleControl({
     action: 'start',
     state: liveState,
     players: initializedPlayers,
     crates: initialCrates
   });
+  // (c) Finally flip battleEvent/state to IN_PROGRESS so Firestore listeners mount Arena into an already-ready room
+  await setDoc(stateDoc, liveState);
 };
 
 /**
- * Teacher host action: Reset match and clear arena
+ * Teacher host action: Reset match, clear arena, and purge stale lobby roster entries
  */
 export const resetBattleEvent = async (): Promise<void> => {
   resetFirestoreQuotaState();
@@ -2302,21 +2467,25 @@ export const resetBattleEvent = async (): Promise<void> => {
   setLocalGameItem(LOCAL_ARENA_PLAYERS_KEY, []);
   setLocalGameItem(LOCAL_STRUCTURES_KEY, []);
   setLocalGameItem(LOCAL_CRATES_KEY, []);
+  setLocalGameItem(LOCAL_LOBBY_PLAYERS_KEY, []);
 
   const ops: BatchOp[] = [];
   const playersColl = collection(db, 'battleEvent', 'players', 'items');
   const structuresColl = collection(db, 'battleEvent', 'structures', 'items');
   const cratesColl = collection(db, 'battleEvent', 'crates', 'items');
+  const lobbyColl = collection(db, 'battleEvent', 'lobby', 'members');
 
-  const [playersSnap, structSnap, cratesSnap] = await Promise.all([
+  const [playersSnap, structSnap, cratesSnap, lobbySnap] = await Promise.all([
     getDocs(playersColl),
     getDocs(structuresColl),
-    getDocs(cratesColl)
+    getDocs(cratesColl),
+    getDocs(lobbyColl)
   ]);
 
   playersSnap.forEach(p => ops.push({ type: 'delete', ref: p.ref }));
   structSnap.forEach(s => ops.push({ type: 'delete', ref: s.ref }));
   cratesSnap.forEach(c => ops.push({ type: 'delete', ref: c.ref }));
+  lobbySnap.forEach(l => ops.push({ type: 'delete', ref: l.ref }));
 
   const stateDoc = doc(db, 'battleEvent', 'state');
   ops.push({ type: 'set', ref: stateDoc, data: DEFAULT_EVENT_STATE });

@@ -1,7 +1,9 @@
 import type {
   ArenaPlayer,
   ArenaStructure,
+  BattleEventConfig,
   BattleEventState,
+  LobbyPlayer,
   SupplyCrate
 } from './firebaseGameService';
 
@@ -68,7 +70,9 @@ export interface BattleRealtimeHandlers {
     players: ArenaPlayer[];
     structures: ArenaStructure[];
     crates: SupplyCrate[];
+    lobbyPlayers?: LobbyPlayer[];
   }) => void;
+  onLobbyState?: (players: LobbyPlayer[]) => void;
   onTick?: (tuples: BattleTickTuple[], serverTs: number) => void;
   onShot?: (shot: BattleShotEvent) => void;
   onDamage?: (dmg: BattleDamageEvent) => void;
@@ -173,6 +177,9 @@ export class BattleRealtimeClient {
             break;
           case 'match_reset':
             if (msg.state) this.handlers.onMatchReset?.(msg.state);
+            break;
+          case 'lobby_state':
+            if (Array.isArray(msg.players)) this.handlers.onLobbyState?.(msg.players);
             break;
         }
       };
@@ -288,11 +295,13 @@ export class BattleRealtimeClient {
 }
 
 export async function notifyServerBattleControl(payload: {
-  action: 'start' | 'end' | 'reset' | 'crate_drop';
+  action: 'start' | 'end' | 'reset' | 'crate_drop' | 'lobby_open' | 'lobby_join' | 'lobby_leave' | 'config_update';
   state?: Partial<BattleEventState>;
   players?: ArenaPlayer[];
   crates?: SupplyCrate[];
   crate?: SupplyCrate;
+  lobbyPlayer?: LobbyPlayer;
+  config?: Partial<BattleEventConfig> | null;
 }): Promise<void> {
   if (typeof fetch === 'undefined') return;
   try {
@@ -303,5 +312,22 @@ export async function notifyServerBattleControl(payload: {
     });
   } catch {
     // Non-fatal if running offline
+  }
+}
+
+export async function fetchServerBattleState(): Promise<(Partial<BattleEventState> & { lobbyPlayers?: LobbyPlayer[]; config?: BattleEventConfig | null }) | null> {
+  if (typeof fetch === 'undefined') return null;
+  try {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 3500) : null;
+    const res = await fetch('/api/battle/state', {
+      method: 'GET',
+      ...(controller ? { signal: controller.signal } : {})
+    });
+    if (timer) clearTimeout(timer);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
   }
 }
