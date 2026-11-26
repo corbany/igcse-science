@@ -193,11 +193,12 @@ export const AdminBattleControl: React.FC<AdminBattleControlProps> = ({
       let chosenWinner: { uid: string; name: string; avatar: string } | null = null;
       if (selectedWinnerUid !== 'none') {
         if (selectedWinnerUid === 'auto') {
-          // Top alive player
-          const alive = arenaPlayers.filter(p => p.isAlive);
+          const realPool = arenaPlayers.filter(p => !p.isSpectator && !p.uid.startsWith('dummy_'));
+          const pool = realPool.length > 0 ? realPool : arenaPlayers.filter(p => !p.isSpectator);
+          const alive = pool.filter(p => p.isAlive);
           const top = alive.length > 0
             ? [...alive].sort((a, b) => (b.kills * 100 + b.hp) - (a.kills * 100 + a.hp))[0]
-            : [...arenaPlayers].sort((a, b) => (b.kills * 100 + b.hp) - (a.kills * 100 + a.hp))[0];
+            : [...pool].sort((a, b) => (b.kills * 100 + b.hp) - (a.kills * 100 + a.hp))[0];
           if (top) {
             chosenWinner = { uid: top.uid, name: top.name, avatar: top.avatar };
           }

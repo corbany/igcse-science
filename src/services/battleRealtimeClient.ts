@@ -20,7 +20,9 @@ export type BattleTickTuple = [
   string, // 9: equippedWeapon
   number, // 10: highGroundActive (1 | 0)
   number, // 11: metalShieldActiveUntil
-  number  // 12: frostSlowUntil
+  number, // 12: frostSlowUntil
+  number?, // 13: vx (px/sec)
+  number?  // 14: vy (px/sec)
 ];
 
 export interface BattleShotEvent {
@@ -223,6 +225,8 @@ export class BattleRealtimeClient {
     x: number;
     y: number;
     angle: number;
+    vx?: number;
+    vy?: number;
     avatar?: string;
     equippedWeapon?: string;
     wood?: number;

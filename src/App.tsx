@@ -20,6 +20,7 @@ import { AvatarShop } from './components/AvatarShop';
 import { GameLobby } from './components/GameLobby';
 import { AdminBattleControl } from './components/AdminBattleControl';
 import { BattleRoyaleArena } from './components/BattleRoyaleArena';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { StudentTaskProgressBar } from './components/StudentTaskProgressBar';
 import { TaskView } from './components/TaskView';
 import { Dashboard } from './components/Dashboard';
@@ -134,6 +135,7 @@ export default function App() {
 
   // Revision Royale Tournament & Arena State
   const [battleArenaActive, setBattleArenaActive] = useState<boolean>(false);
+  const [studentEnteredArena, setStudentEnteredArena] = useState<boolean>(false);
   const [battleState, setBattleState] = useState<BattleEventState | null>(null);
   const [battleConfig, setBattleConfig] = useState<BattleEventConfig | null>(null);
   const [shopInitialTab, setShopInitialTab] = useState<'shop' | 'collection' | 'armory'>('shop');
@@ -145,8 +147,10 @@ export default function App() {
       setBattleState(state);
       if (state.status === 'IN_PROGRESS' && currentTabRef.current === 'royale') {
         setBattleArenaActive(true);
-      } else if (state.status !== 'IN_PROGRESS') {
+        setStudentEnteredArena(true);
+      } else if (state.status !== 'IN_PROGRESS' && state.status !== 'ENDED') {
         setBattleArenaActive(false);
+        setStudentEnteredArena(false);
       }
     });
     const unsubConfig = subscribeToBattleConfig((cfg) => {
@@ -161,8 +165,10 @@ export default function App() {
   useEffect(() => {
     if (battleState?.status === 'IN_PROGRESS' && currentTab === 'royale') {
       setBattleArenaActive(true);
-    } else if (battleState && battleState.status !== 'IN_PROGRESS') {
+      setStudentEnteredArena(true);
+    } else if (battleState && battleState.status !== 'IN_PROGRESS' && battleState.status !== 'ENDED') {
       setBattleArenaActive(false);
+      setStudentEnteredArena(false);
     }
   }, [battleState?.status, currentTab]);
 
@@ -1680,10 +1686,16 @@ export default function App() {
         {currentTab === 'royale' && (
           (user?.email === 'corbanb@gisboyshigh.net' || !isEffectiveStudent) ? (
             battleArenaActive ? (
-              <BattleRoyaleArena
-                user={user}
-                onExit={() => setBattleArenaActive(false)}
-              />
+              <ErrorBoundary
+                fallbackTitle="Arena View Recovered"
+                onReturn={() => setBattleArenaActive(false)}
+                returnLabel="Back to Match Control"
+              >
+                <BattleRoyaleArena
+                  user={user}
+                  onExit={() => setBattleArenaActive(false)}
+                />
+              </ErrorBoundary>
             ) : (
               <AdminBattleControl
                 currentUser={user}
@@ -1692,14 +1704,25 @@ export default function App() {
                 onClose={() => setCurrentTab('instructor')}
               />
             )
-          ) : battleState?.status === 'IN_PROGRESS' ? (
-            <BattleRoyaleArena
-              user={effectiveUser || user}
-              onExit={() => {
+          ) : (battleState?.status === 'IN_PROGRESS' || (battleState?.status === 'ENDED' && studentEnteredArena)) ? (
+            <ErrorBoundary
+              fallbackTitle="Arena View Recovered"
+              onReturn={() => {
                 setBattleArenaActive(false);
+                setStudentEnteredArena(false);
                 setCurrentTab('lessons');
               }}
-            />
+              returnLabel="Return to Lessons"
+            >
+              <BattleRoyaleArena
+                user={effectiveUser || user}
+                onExit={() => {
+                  setBattleArenaActive(false);
+                  setStudentEnteredArena(false);
+                  setCurrentTab('lessons');
+                }}
+              />
+            </ErrorBoundary>
           ) : battleState?.isLobbyOpen ? (
             <GameLobby
               user={effectiveUser || user}

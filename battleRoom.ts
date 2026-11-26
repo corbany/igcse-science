@@ -1,6 +1,11 @@
 import type { Server as HttpServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { getFantasySkin } from './src/data/fantasySkinsData.ts';
+import {
+  computeEqualMapSpawns,
+  pickFarthestOpenMapSpawn,
+  type SpawnCoordinate
+} from './src/utils/battleSpawnLayout.ts';
 
 export interface RoomPlayer {
   uid: string;
@@ -25,6 +30,8 @@ export interface RoomPlayer {
   royalAbsorptionUsedAt?: number;
   brittleGuardUsedAt?: number;
   frostSlowUntil?: number;
+  vx?: number;
+  vy?: number;
   dirty?: boolean;
   lastUpdateAt?: number;
 }
@@ -118,19 +125,16 @@ function resolveFullShieldCap(avatarId?: string): number {
   return getFantasySkin(avatarId || 'cultist').id === 'knight_hero' ? 120 : 100;
 }
 
-function buildSpawnFromLobby(l: RoomLobbyPlayer, idx: number, count: number): RoomPlayer {
-  const angle = (idx / Math.max(1, count)) * 2 * Math.PI;
-  const arenaCenter = 2500;
-  const spawnRadius = 1400;
+function buildSpawnFromLobby(l: RoomLobbyPlayer, spawn: SpawnCoordinate): RoomPlayer {
   const fullShield = resolveFullShieldCap(l.avatar);
   return {
     uid: l.uid,
     name: l.name || 'Hero',
     avatar: l.avatar || 'cultist',
     equippedWeapon: l.equippedWeapon || 'bunsen_burner',
-    x: Math.round(arenaCenter + Math.cos(angle) * spawnRadius),
-    y: Math.round(arenaCenter + Math.sin(angle) * spawnRadius),
-    angle: angle + Math.PI,
+    x: spawn.x,
+    y: spawn.y,
+    angle: spawn.angle,
     hp: 100,
     maxHp: 100,
     shield: fullShield,
@@ -141,6 +145,8 @@ function buildSpawnFromLobby(l: RoomLobbyPlayer, idx: number, count: number): Ro
     isAlive: true,
     isSpectator: false,
     kills: 0,
+    vx: 0,
+    vy: 0,
     dirty: false,
     lastUpdateAt: Date.now()
   };
@@ -252,6 +258,20 @@ function maybeCheckLastStandingWinner() {
       name: victor.name,
       avatar: victor.avatar
     };
+    broadcastJson({
+      type: 'match_state',
+      state: { ...roomState }
+    });
+  } else if (alivePlayers.length === 0) {
+    const ranked = [...realPlayers].sort(
+      (a, b) => ((b.kills || 0) * 100 + (b.lastUpdateAt || 0) * 0.0001) - ((a.kills || 0) * 100 + (a.lastUpdateAt || 0) * 0.0001)
+    );
+    const victor = ranked[0];
+    roomState.status = 'ENDED';
+    roomState.isLobbyOpen = false;
+    roomState.currentWinner = victor
+      ? { uid: victor.uid, name: victor.name, avatar: victor.avatar }
+      : null;
     broadcastJson({
       type: 'match_state',
       state: { ...roomState }
@@ -376,6 +396,8 @@ export function applyServerBattleControl(input: {
             isAlive: true,
             isSpectator: false,
             kills: 0,
+            vx: 0,
+            vy: 0,
             dirty: false,
             lastUpdateAt: startNow
           });
@@ -383,15 +405,28 @@ export function applyServerBattleControl(input: {
       }
     }
 
-    // Ensure every student locked in roomLobby also enters alive with full HP & full shields
-    const missingLobby = Array.from(roomLobby.values()).filter(
-      l => l.uid && !l.isSpectator && !roomPlayers.has(l.uid)
-    );
-    const baseOffset = roomPlayers.size;
-    const totalCount = Math.max(1, baseOffset + missingLobby.length);
-    missingLobby.forEach((l, i) => {
-      roomPlayers.set(l.uid, buildSpawnFromLobby(l, baseOffset + i, totalCount));
-    });
+    // Ensure every student locked in roomLobby also enters alive with full HP & full shields, equally spread across the map
+    const missingLobby = Array.from(roomLobby.values())
+      .filter(l => l.uid && !l.isSpectator && !roomPlayers.has(l.uid))
+      .sort((a, b) => a.uid.localeCompare(b.uid));
+
+    if (missingLobby.length > 0) {
+      if (roomPlayers.size === 0) {
+        const spawns = computeEqualMapSpawns(missingLobby.length, incomingStartedAt);
+        missingLobby.forEach((l, i) => {
+          roomPlayers.set(l.uid, buildSpawnFromLobby(l, spawns[i]));
+        });
+      } else {
+        for (const l of missingLobby) {
+          const openSpawn = pickFarthestOpenMapSpawn(
+            l.uid,
+            incomingStartedAt,
+            Array.from(roomPlayers.values())
+          );
+          roomPlayers.set(l.uid, buildSpawnFromLobby(l, openSpawn));
+        }
+      }
+    }
 
     if (Array.isArray(crates)) {
       for (const c of crates) {
@@ -431,19 +466,19 @@ export function createBattleWebSocketServer() {
     perMessageDeflate: false // Skip per-frame deflate CPU overhead for 32-player 20Hz ticks
   });
 
-  // 20Hz (50ms) coalesced delta tick — replaces 32x32=1024 Firestore snapshot reads/sec!
+  // 30Hz (33ms) coalesced delta tick with sub-pixel coords & velocity for smooth opponent interpolation
   const tickInterval = setInterval(() => {
     if (connectedClients.size === 0 || roomPlayers.size === 0) return;
     const updatedTuples: Array<
-      [string, number, number, number, number, number, number, number, string, string, number, number, number]
+      [string, number, number, number, number, number, number, number, string, string, number, number, number, number, number]
     > = [];
     for (const p of roomPlayers.values()) {
       if (!p.dirty) continue;
       p.dirty = false;
       updatedTuples.push([
         p.uid,
-        Math.round(p.x),
-        Math.round(p.y),
+        Number(p.x.toFixed(1)),
+        Number(p.y.toFixed(1)),
         Number((p.angle || 0).toFixed(2)),
         p.hp,
         p.shield,
@@ -453,7 +488,9 @@ export function createBattleWebSocketServer() {
         p.equippedWeapon || 'bunsen_burner',
         p.highGroundActive ? 1 : 0,
         p.metalShieldActiveUntil || 0,
-        p.frostSlowUntil || 0
+        p.frostSlowUntil || 0,
+        Math.round(p.vx || 0),
+        Math.round(p.vy || 0)
       ]);
     }
     if (updatedTuples.length > 0) {
@@ -463,7 +500,7 @@ export function createBattleWebSocketServer() {
         u: updatedTuples
       });
     }
-  }, 50);
+  }, 33);
 
   // Heartbeat keepalive so reverse proxies (Cloud Run) keep WS open and dead tabs get cleaned up
   const heartbeatInterval = setInterval(() => {
@@ -584,8 +621,20 @@ export function createBattleWebSocketServer() {
             const existing = isStaleExisting ? undefined : existingRaw;
             const fullShield = resolveFullShieldCap(p.avatar);
             if (!existing) {
+              const useServerSpread =
+                roomState.status === 'IN_PROGRESS' && !msg.spawnSynced;
+              const openSpawn = useServerSpread
+                ? pickFarthestOpenMapSpawn(
+                    p.uid,
+                    roomState.startedAt || 'live',
+                    Array.from(roomPlayers.values())
+                  )
+                : null;
               const created: RoomPlayer = {
                 ...p,
+                x: openSpawn ? openSpawn.x : p.x,
+                y: openSpawn ? openSpawn.y : p.y,
+                angle: openSpawn ? openSpawn.angle : p.angle,
                 isAlive: true,
                 isSpectator: false,
                 hp: 100,
@@ -627,8 +676,27 @@ export function createBattleWebSocketServer() {
           if (!p) return;
           if (!p.isAlive || p.hp <= 0) return; // Spectators don't broadcast live avatar positions
 
-          if (typeof msg.x === 'number' && Number.isFinite(msg.x)) p.x = msg.x;
-          if (typeof msg.y === 'number' && Number.isFinite(msg.y)) p.y = msg.y;
+          const prevX = p.x;
+          const prevY = p.y;
+          const prevUpdateAt = p.lastUpdateAt || now;
+          if (typeof msg.x === 'number' && Number.isFinite(msg.x)) {
+            p.x = Math.max(0, Math.min(5120, msg.x));
+          }
+          if (typeof msg.y === 'number' && Number.isFinite(msg.y)) {
+            p.y = Math.max(0, Math.min(5120, msg.y));
+          }
+          if (typeof msg.vx === 'number' && Number.isFinite(msg.vx)) {
+            p.vx = Math.max(-900, Math.min(900, msg.vx));
+          } else {
+            const elapsedSec = Math.max(0.016, (now - prevUpdateAt) / 1000);
+            p.vx = elapsedSec < 0.25 ? Math.max(-900, Math.min(900, (p.x - prevX) / elapsedSec)) : 0;
+          }
+          if (typeof msg.vy === 'number' && Number.isFinite(msg.vy)) {
+            p.vy = Math.max(-900, Math.min(900, msg.vy));
+          } else {
+            const elapsedSec = Math.max(0.016, (now - prevUpdateAt) / 1000);
+            p.vy = elapsedSec < 0.25 ? Math.max(-900, Math.min(900, (p.y - prevY) / elapsedSec)) : 0;
+          }
           if (typeof msg.angle === 'number' && Number.isFinite(msg.angle)) p.angle = msg.angle;
           if (typeof msg.avatar === 'string' && msg.avatar) p.avatar = msg.avatar;
           if (typeof msg.equippedWeapon === 'string' && msg.equippedWeapon) p.equippedWeapon = msg.equippedWeapon;
@@ -649,6 +717,9 @@ export function createBattleWebSocketServer() {
           if (!senderUid) return;
           const sender = roomPlayers.get(senderUid);
           if (sender && (!sender.isAlive || sender.hp <= 0)) return;
+          const sx = typeof msg.x === 'number' && Number.isFinite(msg.x) ? msg.x : (sender?.x ?? 2560);
+          const sy = typeof msg.y === 'number' && Number.isFinite(msg.y) ? msg.y : (sender?.y ?? 2560);
+          const sAngle = typeof msg.angle === 'number' && Number.isFinite(msg.angle) ? msg.angle : 0;
           broadcastJson(
             {
               type: 'shot',
@@ -656,9 +727,9 @@ export function createBattleWebSocketServer() {
               weaponId: msg.weaponId,
               isAlt: Boolean(msg.isAlt),
               altType: msg.altType,
-              x: msg.x,
-              y: msg.y,
-              angle: msg.angle,
+              x: sx,
+              y: sy,
+              angle: sAngle,
               color: msg.color,
               projectiles: Array.isArray(msg.projectiles) ? msg.projectiles.slice(0, 14) : undefined,
               vfx: Array.isArray(msg.vfx) ? msg.vfx.slice(0, 8) : undefined
@@ -687,6 +758,10 @@ export function createBattleWebSocketServer() {
           target.shield = outcome.newShield;
           target.hp = outcome.newHp;
           target.isAlive = !outcome.isKilled;
+          if (outcome.isKilled) {
+            target.vx = 0;
+            target.vy = 0;
+          }
           if (outcome.bricksGained > 0) {
             target.brick = (target.brick || 0) + outcome.bricksGained;
           }

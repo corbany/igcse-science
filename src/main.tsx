@@ -1,6 +1,7 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import './index.css';
 import { doc, getDocFromServer } from 'firebase/firestore';
 import { db } from './services/firebaseAuth';
@@ -18,6 +19,12 @@ testConnection();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary
+      fallbackTitle="Application Display Recovered"
+      onReturn={() => window.location.reload()}
+      returnLabel="Refresh Page"
+    >
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );

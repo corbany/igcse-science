@@ -71,6 +71,7 @@ import {
   BattleDamageEvent
 } from '../services/battleRealtimeClient';
 import { getRandomizedPracticeVaultQuestions } from '../data/syllabusQuestionsBank';
+import { pickFarthestOpenMapSpawn } from '../utils/battleSpawnLayout';
 
 // ============================================================================
 // CONSTANTS & MAP METRICS
@@ -159,6 +160,110 @@ function buildSpatialWorldIndex(world: GeneratedWorldData | null): SpatialWorldI
   }
 
   return { scenery, buildings, cityWalls, loot };
+}
+
+function isSpawnPointClear(
+  world: GeneratedWorldData | null,
+  sIdx: SpatialWorldIndex | null,
+  x: number,
+  y: number
+): boolean {
+  if (x < 120 || x > MAP_SIZE - 120 || y < 120 || y > MAP_SIZE - 120) return false;
+  if (!world) return true;
+
+  const tiles = world.tiles;
+  if (tiles && tiles.length > 0) {
+    const sampleOffsets = [
+      [0, 0],
+      [-18, 0],
+      [18, 0],
+      [0, -18],
+      [0, 18]
+    ];
+    for (const [ox, oy] of sampleOffsets) {
+      const tc = Math.max(0, Math.min(TILES_COUNT - 1, Math.floor((x + ox) / WORLD_TILE_SIZE)));
+      const tr = Math.max(0, Math.min(TILES_COUNT - 1, Math.floor((y + oy) / WORLD_TILE_SIZE)));
+      if (tiles[tr]?.[tc]?.isWater) return false;
+    }
+  }
+
+  if (sIdx) {
+    const cx = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor(x / SPATIAL_CELL_SIZE)));
+    const cy = Math.max(0, Math.min(SPATIAL_GRID_DIM - 1, Math.floor(y / SPATIAL_CELL_SIZE)));
+    const cellIdx = cy * SPATIAL_GRID_DIM + cx;
+
+    for (const bldg of sIdx.buildings[cellIdx]) {
+      if (
+        getBuildingHitboxes(bldg).some(
+          (hb) => x >= hb.x - 22 && x <= hb.x + hb.w + 22 && y >= hb.y - 22 && y <= hb.y + hb.h + 22
+        )
+      ) {
+        return false;
+      }
+    }
+    for (const wall of sIdx.cityWalls[cellIdx]) {
+      if (x >= wall.x - 22 && x <= wall.x + wall.w + 22 && y >= wall.y - 22 && y <= wall.y + wall.h + 22) {
+        return false;
+      }
+    }
+    for (let r = Math.max(0, cy - 1); r <= Math.min(SPATIAL_GRID_DIM - 1, cy + 1); r++) {
+      for (let c = Math.max(0, cx - 1); c <= Math.min(SPATIAL_GRID_DIM - 1, cx + 1); c++) {
+        for (const sc of sIdx.scenery[r * SPATIAL_GRID_DIM + c]) {
+          if (sc.hp > 0 && sc.footprintRadius > 0 && Math.hypot(x - sc.x, y - sc.y) < sc.footprintRadius + 18) {
+            return false;
+          }
+        }
+      }
+    }
+  } else {
+    for (const bldg of world.buildings || []) {
+      if (
+        getBuildingHitboxes(bldg).some(
+          (hb) => x >= hb.x - 22 && x <= hb.x + hb.w + 22 && y >= hb.y - 22 && y <= hb.y + hb.h + 22
+        )
+      ) {
+        return false;
+      }
+    }
+    for (const wall of world.cityWalls || []) {
+      if (x >= wall.x - 22 && x <= wall.x + wall.w + 22 && y >= wall.y - 22 && y <= wall.y + wall.h + 22) {
+        return false;
+      }
+    }
+    for (const sc of world.scenery || []) {
+      if (sc.hp > 0 && sc.footprintRadius > 0 && Math.hypot(x - sc.x, y - sc.y) < sc.footprintRadius + 18) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+function findClearSpawnNear(
+  world: GeneratedWorldData | null,
+  sIdx: SpatialWorldIndex | null,
+  targetX: number,
+  targetY: number
+): { x: number; y: number; nudged: boolean } {
+  const rx = Math.round(Math.max(160, Math.min(MAP_SIZE - 160, targetX)));
+  const ry = Math.round(Math.max(160, Math.min(MAP_SIZE - 160, targetY)));
+  if (!world || isSpawnPointClear(world, sIdx, rx, ry)) {
+    return { x: rx, y: ry, nudged: false };
+  }
+
+  for (let radius = 48; radius <= 384; radius += 48) {
+    for (let step = 0; step < 12; step++) {
+      const ang = (step / 12) * Math.PI * 2;
+      const cx = Math.round(Math.max(160, Math.min(MAP_SIZE - 160, rx + Math.cos(ang) * radius)));
+      const cy = Math.round(Math.max(160, Math.min(MAP_SIZE - 160, ry + Math.sin(ang) * radius)));
+      if (isSpawnPointClear(world, sIdx, cx, cy)) {
+        return { x: cx, y: cy, nudged: true };
+      }
+    }
+  }
+
+  return { x: rx, y: ry, nudged: false };
 }
 
 // 1. Exact Kenney 16x16 Roguelike Sheet Slicing Math (16px tile + 1px border spacing)
@@ -716,18 +821,38 @@ export const SPRITE_MANIFEST: Record<string, string> = {
   landscape_sheet: '/assets/roguelikeSheet_transparent.png'
 };
 
-// Global shared cache for 1024x1024 modular character action sheets (idle, walk, run, attack, hurt, death)
+// Global bounded LRU cache for 1024x1024 modular character action sheets (prevents OOM tab crashes)
+const MAX_ACTION_SHEET_CACHE = 40;
 const characterActionCache = new Map<string, HTMLImageElement>();
 export function getActionSheetImage(src: string): HTMLImageElement | null {
   if (!src) return null;
   let img = characterActionCache.get(src);
-  if (!img) {
+  if (img) {
+    // Refresh LRU position
+    characterActionCache.delete(src);
+    characterActionCache.set(src, img);
+  } else {
+    if (characterActionCache.size >= MAX_ACTION_SHEET_CACHE) {
+      const oldestKey = characterActionCache.keys().next().value;
+      if (oldestKey) {
+        const evicted = characterActionCache.get(oldestKey);
+        if (evicted) {
+          try { evicted.src = ''; } catch {}
+        }
+        characterActionCache.delete(oldestKey);
+      }
+    }
     img = new Image();
     img.src = src;
     characterActionCache.set(src, img);
   }
   if (img.complete && img.naturalWidth > 0) return img;
   return null;
+}
+
+export function normalizeAngleDelta(delta: number): number {
+  if (!Number.isFinite(delta)) return 0;
+  return Math.atan2(Math.sin(delta), Math.cos(delta));
 }
 
 // ============================================================================
@@ -841,21 +966,41 @@ class ArenaSoundEngine {
     return true;
   }
 
+  private bindAutoDisconnect(source: AudioScheduledSourceNode, nodes: AudioNode[]) {
+    source.onended = () => {
+      try { source.disconnect(); } catch {}
+      for (const n of nodes) {
+        try { n.disconnect(); } catch {}
+      }
+    };
+  }
+
   public initCtx() {
+    if (this.ctx && this.ctx.state === 'closed') {
+      this.ctx = null;
+      this.masterGain = null;
+      this.sfxGain = null;
+      this.musicGain = null;
+      this.noiseBuffer = null;
+    }
     if (!this.ctx && typeof window !== 'undefined') {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (AudioCtx) {
-        this.ctx = new AudioCtx();
-        this.masterGain = this.ctx.createGain();
-        this.sfxGain = this.ctx.createGain();
-        this.musicGain = this.ctx.createGain();
+      try {
+        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (AudioCtx) {
+          this.ctx = new AudioCtx();
+          this.masterGain = this.ctx.createGain();
+          this.sfxGain = this.ctx.createGain();
+          this.musicGain = this.ctx.createGain();
 
-        this.sfxGain.connect(this.masterGain);
-        this.musicGain.connect(this.masterGain);
-        this.masterGain.connect(this.ctx.destination);
+          this.sfxGain.connect(this.masterGain);
+          this.musicGain.connect(this.masterGain);
+          this.masterGain.connect(this.ctx.destination);
 
-        this.sfxGain.gain.setValueAtTime(this.sfxEnabled ? 1 : 0, this.ctx.currentTime);
-        this.musicGain.gain.setValueAtTime(this.musicEnabled ? 0.22 : 0, this.ctx.currentTime);
+          this.sfxGain.gain.setValueAtTime(this.sfxEnabled ? 1 : 0, this.ctx.currentTime);
+          this.musicGain.gain.setValueAtTime(this.musicEnabled ? 0.22 : 0, this.ctx.currentTime);
+        }
+      } catch {
+        this.ctx = null;
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
@@ -887,13 +1032,13 @@ class ArenaSoundEngine {
     listenerX?: number,
     listenerY?: number,
     maxDistance: number = 1400
-  ): { targetNode: AudioNode; gainFactor: number } | null {
+  ): { targetNode: AudioNode; gainFactor: number; tempNodes: AudioNode[] } | null {
     if (!this.sfxEnabled) return null;
     this.initCtx();
-    if (!this.ctx || !this.sfxGain) return null;
+    if (!this.ctx || this.ctx.state === 'closed' || !this.sfxGain) return null;
 
     if (sourceX === undefined || sourceY === undefined || listenerX === undefined || listenerY === undefined) {
-      return { targetNode: this.sfxGain, gainFactor: 1 };
+      return { targetNode: this.sfxGain, gainFactor: 1, tempNodes: [] };
     }
 
     const dx = sourceX - listenerX;
@@ -919,7 +1064,7 @@ class ArenaSoundEngine {
 
         gainNode.connect(panner);
         panner.connect(this.sfxGain);
-        return { targetNode: gainNode, gainFactor: distanceGain };
+        return { targetNode: gainNode, gainFactor: distanceGain, tempNodes: [gainNode, panner] };
       }
     } catch {
       // Fallback
@@ -928,7 +1073,7 @@ class ArenaSoundEngine {
     const gainNode = this.ctx.createGain();
     gainNode.gain.setValueAtTime(distanceGain, this.ctx.currentTime);
     gainNode.connect(this.sfxGain);
-    return { targetNode: gainNode, gainFactor: distanceGain };
+    return { targetNode: gainNode, gainFactor: distanceGain, tempNodes: [gainNode] };
   }
 
   /**
@@ -952,6 +1097,7 @@ class ArenaSoundEngine {
     const gain = this.ctx.createGain();
     osc.connect(gain);
     gain.connect(bus.targetNode);
+    this.bindAutoDisconnect(osc, [gain, ...bus.tempNodes]);
 
     if (surface === 'asphalt' || surface === 'pavement') {
       osc.type = 'triangle';
@@ -1008,6 +1154,7 @@ class ArenaSoundEngine {
     const gain = this.ctx.createGain();
     osc.connect(gain);
     gain.connect(bus.targetNode);
+    this.bindAutoDisconnect(osc, [gain, ...bus.tempNodes]);
 
     if (weaponId === 'laser_pointer') {
       osc.type = 'sawtooth';
@@ -1078,6 +1225,7 @@ class ArenaSoundEngine {
     const gain = this.ctx.createGain();
     osc.connect(gain);
     gain.connect(bus.targetNode);
+    this.bindAutoDisconnect(osc, [gain, ...bus.tempNodes]);
 
     if (type === 'wood_wall') {
       osc.type = 'triangle';
@@ -1121,6 +1269,7 @@ class ArenaSoundEngine {
     const gain = this.ctx.createGain();
     osc.connect(gain);
     gain.connect(bus.targetNode);
+    this.bindAutoDisconnect(osc, [gain, ...bus.tempNodes]);
     osc.type = 'sawtooth';
     osc.frequency.setValueAtTime(160, t);
     osc.frequency.exponentialRampToValueAtTime(50, t + 0.1);
@@ -1264,13 +1413,14 @@ class ArenaSoundEngine {
   }
 
   private playChiptuneDrum(type: 'kick' | 'snare' | 'hihat', time: number) {
-    if (!this.ctx || !this.musicGain || !this.musicEnabled) return;
+    if (!this.ctx || this.ctx.state === 'closed' || !this.musicGain || !this.musicEnabled) return;
     try {
       if (type === 'kick') {
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         osc.connect(gain);
         gain.connect(this.musicGain);
+        this.bindAutoDisconnect(osc, [gain]);
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(150, time);
         osc.frequency.exponentialRampToValueAtTime(32, time + 0.08);
@@ -1291,6 +1441,7 @@ class ArenaSoundEngine {
           noise.connect(filter);
           filter.connect(gain);
           gain.connect(this.musicGain);
+          this.bindAutoDisconnect(noise, [filter, gain]);
           gain.gain.setValueAtTime(0.22, time);
           gain.gain.exponentialRampToValueAtTime(0.001, time + 0.11);
           noise.start(time);
@@ -1308,6 +1459,7 @@ class ArenaSoundEngine {
           noise.connect(filter);
           filter.connect(gain);
           gain.connect(this.musicGain);
+          this.bindAutoDisconnect(noise, [filter, gain]);
           gain.gain.setValueAtTime(0.08, time);
           gain.gain.exponentialRampToValueAtTime(0.001, time + 0.035);
           noise.start(time);
@@ -1318,12 +1470,13 @@ class ArenaSoundEngine {
   }
 
   private play16BitLead(freq: number, time: number, duration: number, isHigh: boolean) {
-    if (!this.ctx || !this.musicGain || !this.musicEnabled || freq <= 0) return;
+    if (!this.ctx || this.ctx.state === 'closed' || !this.musicGain || !this.musicEnabled || freq <= 0) return;
     try {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.connect(gain);
       gain.connect(this.musicGain);
+      this.bindAutoDisconnect(osc, [gain]);
       osc.type = 'square';
       osc.frequency.setValueAtTime(freq, time);
 
@@ -1338,12 +1491,13 @@ class ArenaSoundEngine {
   }
 
   private play16BitBass(freq: number, time: number, duration: number) {
-    if (!this.ctx || !this.musicGain || !this.musicEnabled || freq <= 0) return;
+    if (!this.ctx || this.ctx.state === 'closed' || !this.musicGain || !this.musicEnabled || freq <= 0) return;
     try {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.connect(gain);
       gain.connect(this.musicGain);
+      this.bindAutoDisconnect(osc, [gain]);
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(freq, time);
       gain.gain.setValueAtTime(0.25, time);
@@ -1354,7 +1508,7 @@ class ArenaSoundEngine {
   }
 
   private play16BitArp(notes: number[], time: number) {
-    if (!this.ctx || !this.musicGain || !this.musicEnabled || notes.length === 0) return;
+    if (!this.ctx || this.ctx.state === 'closed' || !this.musicGain || !this.musicEnabled || notes.length === 0) return;
     try {
       const stepT = 0.032;
       notes.forEach((f, idx) => {
@@ -1364,6 +1518,7 @@ class ArenaSoundEngine {
         const gain = this.ctx!.createGain();
         osc.connect(gain);
         gain.connect(this.musicGain!);
+        this.bindAutoDisconnect(osc, [gain]);
         osc.type = 'square';
         osc.frequency.setValueAtTime(f, nTime);
         gain.gain.setValueAtTime(0.065, nTime);
@@ -1453,7 +1608,7 @@ class ArenaSoundEngine {
     this.currentStep = 0;
 
     const tick = () => {
-      if (!this.ctx || !this.musicGain || !this.musicEnabled) return;
+      if (!this.ctx || this.ctx.state === 'closed' || !this.musicGain || !this.musicEnabled) return;
       if (this.ctx.state === 'suspended') return;
 
       const track = tracks[this.currentTrackIndex % tracks.length];
@@ -3313,6 +3468,19 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const [confirmEndMatch, setConfirmEndMatch] = useState<boolean>(false);
   const [isEndingMatch, setIsEndingMatch] = useState<boolean>(false);
   const [endMatchError, setEndMatchError] = useState<string | null>(null);
+  const isMountedRef = useRef<boolean>(true);
+  const pendingTimeoutsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  const scheduleSafeTimeout = useCallback((fn: () => void, ms: number) => {
+    const id = setTimeout(() => {
+      pendingTimeoutsRef.current.delete(id);
+      if (isMountedRef.current) {
+        fn();
+      }
+    }, ms);
+    pendingTimeoutsRef.current.add(id);
+    return id;
+  }, []);
 
   const handleInstructorEndMatch = async () => {
     setConfirmEndMatch(false);
@@ -3320,8 +3488,8 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     setEndMatchError(null);
     try {
       const players = arenaPlayersRef.current || [];
-      const realPlayers = players.filter(p => !p.uid.startsWith('dummy_'));
-      const pool = realPlayers.length > 0 ? realPlayers : players;
+      const realPlayers = players.filter(p => !p.uid.startsWith('dummy_') && !p.isSpectator);
+      const pool = realPlayers.length > 0 ? realPlayers : players.filter(p => !p.isSpectator);
       const alive = pool.filter(p => p.isAlive && (p.hp === undefined || p.hp > 0));
       const sorted = [...(alive.length > 0 ? alive : pool)].sort(
         (a, b) => ((b.kills || 0) * 100 + (b.hp || 0)) - ((a.kills || 0) * 100 + (a.hp || 0))
@@ -3332,10 +3500,14 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       await endBattleRoyale(topWinner);
     } catch (e: any) {
       console.warn('Failed to end battle royale from arena HUD:', e);
-      setEndMatchError(e?.message || 'Could not end match. Please retry.');
-      setTimeout(() => setEndMatchError(null), 5000);
+      if (isMountedRef.current) {
+        setEndMatchError(e?.message || 'Could not end match. Please retry.');
+        scheduleSafeTimeout(() => setEndMatchError(null), 5000);
+      }
     } finally {
-      setIsEndingMatch(false);
+      if (isMountedRef.current) {
+        setIsEndingMatch(false);
+      }
     }
   };
 
@@ -3344,8 +3516,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const lastValid4x4SheetRef = useRef<Record<string, HTMLImageElement>>({});
   const [assetsPreloaded, setAssetsPreloaded] = useState<boolean>(false);
 
-  // Preload Image Assets on Mount
+  // Preload lightweight SVG/portrait manifest on Mount (action sheets load on demand via bounded LRU cache)
   useEffect(() => {
+    isMountedRef.current = true;
     let loadedCount = 0;
     const entries = Object.entries(SPRITE_MANIFEST);
     const total = entries.length;
@@ -3354,26 +3527,21 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       const img = new Image();
       img.onload = () => {
         loadedCount++;
-        if (loadedCount === total) setAssetsPreloaded(true);
+        if (loadedCount === total && isMountedRef.current) setAssetsPreloaded(true);
       };
       img.onerror = () => {
         loadedCount++;
-        if (loadedCount === total) setAssetsPreloaded(true);
+        if (loadedCount === total && isMountedRef.current) setAssetsPreloaded(true);
       };
       img.src = src;
       imageAssets.current[key] = img;
     });
 
-    // Also preload the 1024x1024 modular character action sheets (idle, walk, run, attack, hurt, death)
-    Object.values(CHARACTER_ACTION_SHEETS).forEach(sheets => {
-      [sheets.idle, sheets.walk, sheets.run, sheets.attack, sheets.hurt, sheets.death].forEach(url => {
-        if (url && !characterActionCache.has(url)) {
-          const img = new Image();
-          img.src = url;
-          characterActionCache.set(url, img);
-        }
-      });
-    });
+    return () => {
+      isMountedRef.current = false;
+      pendingTimeoutsRef.current.forEach(t => clearTimeout(t));
+      pendingTimeoutsRef.current.clear();
+    };
   }, []);
 
   // Tracking animation transitions (damage, death, elimination lock, remote motion smoothing)
@@ -3394,7 +3562,116 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     prevHp: number;
     hurtUntil: number;
     attackUntil: number;
+    snapshots: Array<{ t: number; x: number; y: number; angle: number; vx: number; vy: number }>;
+    renderTime: number;
+    jitterMs: number;
+    lastRecvAt: number;
+    lastWsTickAt: number;
   }>>({});
+
+  const pushRemoteMotionSnapshot = useCallback((
+    uid: string,
+    x: number,
+    y: number,
+    angle: number,
+    vx: number,
+    vy: number,
+    hp: number,
+    nowPerf: number,
+    fromWs: boolean
+  ) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const safeAngle = Number.isFinite(angle) ? angle : 0;
+    const safeVx = Number.isFinite(vx) ? vx : 0;
+    const safeVy = Number.isFinite(vy) ? vy : 0;
+    const safeHp = Number.isFinite(hp) ? hp : 100;
+    const nowMs = Date.now();
+    let entry = remotePlayerMotionRef.current[uid];
+    if (!entry) {
+      remotePlayerMotionRef.current[uid] = {
+        drawX: x,
+        drawY: y,
+        drawAngle: safeAngle,
+        lastMovedAt: Math.hypot(safeVx, safeVy) > 15 ? nowMs : 0,
+        prevHp: safeHp,
+        hurtUntil: 0,
+        attackUntil: 0,
+        snapshots: [{ t: nowPerf, x, y, angle: safeAngle, vx: safeVx, vy: safeVy }],
+        renderTime: nowPerf - 75,
+        jitterMs: 12,
+        lastRecvAt: nowPerf,
+        lastWsTickAt: fromWs ? nowPerf : 0
+      };
+      return;
+    }
+
+    if (safeHp < entry.prevHp) {
+      entry.hurtUntil = nowMs + 300;
+    }
+    entry.prevHp = safeHp;
+
+    const snaps = entry.snapshots;
+    const last = snaps[snaps.length - 1];
+    if (!last) {
+      snaps.push({ t: nowPerf, x, y, angle: angle || 0, vx, vy });
+      entry.drawX = x;
+      entry.drawY = y;
+      entry.drawAngle = angle || 0;
+      entry.renderTime = nowPerf - 75;
+      entry.lastRecvAt = nowPerf;
+      if (fromWs) entry.lastWsTickAt = nowPerf;
+      return;
+    }
+
+    const jumpDist = Math.hypot(x - last.x, y - last.y);
+    // Snap cleanly on teleports (Quantum Dash, Slime Bounce, respawn, unstuck) instead of rubber-banding
+    if (jumpDist > 210) {
+      entry.snapshots = [{ t: nowPerf, x, y, angle: angle || 0, vx: 0, vy: 0 }];
+      entry.drawX = x;
+      entry.drawY = y;
+      entry.drawAngle = angle || 0;
+      entry.renderTime = nowPerf - 75;
+      entry.lastRecvAt = nowPerf;
+      if (fromWs) entry.lastWsTickAt = nowPerf;
+      return;
+    }
+
+    const dtMs = nowPerf - entry.lastRecvAt;
+    if (fromWs && dtMs > 5 && dtMs < 500) {
+      const gapAboveExpected = Math.max(0, dtMs - 36);
+      entry.jitterMs = entry.jitterMs * 0.85 + Math.min(70, gapAboveExpected) * 0.15;
+    }
+
+    let resolvedVx = vx;
+    let resolvedVy = vy;
+    const segDt = (nowPerf - last.t) / 1000;
+    if (resolvedVx === 0 && resolvedVy === 0 && segDt > 0.01 && segDt < 0.35 && jumpDist > 1.2) {
+      resolvedVx = (x - last.x) / segDt;
+      resolvedVy = (y - last.y) / segDt;
+    }
+
+    if (jumpDist > 1.2 || Math.hypot(resolvedVx, resolvedVy) > 15) {
+      entry.lastMovedAt = nowMs;
+    }
+
+    if (nowPerf - last.t < 4) {
+      last.x = x;
+      last.y = y;
+      last.angle = angle || 0;
+      last.vx = resolvedVx;
+      last.vy = resolvedVy;
+    } else {
+      snaps.push({ t: nowPerf, x, y, angle: angle || 0, vx: resolvedVx, vy: resolvedVy });
+      while (snaps.length > 10 || (snaps.length > 2 && nowPerf - snaps[0].t > 550)) {
+        snaps.shift();
+      }
+    }
+
+    entry.lastRecvAt = nowPerf;
+    if (fromWs) {
+      entry.lastWsTickAt = nowPerf;
+    }
+  }, []);
 
   // Low-Latency WebSocket + Spatial/Offscreen Render Caches (32-player 60fps readiness)
   const wsClientRef = useRef<BattleRealtimeClient | null>(null);
@@ -3429,6 +3706,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const [spectateTargetName, setSpectateTargetName] = useState<string | null>(null);
   const spectateCycleIndexRef = useRef<number>(0);
   const hasSpawnSynced = useRef<boolean>(false);
+  const spawnAuthoritySeedRef = useRef<string | null>(null);
   const hasSpectatorFocusedRef = useRef<boolean>(false);
 
   // Fullscreen, Audio & Minimap UI state
@@ -3443,6 +3721,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   const stormCenter = useRef<{ x: number; y: number }>({ x: 2500, y: 2500 });
   const targetFinalCenterRef = useRef<{ x: number; y: number }>({ x: 2850, y: 1950 });
   const matchStartTimeRef = useRef<number>(Date.now());
+  const lastElapsedSecRef = useRef<number>(0);
   const [matchElapsedSeconds, setMatchElapsedSeconds] = useState<number>(0);
   const [isSurgeActive, setIsSurgeActive] = useState<boolean>(false);
   const wasSurgingRef = useRef<boolean>(false);
@@ -3495,13 +3774,39 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     spatialIndexRef.current = buildSpatialWorldIndex(worldDataRef.current);
   }
 
+  const releaseOffscreenCaches = useCallback(() => {
+    terrainChunksRef.current.forEach((cvs) => {
+      try { cvs.width = 0; cvs.height = 0; } catch {}
+    });
+    terrainChunksRef.current.clear();
+    buildingCacheRef.current.forEach((entry) => {
+      try { entry.canvas.width = 0; entry.canvas.height = 0; } catch {}
+    });
+    buildingCacheRef.current.clear();
+    if (minimapStaticCanvasRef.current) {
+      try { minimapStaticCanvasRef.current.width = 0; minimapStaticCanvasRef.current.height = 0; } catch {}
+      minimapStaticCanvasRef.current = null;
+    }
+  }, []);
+
+  // Release all offscreen canvas GPU backing stores cleanly on unmount
+  useEffect(() => {
+    return () => {
+      releaseOffscreenCaches();
+      projectilesRef.current = [];
+      particlesRef.current = [];
+      weaponVfxRef.current = [];
+      floatingTextsRef.current = [];
+      remotePlayerMotionRef.current = {};
+      lastValid4x4SheetRef.current = {};
+    };
+  }, [releaseOffscreenCaches]);
+
   // Rebuild O(1) spatial hash grid & invalidate cached terrain/building sprites whenever map changes
   useEffect(() => {
     spatialIndexRef.current = buildSpatialWorldIndex(worldDataRef.current);
-    terrainChunksRef.current.clear();
-    buildingCacheRef.current.clear();
-    minimapStaticCanvasRef.current = null;
-  }, [mapRevision]);
+    releaseOffscreenCaches();
+  }, [mapRevision, releaseOffscreenCaches]);
 
   // Instructor Test & Map Design States (corbanb@gisboyshigh.net only)
   const [showMapEditor, setShowMapEditor] = useState<boolean>(false);
@@ -3581,10 +3886,10 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
   const flashSkinAbility = useCallback((label: string) => {
     setSkinAbilityFlash(label);
-    setTimeout(() => {
+    scheduleSafeTimeout(() => {
       setSkinAbilityFlash(prev => (prev === label ? null : prev));
     }, 2400);
-  }, []);
+  }, [scheduleSafeTimeout]);
 
   const findValidCratePointInStormEye = useCallback(
     (center: { x: number; y: number }, radius: number): { x: number; y: number } => {
@@ -3669,7 +3974,6 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     setSpectateTargetName(target.name);
   }, [user.id, setPlayerCoords]);
 
-  useEffect(() => { arenaPlayersRef.current = arenaPlayers; }, [arenaPlayers]);
   useEffect(() => { structuresRef.current = structures; }, [structures]);
   useEffect(() => { cratesRef.current = crates; }, [crates]);
   useEffect(() => { battleStateRef.current = battleState; }, [battleState]);
@@ -4170,13 +4474,21 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     };
 
     const getDistributedStudentSpawn = (uidStr: string): { x: number; y: number; angle: number } => {
-      const h = hashSeedString(`${uidStr}_${battleStateRef.current?.startedAt || 'live'}`);
-      const ang = ((h % 360) / 180) * Math.PI;
-      const rad = 1050 + (h % 350);
+      const openPt = pickFarthestOpenMapSpawn(
+        uidStr,
+        battleStateRef.current?.startedAt,
+        arenaPlayersRef.current
+      );
+      const clearPt = findClearSpawnNear(
+        worldDataRef.current,
+        spatialIndexRef.current,
+        openPt.x,
+        openPt.y
+      );
       return {
-        x: Math.round(2500 + Math.cos(ang) * rad),
-        y: Math.round(2500 + Math.sin(ang) * rad),
-        angle: ang + Math.PI
+        x: clearPt.x,
+        y: clearPt.y,
+        angle: openPt.angle
       };
     };
 
@@ -4245,7 +4557,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           lastDamageTimeRef.current = 0;
           hasDeclaredWinnerRef.current = false;
           hasSpawnSynced.current = false;
+          spawnAuthoritySeedRef.current = null;
           hasSpectatorFocusedRef.current = false;
+          remotePlayerMotionRef.current = {};
           setShowEliminationToast(false);
           setSpectateTargetName(null);
 
@@ -4263,6 +4577,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           }
 
           worldDataRef.current = generateSuperAnimalStyleMap(hashSeedString(merged.startedAt));
+          spatialIndexRef.current = buildSpatialWorldIndex(worldDataRef.current);
           structuresRef.current = [];
           setStructures([]);
           if (isOwnerTester && !forceResetSpawn) {
@@ -4274,7 +4589,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           setIsAlive(false);
         }
         const startMs = new Date(merged.startedAt).getTime();
-        if (Date.now() - startMs < 600 * 1000) {
+        if (!Number.isNaN(startMs) && Date.now() - startMs < 3600 * 1000) {
           matchStartTimeRef.current = startMs;
         } else {
           matchStartTimeRef.current = Date.now();
@@ -4288,6 +4603,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           localEliminatedRef.current = false;
           localDeathTimeRef.current = 0;
           hasDeclaredWinnerRef.current = false;
+          hasSpawnSynced.current = false;
+          spawnAuthoritySeedRef.current = null;
+          remotePlayerMotionRef.current = {};
           structuresRef.current = [];
           setStructures([]);
         }
@@ -4296,10 +4614,17 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         setIsAlive(nextAlive);
         matchStartTimeRef.current = Date.now();
       }
-      if (merged.status === 'ENDED' && merged.currentWinner) {
-        setWinnerCelebration(merged.currentWinner);
-        soundEngine.playVictory();
-      } else if (merged.status !== 'ENDED') {
+      if (merged.status === 'ENDED') {
+        if (merged.currentWinner) {
+          setWinnerCelebration(prev => {
+            if (prev?.name === merged.currentWinner?.name && prev?.avatar === merged.currentWinner?.avatar) {
+              return prev;
+            }
+            soundEngine.playVictory();
+            return merged.currentWinner;
+          });
+        }
+      } else {
         setWinnerCelebration(null);
       }
     };
@@ -4367,7 +4692,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         frostSlowUntilRef.current = 0;
         setFrostSlowUntil(0);
         setShowEliminationToast(true);
-        setTimeout(() => setShowEliminationToast(false), 3800);
+        scheduleSafeTimeout(() => setShowEliminationToast(false), 3800);
       }
 
       const fullSh = effectiveSkinDefRef.current.id === 'knight_hero' ? 120 : 100;
@@ -4406,12 +4731,36 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         setLocalMetal(me.metal);
       }
 
-      if (!hasSpawnSynced.current && me.x !== undefined && me.y !== undefined) {
-        setPlayerCoords(me.x, me.y);
+      const needsAuthoritySpawn =
+        !hasSpawnSynced.current ||
+        (matchIsInProgress && spawnAuthoritySeedRef.current !== currentMatchKey);
+      if (needsAuthoritySpawn && me.x !== undefined && me.y !== undefined) {
+        const clearPt = findClearSpawnNear(worldDataRef.current, spatialIndexRef.current, me.x, me.y);
+        setPlayerCoords(clearPt.x, clearPt.y);
         const vd = viewDimsRef.current;
-        cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, me.x - vd.width / 2));
-        cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, me.y - vd.height / 2));
+        cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, clearPt.x - vd.width / 2));
+        cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, clearPt.y - vd.height / 2));
         hasSpawnSynced.current = true;
+        if (matchIsInProgress) {
+          spawnAuthoritySeedRef.current = currentMatchKey;
+        }
+        if (clearPt.nudged) {
+          me.x = clearPt.x;
+          me.y = clearPt.y;
+          if (wsConnectedRef.current && wsClientRef.current) {
+            wsClientRef.current.sendPosition({
+              x: clearPt.x,
+              y: clearPt.y,
+              angle: me.angle ?? facingAngleRef.current
+            });
+          } else {
+            updatePlayerPosition(user.id, {
+              x: clearPt.x,
+              y: clearPt.y,
+              angle: me.angle ?? facingAngleRef.current
+            }).catch(() => {});
+          }
+        }
       }
 
       return changedAlive;
@@ -4429,17 +4778,16 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             state: battleStateRef.current || undefined
           };
         }
-        const spawnPt = !hasSpawnSynced.current ? getDistributedStudentSpawn(user.id) : undefined;
-        if (spawnPt) {
-          setPlayerCoords(spawnPt.x, spawnPt.y);
-          const vd = viewDimsRef.current;
-          cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, spawnPt.x - vd.width / 2));
-          cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, spawnPt.y - vd.height / 2));
-          hasSpawnSynced.current = true;
-        }
-        const studentPlayer = buildStudentJoinPlayer(spawnPt);
-        studentPlayer.x = Math.round(playerPosRef.current.x);
-        studentPlayer.y = Math.round(playerPosRef.current.y);
+        const alreadySynced = hasSpawnSynced.current;
+        const studentPlayer = buildStudentJoinPlayer(
+          alreadySynced
+            ? {
+                x: Math.round(playerPosRef.current.x),
+                y: Math.round(playerPosRef.current.y),
+                angle: facingAngleRef.current
+              }
+            : undefined
+        );
         studentPlayer.angle = facingAngleRef.current;
         studentPlayer.hp = hpRef.current;
         studentPlayer.shield = shieldRef.current ?? studentPlayer.shield;
@@ -4450,6 +4798,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         return {
           uid: user.id,
           isSpectator: false,
+          spawnSynced: alreadySynced,
           player: studentPlayer,
           state: battleStateRef.current || undefined,
           seedStructures: structuresRef.current.length > 0 ? structuresRef.current : undefined,
@@ -4487,6 +4836,12 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               }));
             arenaPlayersRef.current = mergedPlayers;
             rebuildPlayerMap(mergedPlayers);
+            const welcomePerf = performance.now();
+            for (const mp of mergedPlayers) {
+              if (mp.uid !== user.id) {
+                pushRemoteMotionSnapshot(mp.uid, mp.x, mp.y, mp.angle || 0, 0, 0, mp.hp ?? 100, welcomePerf, true);
+              }
+            }
 
             if (isInstructorRef.current) {
               isAliveRef.current = false;
@@ -4503,6 +4858,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, initStudent.x - vd.width / 2));
                 cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, initStudent.y - vd.height / 2));
                 hasSpawnSynced.current = true;
+                spawnAuthoritySeedRef.current = battleStateRef.current?.startedAt || 'live';
                 arenaPlayersRef.current.push(initStudent);
                 playerByUidRef.current.set(initStudent.uid, initStudent);
                 isAliveRef.current = true;
@@ -4512,6 +4868,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                   type: 'hello',
                   uid: initStudent.uid,
                   isSpectator: false,
+                  spawnSynced: true,
                   player: initStudent,
                   state: battleStateRef.current || undefined
                 });
@@ -4544,6 +4901,13 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             : [];
           arenaPlayersRef.current = filteredPlayers;
           rebuildPlayerMap(filteredPlayers);
+          remotePlayerMotionRef.current = {};
+          const startPerf = performance.now();
+          for (const fp of filteredPlayers) {
+            if (fp.uid !== user.id) {
+              pushRemoteMotionSnapshot(fp.uid, fp.x, fp.y, fp.angle || 0, 0, 0, fp.hp ?? 100, startPerf, true);
+            }
+          }
 
           if (isInstructorRef.current) {
             isAliveRef.current = false;
@@ -4554,7 +4918,11 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             localDeathTimeRef.current = 0;
             setShowEliminationToast(false);
             const me = filteredPlayers.find(p => p.uid === user.id);
+            const matchKey = state?.startedAt || battleStateRef.current?.startedAt || 'live';
             if (me) {
+              const clearPt = findClearSpawnNear(worldDataRef.current, spatialIndexRef.current, me.x, me.y);
+              me.x = clearPt.x;
+              me.y = clearPt.y;
               const fullSh = effectiveSkinDefRef.current.id === 'knight_hero' ? 120 : 100;
               const startHp = Math.max(100, me.hp || 100);
               const startShield = Math.max(fullSh, me.shield ?? fullSh);
@@ -4575,11 +4943,24 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               setLocalMetal(metalRef.current);
               setIsAlive(true);
               setKills(0);
-              setPlayerCoords(me.x, me.y);
+              setPlayerCoords(clearPt.x, clearPt.y);
               const vd = viewDimsRef.current;
-              cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, me.x - vd.width / 2));
-              cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, me.y - vd.height / 2));
+              cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, clearPt.x - vd.width / 2));
+              cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, clearPt.y - vd.height / 2));
               hasSpawnSynced.current = true;
+              spawnAuthoritySeedRef.current = matchKey;
+              if (clearPt.nudged) {
+                wsClient.sendPosition({
+                  x: clearPt.x,
+                  y: clearPt.y,
+                  angle: me.angle ?? facingAngleRef.current
+                });
+                updatePlayerPosition(user.id, {
+                  x: clearPt.x,
+                  y: clearPt.y,
+                  angle: me.angle ?? facingAngleRef.current
+                }).catch(() => {});
+              }
             } else {
               const initStudent = buildStudentJoinPlayer();
               hpRef.current = initStudent.hp;
@@ -4600,6 +4981,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, initStudent.x - vd.width / 2));
               cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, initStudent.y - vd.height / 2));
               hasSpawnSynced.current = true;
+              spawnAuthoritySeedRef.current = matchKey;
               arenaPlayersRef.current.push(initStudent);
               playerByUidRef.current.set(initStudent.uid, initStudent);
               ensureArenaPlayer(initStudent);
@@ -4626,6 +5008,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           cratesRef.current = [];
           arenaPlayersRef.current = [];
           playerByUidRef.current.clear();
+          remotePlayerMotionRef.current = {};
           frostSlowUntilRef.current = 0;
           setFrostSlowUntil(0);
           enemyFrostSlowUntilRef.current = {};
@@ -4637,11 +5020,15 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         onTick: (tuples) => {
           let aliveChanged = false;
           let rosterChanged = false;
+          const nowPerf = performance.now();
           for (const t of tuples) {
-            const [uid, x, y, angle, hp, shield, aliveNum, killCnt, avatar, equippedWeapon, hgNum, metalShieldUntilVal, frostSlowUntilVal] = t;
+            const [uid, x, y, angle, hp, shield, aliveNum, killCnt, avatar, equippedWeapon, hgNum, metalShieldUntilVal, frostSlowUntilVal, vx = 0, vy = 0] = t;
             if (isInstructorRef.current && uid === user.id) continue;
             const existing = playerByUidRef.current.get(uid);
             const isAliveBool = aliveNum === 1;
+            if (uid !== user.id) {
+              pushRemoteMotionSnapshot(uid, x, y, angle, vx || 0, vy || 0, hp, nowPerf, true);
+            }
             if (existing) {
               if (existing.isAlive !== isAliveBool) aliveChanged = true;
               if (uid !== user.id) {
@@ -4698,8 +5085,6 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           }
           if (aliveChanged || rosterChanged) {
             schedulePlayersReactSync(true);
-          } else {
-            schedulePlayersReactSync(false);
           }
         },
         onShot: (shot) => {
@@ -4840,7 +5225,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               frostSlowUntilRef.current = 0;
               setFrostSlowUntil(0);
               setShowEliminationToast(true);
-              setTimeout(() => setShowEliminationToast(false), 3800);
+              scheduleSafeTimeout(() => setShowEliminationToast(false), 3800);
               updatePlayerPosition(user.id, { hp: 0, isAlive: false }).catch(() => {});
             }
 
@@ -4912,6 +5297,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       const cleanPlayers = players.filter(
         p => p && p.uid && !p.isSpectator && !(isInstructorRef.current && p.uid === user.id)
       );
+      const nowPerf = performance.now();
       if (wsConnectedRef.current && playerByUidRef.current.size > 0) {
         // WS is active & authoritative for live movement/combat; only merge missing UIDs & names
         let addedAny = false;
@@ -4920,6 +5306,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           if (!existing) {
             arenaPlayersRef.current.push(p);
             playerByUidRef.current.set(p.uid, p);
+            if (p.uid !== user.id) {
+              pushRemoteMotionSnapshot(p.uid, p.x, p.y, p.angle || 0, 0, 0, p.hp ?? 100, nowPerf, false);
+            }
             addedAny = true;
           } else if (p.name && existing.name === 'Player') {
             existing.name = p.name;
@@ -4932,18 +5321,37 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         return;
       }
 
-      arenaPlayersRef.current = cleanPlayers;
-      rebuildPlayerMap(cleanPlayers);
+      // Preserve live WS coordinates for any opponent updated recently so reconnects never roll positions back to Firestore
+      const mergedFallback = cleanPlayers.map((p) => {
+        const existing = playerByUidRef.current.get(p.uid);
+        const motion = remotePlayerMotionRef.current[p.uid];
+        const hasRecentWs = Boolean(motion && motion.lastWsTickAt > 0 && nowPerf - motion.lastWsTickAt < 6000);
+        if (p.uid !== user.id && existing && hasRecentWs) {
+          return {
+            ...p,
+            x: existing.x,
+            y: existing.y,
+            angle: existing.angle
+          };
+        }
+        if (p.uid !== user.id) {
+          pushRemoteMotionSnapshot(p.uid, p.x, p.y, p.angle || 0, 0, 0, p.hp ?? 100, nowPerf, false);
+        }
+        return p;
+      });
+
+      arenaPlayersRef.current = mergedFallback;
+      rebuildPlayerMap(mergedFallback);
 
       if (isInstructorRef.current) {
         isAliveRef.current = false;
         setIsAlive(false);
-        focusSpectatorOnAliveStudent(cleanPlayers);
+        focusSpectatorOnAliveStudent(mergedFallback);
         schedulePlayersReactSync(false);
         return;
       }
 
-      const me = cleanPlayers.find(p => p.uid === user.id);
+      const me = mergedFallback.find(p => p.uid === user.id);
       const criticalLocalChange = (me && battleStateRef.current?.status === 'IN_PROGRESS')
         ? syncLocalVitalsFromMe(me)
         : false;
@@ -5014,17 +5422,25 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       const alreadyListed = arenaPlayersRef.current.some(p => p.uid === user.id);
       if (alreadyListed) return;
 
-      const h = hashSeedString(`${user.id}_${battleStateRef.current?.startedAt || 'live'}`);
-      const ang = ((h % 360) / 180) * Math.PI;
-      const rad = 1050 + (h % 350);
-      const spawnX = hasSpawnSynced.current ? Math.round(playerPosRef.current.x) : Math.round(2500 + Math.cos(ang) * rad);
-      const spawnY = hasSpawnSynced.current ? Math.round(playerPosRef.current.y) : Math.round(2500 + Math.sin(ang) * rad);
+      const openPt = pickFarthestOpenMapSpawn(
+        user.id,
+        battleStateRef.current?.startedAt,
+        arenaPlayersRef.current
+      );
+      const clearPt = hasSpawnSynced.current
+        ? { x: Math.round(playerPosRef.current.x), y: Math.round(playerPosRef.current.y) }
+        : findClearSpawnNear(worldDataRef.current, spatialIndexRef.current, openPt.x, openPt.y);
+      const spawnX = clearPt.x;
+      const spawnY = clearPt.y;
       if (!hasSpawnSynced.current) {
         setPlayerCoords(spawnX, spawnY);
         const vd = viewDimsRef.current;
         cameraRef.current.x = Math.max(0, Math.min(MAP_SIZE - vd.width, spawnX - vd.width / 2));
         cameraRef.current.y = Math.max(0, Math.min(MAP_SIZE - vd.height, spawnY - vd.height / 2));
         hasSpawnSynced.current = true;
+        if (battleStateRef.current?.status === 'IN_PROGRESS') {
+          spawnAuthoritySeedRef.current = battleStateRef.current.startedAt || 'live';
+        }
       }
 
       const initialAvatar = activeSkinId || gameProfile?.equippedSkin || gameProfile?.avatar || 'cultist';
@@ -5039,7 +5455,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         equippedWeapon: initialWeapon,
         x: spawnX,
         y: spawnY,
-        angle: ang + Math.PI,
+        angle: openPt.angle,
         hp: 100,
         maxHp: 100,
         shield: isKnightHero ? 120 : 100,
@@ -5057,6 +5473,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           type: 'hello',
           uid: initPlayer.uid,
           isSpectator: false,
+          spawnSynced: true,
           player: initPlayer,
           state: battleStateRef.current || undefined
         });
@@ -5098,13 +5515,13 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       spawnParticles(pt.x, pt.y, '#facc15', 'spark', 18, 5);
       addFloatingText(pt.x, pt.y - 28, '📦 SUPPLY CRATE DROPPED!', '#facc15');
       setCrateDropBanner('📦 Science Supply Crate air-dropped inside the Eye of the Storm!');
-      setTimeout(() => {
+      scheduleSafeTimeout(() => {
         setCrateDropBanner(prev =>
           prev === '📦 Science Supply Crate air-dropped inside the Eye of the Storm!' ? null : prev
         );
       }, 3600);
     }
-  }, [findValidCratePointInStormEye]);
+  }, [findValidCratePointInStormEye, scheduleSafeTimeout]);
 
   useEffect(() => {
     const isTeacherUser = user?.role === 'instructor' || gameProfile?.role === 'instructor';
@@ -5238,6 +5655,25 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
   useEffect(() => { equippedWeaponRef.current = equippedWeapon; }, [equippedWeapon]);
   useEffect(() => { effectiveSkinIdRef.current = effectiveSkinId; }, [effectiveSkinId]);
   useEffect(() => { effectiveSkinDefRef.current = equippedSkinDef; }, [equippedSkinDef]);
+
+  // Targeted preload of idle/walk sheets only for skins active in the current match
+  useEffect(() => {
+    const activeIds = new Set<string>([equippedSkinDef.id]);
+    for (const p of arenaPlayers) {
+      if (activeIds.size >= 12) break;
+      if (p.avatar && !p.isSpectator) {
+        activeIds.add(getFantasySkin(FANTASY_SKIN_ALIASES[p.avatar] || p.avatar).id);
+      }
+    }
+    activeIds.forEach(skinId => {
+      const def = getFantasySkin(skinId);
+      const sheets = def.actionSheets || CHARACTER_ACTION_SHEETS[def.id];
+      if (sheets) {
+        getActionSheetImage(sheets.idle);
+        getActionSheetImage(sheets.walk);
+      }
+    });
+  }, [equippedSkinDef.id, arenaPlayers]);
 
   // Switch weapon immediately in arena
   const handleSelectWeapon = async (wId: string) => {
@@ -5456,8 +5892,12 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     return maxDist;
   };
 
-  // Helper: Floating Text
+  // Helper: Floating Text (bounded to avoid DOM/canvas text explosion in final circle)
   const addFloatingText = (x: number, y: number, text: string, color: string) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    if (floatingTextsRef.current.length > 45) {
+      floatingTextsRef.current = floatingTextsRef.current.slice(-30);
+    }
     floatingTextsRef.current.push({
       id: `ft_${Date.now()}_${Math.random()}`,
       x,
@@ -6575,7 +7015,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             });
           }
 
-          setTimeout(() => {
+          scheduleSafeTimeout(() => {
             const strikeNow = Date.now();
             const beamVfx = {
               id: `vfx_orbital_beam_${strikeNow}`,
@@ -6621,18 +7061,20 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               });
             }
 
-            arenaPlayersRef.current.forEach(p => {
-              if (p.uid !== user.id && p.isAlive && (p.hp === undefined || p.hp > 0)) {
-                const d = Math.hypot(p.x - worldMouseX, p.y - worldMouseY);
-                if (d < 160) {
-                  emitDamagePlayer(p.uid, altDmg, user.id).then(res => {
-                    if (!wsConnectedRef.current && res.killed) setKills(k => k + 1);
-                  });
-                  spawnParticles(p.x, p.y, '#f43f5e', 'flame', 18, 6.5);
-                  addFloatingText(p.x, p.y - 30, `-${altDmg} POSITRON BLAST`, '#f43f5e');
+            if (battleStateRef.current?.status !== 'ENDED') {
+              arenaPlayersRef.current.forEach(p => {
+                if (p.uid !== user.id && p.isAlive && (p.hp === undefined || p.hp > 0)) {
+                  const d = Math.hypot(p.x - worldMouseX, p.y - worldMouseY);
+                  if (d < 160) {
+                    emitDamagePlayer(p.uid, altDmg, user.id).then(res => {
+                      if (!wsConnectedRef.current && res.killed) setKills(k => k + 1);
+                    });
+                    spawnParticles(p.x, p.y, '#f43f5e', 'flame', 18, 6.5);
+                    addFloatingText(p.x, p.y - 30, `-${altDmg} POSITRON BLAST`, '#f43f5e');
+                  }
                 }
-              }
-            });
+              });
+            }
           }, 550);
           break;
         }
@@ -6792,6 +7234,9 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     let lastSyncedX = 0;
     let lastSyncedY = 0;
     let lastSyncedAngle = 0;
+    let wasSyncMoving = false;
+    let prevLoopPx = playerPosRef.current.x;
+    let prevLoopPy = playerPosRef.current.y;
 
     const isPositionBlocked = (testX: number, testY: number, moveDx: number, moveDy: number): boolean => {
       const collRadius = 18;
@@ -6891,6 +7336,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
     };
 
     const gameLoop = () => {
+      if (!isMountedRef.current) return;
       const canvas = canvasRef.current;
       if (!canvas) {
         animationFrameId = requestAnimationFrame(gameLoop);
@@ -6902,6 +7348,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         return;
       }
 
+      try {
       const nowPerf = performance.now();
       const dt = Math.min(0.05, Math.max(0.001, (nowPerf - lastPerf) / 1000));
       lastPerf = nowPerf;
@@ -7289,31 +7736,44 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       const camX = cameraRef.current.x;
       const camY = cameraRef.current.y;
 
-      // Exact scaled world-space aim & high-frequency 18Hz WS position sync (Firestore fallback only when offline)
+      // Exact scaled world-space aim & high-frequency 30Hz WS position + velocity sync (Firestore fallback only when offline)
       const { worldX: worldAimX, worldY: worldAimY } = getWorldMouseCoords();
-      if (playerAlive) {
+      const frameMovedDist = Math.hypot(px - prevLoopPx, py - prevLoopPy);
+      const instVx = frameMovedDist > 0.05 && frameMovedDist < 180 ? (px - prevLoopPx) / dt : 0;
+      const instVy = frameMovedDist > 0.05 && frameMovedDist < 180 ? (py - prevLoopPy) / dt : 0;
+      prevLoopPx = px;
+      prevLoopPy = py;
+
+      if (playerAlive && hasSpawnSynced.current) {
         const angle = Math.atan2(worldAimY - py, worldAimX - px);
         facingAngleRef.current = angle;
 
         const distMoved = Math.hypot(px - lastSyncedX, py - lastSyncedY);
-        const angleDiff = Math.abs(angle - lastSyncedAngle);
+        let angleDiff = Math.abs(angle - lastSyncedAngle);
+        if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+        const isMovingNow = Math.hypot(instVx, instVy) > 10 || isLocallyMovingRef.current;
+
         if (wsConnectedRef.current && wsClientRef.current) {
-          if (now - lastPositionSync >= 55 && (distMoved > 3 || angleDiff > 0.12)) {
+          const stoppedNow = wasSyncMoving && !isMovingNow;
+          if ((now - lastPositionSync >= 32 && (distMoved > 1.0 || angleDiff > 0.05)) || stoppedNow) {
             lastPositionSync = now;
             lastSyncedX = px;
             lastSyncedY = py;
             lastSyncedAngle = angle;
+            wasSyncMoving = isMovingNow;
             wsClientRef.current.sendPosition({
-              x: Math.round(px),
-              y: Math.round(py),
+              x: Number(px.toFixed(1)),
+              y: Number(py.toFixed(1)),
               angle: Number(angle.toFixed(2)),
+              vx: isMovingNow ? Math.round(instVx) : 0,
+              vy: isMovingNow ? Math.round(instVy) : 0,
               avatar: effectiveSkinIdRef.current,
               equippedWeapon: equippedWeaponRef.current.id,
               highGroundActive: now < highGroundUntilRef.current,
               metalShieldActiveUntil: metalShieldUntilRef.current
             });
           }
-        } else if ((distMoved > 24 && now - lastPositionSync >= 1000) || (angleDiff > 0.5 && now - lastPositionSync >= 2200)) {
+        } else if ((distMoved > 10 && now - lastPositionSync >= 300) || (angleDiff > 0.35 && now - lastPositionSync >= 900)) {
           lastPositionSync = now;
           lastSyncedX = px;
           lastSyncedY = py;
@@ -7329,7 +7789,15 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       // --- 4. 10-MINUTE SHRINKING STORM CIRCLE WITH 10S-PER-MINUTE SURGE & RANDOM CENTER ---
       const bState = battleStateRef.current;
       const isMatchActive = !bState || bState.status === 'IN_PROGRESS';
-      const elapsedSec = isMatchActive ? Math.max(0, (now - matchStartTimeRef.current) / 1000) : 0;
+      const isMatchEnded = bState?.status === 'ENDED';
+      const elapsedSec = isMatchActive
+        ? Math.max(0, (now - matchStartTimeRef.current) / 1000)
+        : isMatchEnded
+          ? lastElapsedSecRef.current
+          : 0;
+      if (isMatchActive) {
+        lastElapsedSecRef.current = elapsedSec;
+      }
       const storm = calculateStormState(elapsedSec, targetFinalCenterRef.current);
       stormCenter.current = storm.center;
       currentStormRadiusRef.current = storm.radius;
@@ -7390,7 +7858,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               setSelectedBuildType(null);
               setActiveCrateModal(null);
               setShowEliminationToast(true);
-              setTimeout(() => setShowEliminationToast(false), 3800);
+              scheduleSafeTimeout(() => setShowEliminationToast(false), 3800);
             }
           }
           emitDamagePlayer(user.id, 8, undefined, true).then(res => {
@@ -8038,7 +8506,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         if (!hit && !expired) {
           activeProjectiles.push(p);
 
-          if (Math.random() < 0.72) {
+          if (particlesRef.current.length < 280 && Math.random() < 0.72) {
             const pType: ParticleFX['type'] =
               p.weaponId === 'bunsen_burner'
                 ? 'flame'
@@ -8160,7 +8628,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               }
             }
           }
-          if (Math.random() < 0.45) {
+          if (particlesRef.current.length < 280 && Math.random() < 0.45) {
             const ang = Math.random() * Math.PI * 2;
             const r = vfx.radius * 0.85;
             const sx = vfx.x + Math.cos(ang) * r;
@@ -8226,8 +8694,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       const hasSheet = Boolean(sheetImg && sheetImg.complete && sheetImg.naturalWidth > 0);
       if (hasSheet !== lastTerrainSheetReadyRef.current) {
         lastTerrainSheetReadyRef.current = hasSheet;
-        terrainChunksRef.current.clear();
-        buildingCacheRef.current.clear();
+        releaseOffscreenCaches();
       }
 
       ctx.imageSmoothingEnabled = false; // Crisp 16x16 Kenney pixel scaling
@@ -8243,7 +8710,11 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         for (let cx = startChunkX; cx <= endChunkX; cx++) {
           const chunkKey = `${cx}_${cy}`;
           let chunkCanvas = terrainChunksRef.current.get(chunkKey);
-          if (!chunkCanvas) {
+          if (chunkCanvas) {
+            // Refresh LRU position
+            terrainChunksRef.current.delete(chunkKey);
+            terrainChunksRef.current.set(chunkKey, chunkCanvas);
+          } else {
             chunkCanvas = document.createElement('canvas');
             chunkCanvas.width = TERRAIN_CHUNK_SIZE;
             chunkCanvas.height = TERRAIN_CHUNK_SIZE;
@@ -8331,6 +8802,16 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
                 }
               }
             }
+            if (terrainChunksRef.current.size >= 28) {
+              const oldestChunkKey = terrainChunksRef.current.keys().next().value;
+              if (oldestChunkKey) {
+                const evictedChunk = terrainChunksRef.current.get(oldestChunkKey);
+                if (evictedChunk) {
+                  try { evictedChunk.width = 0; evictedChunk.height = 0; } catch {}
+                }
+                terrainChunksRef.current.delete(oldestChunkKey);
+              }
+            }
             terrainChunksRef.current.set(chunkKey, chunkCanvas);
           }
           ctx.drawImage(chunkCanvas, cx * TERRAIN_CHUNK_SIZE, cy * TERRAIN_CHUNK_SIZE);
@@ -8357,7 +8838,10 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
 
           const bKey = bldg.id || `bldg_${bIdx}`;
           let cached = buildingCacheRef.current.get(bKey);
-          if (!cached) {
+          if (cached) {
+            buildingCacheRef.current.delete(bKey);
+            buildingCacheRef.current.set(bKey, cached);
+          } else {
             const wingHbs = getBuildingHitboxes(bldg);
             let minX = bldg.worldX;
             let minY = bldg.worldY;
@@ -8409,6 +8893,16 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               }
             }
             cached = { canvas: offCanvas, minX, minY };
+            if (buildingCacheRef.current.size >= 36) {
+              const oldestBKey = buildingCacheRef.current.keys().next().value;
+              if (oldestBKey) {
+                const evictedBldg = buildingCacheRef.current.get(oldestBKey);
+                if (evictedBldg) {
+                  try { evictedBldg.canvas.width = 0; evictedBldg.canvas.height = 0; } catch {}
+                }
+                buildingCacheRef.current.delete(oldestBKey);
+              }
+            }
             buildingCacheRef.current.set(bKey, cached);
           }
 
@@ -8422,6 +8916,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       // =======================================================================
       weaponVfxRef.current.forEach(vfx => {
         if (vfx.kind !== 'hazard_pool' && vfx.kind !== 'orbital_lock' && vfx.kind !== 'vortex') return;
+        if (!Number.isFinite(vfx.x) || !Number.isFinite(vfx.y) || !Number.isFinite(vfx.radius) || vfx.radius <= 0) return;
         const t = Math.min(1, Math.max(0, (now - vfx.startedAt) / vfx.durationMs));
         if (
           vfx.x + vfx.radius < camX - 40 ||
@@ -8433,17 +8928,18 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         }
         ctx.save();
         if (vfx.kind === 'hazard_pool') {
+          const safeRad = Math.max(8, vfx.radius);
           const fadeAlpha = t > 0.78 ? Math.max(0, (1 - t) / 0.22) : Math.min(1, t * 5);
           const isAcid = vfx.zoneKind === 'acid';
           ctx.globalAlpha = 0.88 * fadeAlpha;
           // Outer hazard ring
-          const grad = ctx.createRadialGradient(vfx.x, vfx.y, 4, vfx.x, vfx.y, vfx.radius);
+          const grad = ctx.createRadialGradient(vfx.x, vfx.y, 4, vfx.x, vfx.y, safeRad);
           grad.addColorStop(0, isAcid ? 'rgba(52, 211, 153, 0.65)' : 'rgba(163, 230, 53, 0.6)');
           grad.addColorStop(0.65, isAcid ? 'rgba(16, 185, 129, 0.35)' : 'rgba(132, 204, 22, 0.32)');
           grad.addColorStop(1, 'rgba(16, 185, 129, 0)');
           ctx.fillStyle = grad;
           ctx.beginPath();
-          ctx.arc(vfx.x, vfx.y, vfx.radius, 0, Math.PI * 2);
+          ctx.arc(vfx.x, vfx.y, safeRad, 0, Math.PI * 2);
           ctx.fill();
 
           // Dashed caustic perimeter
@@ -8452,17 +8948,17 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           ctx.setLineDash([8, 6]);
           ctx.lineDashOffset = -(now / 35);
           ctx.beginPath();
-          ctx.arc(vfx.x, vfx.y, vfx.radius * (0.94 + Math.sin(now / 140) * 0.04), 0, Math.PI * 2);
+          ctx.arc(vfx.x, vfx.y, safeRad * (0.94 + Math.sin(now / 140) * 0.04), 0, Math.PI * 2);
           ctx.stroke();
           ctx.setLineDash([]);
 
           // Animated boiling bubbles
           for (let b = 0; b < 5; b++) {
             const ang = (b * Math.PI * 2) / 5 + now / 900;
-            const rad = vfx.radius * (0.25 + ((b * 0.17 + now / 1200) % 0.6));
+            const rad = safeRad * (0.25 + ((b * 0.17 + now / 1200) % 0.6));
             const bx = vfx.x + Math.cos(ang) * rad;
             const by = vfx.y + Math.sin(ang) * rad;
-            const br = 3.5 + Math.sin(now / 110 + b) * 2;
+            const br = Math.max(0.5, 3.5 + Math.sin(now / 110 + b) * 2);
             ctx.fillStyle = isAcid ? '#a7f3d0' : '#ecfccb';
             ctx.beginPath();
             ctx.arc(bx, by, br, 0, Math.PI * 2);
@@ -8502,19 +8998,20 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             ctx.stroke();
           }
         } else if (vfx.kind === 'vortex') {
+          const safeVRad = Math.max(12, vfx.radius);
           const fadeAlpha = t > 0.82 ? Math.max(0, (1 - t) / 0.18) : Math.min(1, t * 5);
           ctx.translate(vfx.x, vfx.y);
           ctx.globalAlpha = fadeAlpha;
 
           // Gravity field aura
-          const gGrad = ctx.createRadialGradient(0, 0, 8, 0, 0, vfx.radius);
+          const gGrad = ctx.createRadialGradient(0, 0, 8, 0, 0, safeVRad);
           gGrad.addColorStop(0, 'rgba(15, 5, 29, 0.92)');
           gGrad.addColorStop(0.28, 'rgba(147, 51, 234, 0.55)');
           gGrad.addColorStop(0.75, 'rgba(168, 85, 247, 0.2)');
           gGrad.addColorStop(1, 'rgba(168, 85, 247, 0)');
           ctx.fillStyle = gGrad;
           ctx.beginPath();
-          ctx.arc(0, 0, vfx.radius, 0, Math.PI * 2);
+          ctx.arc(0, 0, safeVRad, 0, Math.PI * 2);
           ctx.fill();
 
           // Spinning spiral accretion arms
@@ -9693,7 +10190,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         cContext.restore();
       };
 
-      // 5. Add Other Alive Players to Y-Sort Queue with smooth interpolation (eliminated players are completely invisible)
+      // 5. Add Other Alive Players to Y-Sort Queue with timestamped snapshot interpolation (eliminated players are completely invisible)
       arenaPlayersRef.current.forEach(p => {
         if (p.uid !== user.id && p.isAlive && (p.hp === undefined || p.hp > 0)) {
           let motion = remotePlayerMotionRef.current[p.uid];
@@ -9705,25 +10202,90 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
               lastMovedAt: 0,
               prevHp: p.hp,
               hurtUntil: 0,
-              attackUntil: 0
+              attackUntil: 0,
+              snapshots: [{ t: nowPerf, x: p.x, y: p.y, angle: p.angle || 0, vx: 0, vy: 0 }],
+              renderTime: nowPerf - 75,
+              jitterMs: 12,
+              lastRecvAt: nowPerf,
+              lastWsTickAt: 0
             };
             remotePlayerMotionRef.current[p.uid] = motion;
           }
-          const deltaStep = Math.hypot(p.x - motion.drawX, p.y - motion.drawY);
-          if (deltaStep > 2.2) {
-            motion.lastMovedAt = now;
-          }
+
           if (p.hp < motion.prevHp) {
             motion.hurtUntil = now + 300;
           }
           motion.prevHp = p.hp;
-          const lerpAlpha = 1 - Math.exp(-12 * dt);
-          motion.drawX += (p.x - motion.drawX) * lerpAlpha;
-          motion.drawY += (p.y - motion.drawY) * lerpAlpha;
-          let angleDelta = (p.angle || 0) - motion.drawAngle;
-          while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
-          while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
-          motion.drawAngle += angleDelta * lerpAlpha;
+
+          const snaps = motion.snapshots;
+          const targetDelayMs = Math.min(135, 70 + motion.jitterMs);
+          const desiredRenderTime = nowPerf - targetDelayMs;
+          motion.renderTime += dt * 1000;
+          const clockErr = desiredRenderTime - motion.renderTime;
+          if (Math.abs(clockErr) > 320) {
+            motion.renderTime = desiredRenderTime;
+          } else {
+            motion.renderTime += clockErr * Math.min(1, dt * 6);
+          }
+
+          let targetX = p.x;
+          let targetY = p.y;
+          let targetAngle = p.angle || 0;
+          let isMovingSample = false;
+
+          if (snaps.length > 0) {
+            const rt = motion.renderTime;
+            if (rt <= snaps[0].t) {
+              targetX = snaps[0].x;
+              targetY = snaps[0].y;
+              targetAngle = snaps[0].angle;
+              isMovingSample = Math.hypot(snaps[0].vx, snaps[0].vy) > 15;
+            } else if (rt >= snaps[snaps.length - 1].t) {
+              const last = snaps[snaps.length - 1];
+              const extrapSec = Math.min(0.09, Math.max(0, (rt - last.t) / 1000));
+              const damp = Math.max(0, 1 - extrapSec / 0.14);
+              targetX = Math.max(0, Math.min(MAP_SIZE, last.x + last.vx * extrapSec * damp));
+              targetY = Math.max(0, Math.min(MAP_SIZE, last.y + last.vy * extrapSec * damp));
+              targetAngle = last.angle;
+              isMovingSample = Math.hypot(last.vx, last.vy) > 15 && (nowPerf - last.t < 180);
+            } else {
+              let s0 = snaps[0];
+              let s1 = snaps[snaps.length - 1];
+              for (let si = 0; si < snaps.length - 1; si++) {
+                if (snaps[si].t <= rt && rt <= snaps[si + 1].t) {
+                  s0 = snaps[si];
+                  s1 = snaps[si + 1];
+                  break;
+                }
+              }
+              const segMs = Math.max(1, s1.t - s0.t);
+              const u = Math.max(0, Math.min(1, (rt - s0.t) / segMs));
+              targetX = s0.x + (s1.x - s0.x) * u;
+              targetY = s0.y + (s1.y - s0.y) * u;
+              const aDiff = normalizeAngleDelta(s1.angle - s0.angle);
+              targetAngle = s0.angle + aDiff * u;
+              isMovingSample =
+                Math.hypot(s1.x - s0.x, s1.y - s0.y) > 1.2 ||
+                Math.hypot(s0.vx, s0.vy) > 15 ||
+                Math.hypot(s1.vx, s1.vy) > 15;
+            }
+          }
+
+          if (Math.hypot(targetX - motion.drawX, targetY - motion.drawY) > 210) {
+            motion.drawX = targetX;
+            motion.drawY = targetY;
+            motion.drawAngle = targetAngle;
+          } else {
+            const microAlpha = 1 - Math.exp(-28 * dt);
+            motion.drawX += (targetX - motion.drawX) * microAlpha;
+            motion.drawY += (targetY - motion.drawY) * microAlpha;
+            const angleDelta = normalizeAngleDelta(targetAngle - motion.drawAngle);
+            motion.drawAngle += angleDelta * microAlpha;
+          }
+
+          if (isMovingSample) {
+            motion.lastMovedAt = now;
+          }
 
           if (
             motion.drawX < camX - 50 ||
@@ -9734,7 +10296,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
             return;
           }
 
-          const isRemoteMoving = now - motion.lastMovedAt < 380;
+          const isRemoteMoving = isMovingSample || now - motion.lastMovedAt < 220;
           const isRemoteHurt = now < motion.hurtUntil;
           const isRemoteAttacking = now < motion.attackUntil;
           const drawX = motion.drawX;
@@ -10338,25 +10900,27 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         } else if (vfx.kind === 'orbital_beam') {
           // Colossal Vertical Positron Orbital Strike Pillar from sky to target ground
           const beamTopY = vfx.y - viewH - 220;
-          const beamHalfW = Math.max(8, (vfx.radius * 0.42) * (1 - progress * 0.72));
-          ctx.globalAlpha = Math.max(0, 1 - progress * 0.85);
-          ctx.shadowColor = '#f43f5e';
-          ctx.shadowBlur = 28;
+          const beamHalfW = Math.max(8, ((Number.isFinite(vfx.radius) ? vfx.radius : 120) * 0.42) * (1 - progress * 0.72));
+          if (Number.isFinite(vfx.x) && Number.isFinite(vfx.y) && Number.isFinite(beamTopY) && beamHalfW > 0) {
+            ctx.globalAlpha = Math.max(0, 1 - progress * 0.85);
+            ctx.shadowColor = '#f43f5e';
+            ctx.shadowBlur = 28;
 
-          const grad = ctx.createLinearGradient(vfx.x - beamHalfW, 0, vfx.x + beamHalfW, 0);
-          grad.addColorStop(0, 'rgba(244, 63, 94, 0)');
-          grad.addColorStop(0.28, 'rgba(244, 63, 94, 0.85)');
-          grad.addColorStop(0.5, 'rgba(255, 255, 255, 1)');
-          grad.addColorStop(0.72, 'rgba(244, 63, 94, 0.85)');
-          grad.addColorStop(1, 'rgba(244, 63, 94, 0)');
-          ctx.fillStyle = grad;
-          ctx.fillRect(vfx.x - beamHalfW, beamTopY, beamHalfW * 2, vfx.y - beamTopY);
+            const grad = ctx.createLinearGradient(vfx.x - beamHalfW, 0, vfx.x + beamHalfW, 0);
+            grad.addColorStop(0, 'rgba(244, 63, 94, 0)');
+            grad.addColorStop(0.28, 'rgba(244, 63, 94, 0.85)');
+            grad.addColorStop(0.5, 'rgba(255, 255, 255, 1)');
+            grad.addColorStop(0.72, 'rgba(244, 63, 94, 0.85)');
+            grad.addColorStop(1, 'rgba(244, 63, 94, 0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(vfx.x - beamHalfW, beamTopY, beamHalfW * 2, vfx.y - beamTopY);
 
-          // Blinding ground impact crater ellipse
-          ctx.fillStyle = 'rgba(254, 205, 211, 0.9)';
-          ctx.beginPath();
-          ctx.ellipse(vfx.x, vfx.y, beamHalfW * 1.45, beamHalfW * 0.65, 0, 0, Math.PI * 2);
-          ctx.fill();
+            // Blinding ground impact crater ellipse
+            ctx.fillStyle = 'rgba(254, 205, 211, 0.9)';
+            ctx.beginPath();
+            ctx.ellipse(vfx.x, vfx.y, beamHalfW * 1.45, beamHalfW * 0.65, 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
         } else if (vfx.kind === 'chain_arc' && vfx.points.length >= 2) {
           ctx.globalAlpha = alpha;
           ctx.shadowColor = vfx.color || '#38bdf8';
@@ -10433,48 +10997,55 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       // (E) LAYER 4: EYE OF THE STORM & TRANSPARENT VIOLET WORLD SHROUD
       ctx.save();
 
-      const safeEyeRadius = Math.max(0, storm.radius);
+      const safeStormX = Number.isFinite(stormCenter.current?.x) ? stormCenter.current.x : 2560;
+      const safeStormY = Number.isFinite(stormCenter.current?.y) ? stormCenter.current.y : 2560;
+      const safeEyeRadius = Math.max(0, Number.isFinite(storm.radius) ? storm.radius : 3600);
       const isSurging = storm.isSurging && isMatchActive;
 
       // 1. Transparent Violet Filter Outside the Eye of the Storm (where storm damage occurs)
       ctx.beginPath();
       ctx.rect(-1000, -1000, MAP_SIZE + 2000, MAP_SIZE + 2000);
-      ctx.arc(stormCenter.current.x, stormCenter.current.y, safeEyeRadius, 0, Math.PI * 2, true);
+      if (safeEyeRadius > 0) {
+        ctx.moveTo(safeStormX + safeEyeRadius, safeStormY);
+        ctx.arc(safeStormX, safeStormY, safeEyeRadius, 0, Math.PI * 2, true);
+      }
       const violetAlpha = isSurging ? 0.46 : 0.32;
       ctx.fillStyle = `rgba(139, 92, 246, ${violetAlpha})`;
       ctx.fill('evenodd');
 
-      // 2. High-energy electric outer perimeter ring with dynamic neon glow
-      const pulse = (Math.sin(now / 180) + 1) / 2;
-      ctx.beginPath();
-      ctx.arc(stormCenter.current.x, stormCenter.current.y, safeEyeRadius, 0, 2 * Math.PI);
-      ctx.strokeStyle = isSurging ? '#f43f5e' : '#c026d3';
-      ctx.lineWidth = 7 + pulse * 3.5;
-      ctx.shadowColor = isSurging ? '#fda4af' : '#e879f9';
-      ctx.shadowBlur = 28;
-      ctx.stroke();
+      if (safeEyeRadius > 0) {
+        // 2. High-energy electric outer perimeter ring with dynamic neon glow
+        const pulse = (Math.sin(now / 180) + 1) / 2;
+        ctx.beginPath();
+        ctx.arc(safeStormX, safeStormY, safeEyeRadius, 0, 2 * Math.PI);
+        ctx.strokeStyle = isSurging ? '#f43f5e' : '#c026d3';
+        ctx.lineWidth = 7 + pulse * 3.5;
+        ctx.shadowColor = isSurging ? '#fda4af' : '#e879f9';
+        ctx.shadowBlur = 28;
+        ctx.stroke();
 
-      // 3. Crisp neon inner perimeter accent edge
-      ctx.beginPath();
-      ctx.arc(stormCenter.current.x, stormCenter.current.y, safeEyeRadius, 0, 2 * Math.PI);
-      ctx.strokeStyle = 'rgba(250, 232, 255, 0.75)';
-      ctx.lineWidth = 2;
-      ctx.shadowBlur = 0;
-      ctx.stroke();
+        // 3. Crisp neon inner perimeter accent edge
+        ctx.beginPath();
+        ctx.arc(safeStormX, safeStormY, safeEyeRadius, 0, 2 * Math.PI);
+        ctx.strokeStyle = 'rgba(250, 232, 255, 0.75)';
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 0;
+        ctx.stroke();
 
-      // 4. Subtle electric energy spark particles orbiting along the storm boundary
-      const sparkCount = 6;
-      for (let s = 0; s < sparkCount; s++) {
-        const sparkAngle = (now / 1500 + (s * Math.PI * 2) / sparkCount) % (Math.PI * 2);
-        const sx = stormCenter.current.x + Math.cos(sparkAngle) * safeEyeRadius;
-        const sy = stormCenter.current.y + Math.sin(sparkAngle) * safeEyeRadius;
-        if (sx >= camX - 30 && sx <= camX + viewW + 30 && sy >= camY - 30 && sy <= camY + viewH + 30) {
-          ctx.beginPath();
-          ctx.arc(sx, sy, 3 + Math.sin(now / 120 + s) * 1.5, 0, Math.PI * 2);
-          ctx.fillStyle = '#f0abfc';
-          ctx.shadowColor = '#ffffff';
-          ctx.shadowBlur = 12;
-          ctx.fill();
+        // 4. Subtle electric energy spark particles orbiting along the storm boundary
+        const sparkCount = 6;
+        for (let s = 0; s < sparkCount; s++) {
+          const sparkAngle = (now / 1500 + (s * Math.PI * 2) / sparkCount) % (Math.PI * 2);
+          const sx = safeStormX + Math.cos(sparkAngle) * safeEyeRadius;
+          const sy = safeStormY + Math.sin(sparkAngle) * safeEyeRadius;
+          if (sx >= camX - 30 && sx <= camX + viewW + 30 && sy >= camY - 30 && sy <= camY + viewH + 30) {
+            ctx.beginPath();
+            ctx.arc(sx, sy, Math.max(0.5, 3 + Math.sin(now / 120 + s) * 1.5), 0, Math.PI * 2);
+            ctx.fillStyle = '#f0abfc';
+            ctx.shadowColor = '#ffffff';
+            ctx.shadowBlur = 12;
+            ctx.fill();
+          }
         }
       }
 
@@ -10705,8 +11276,22 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       }
 
       ctx.restore(); // Restore Viewport Camera
-
-      animationFrameId = requestAnimationFrame(gameLoop);
+      } catch (err) {
+        console.error('BattleRoyaleArena gameLoop frame error:', err);
+        for (let r = 0; r < 16; r++) {
+          try { ctx.restore(); } catch {}
+        }
+        try {
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.globalAlpha = 1;
+          ctx.shadowBlur = 0;
+          ctx.setLineDash([]);
+        } catch {}
+      } finally {
+        if (isMountedRef.current) {
+          animationFrameId = requestAnimationFrame(gameLoop);
+        }
+      }
     };
 
     animationFrameId = requestAnimationFrame(gameLoop);
@@ -10726,6 +11311,16 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
           uid: victor.uid,
           name: victor.name,
           avatar: victor.avatar
+        });
+      }
+    } else if (alivePlayers.length === 0 && realPlayers.length > 1 && isInstructor) {
+      const fallbackVictor = [...realPlayers].sort((a, b) => (b.kills || 0) - (a.kills || 0))[0];
+      if (fallbackVictor) {
+        hasDeclaredWinnerRef.current = true;
+        declareBattleWinner({
+          uid: fallbackVictor.uid,
+          name: fallbackVictor.name,
+          avatar: fallbackVictor.avatar
         });
       }
     }
@@ -10828,7 +11423,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       if (isGoblin) {
         flashSkinAbility('Gold Snatcher (+50% Crate Bonus!)');
       }
-      setTimeout(() => {
+      scheduleSafeTimeout(() => {
         crateSubmittingRef.current = false;
         activeCrateModalRef.current = null;
         setActiveCrateModal(null);
@@ -10838,7 +11433,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
       crateDismissCooldownRef.current[crateModal.id] = Date.now() + 4000;
       setCrateFeedback(`❌ Incorrect! ${crateModal.question.explanation}`);
       soundEngine.playHit();
-      setTimeout(() => {
+      scheduleSafeTimeout(() => {
         crateSubmittingRef.current = false;
         activeCrateModalRef.current = null;
         setActiveCrateModal(null);
@@ -11754,7 +12349,7 @@ export const BattleRoyaleArena: React.FC<BattleRoyaleArenaProps> = ({
         )}
 
         {/* TOURNAMENT ACCESS LOCKDOWN FOR STUDENTS BETWEEN SET ROYALE TOURNAMENTS */}
-        {!isInstructor && !isOwnerTester && battleState?.status !== 'IN_PROGRESS' && (
+        {!isInstructor && !isOwnerTester && battleState?.status !== 'IN_PROGRESS' && battleState?.status !== 'ENDED' && (
           <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
             <div className="bg-white border border-slate-300 rounded-xl p-8 max-w-md w-full shadow-md text-center space-y-4 text-slate-800">
               <div className="w-14 h-14 rounded-xl bg-[#EBF3F5] border border-slate-300 flex items-center justify-center text-2xl mx-auto">

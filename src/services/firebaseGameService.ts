@@ -99,6 +99,7 @@ import { notifyServerBattleControl, fetchServerBattleState } from './battleRealt
 import { getRandomizedPracticeVaultQuestions } from '../data/syllabusQuestionsBank';
 import { getLocalDateKey, getYesterdayDateKey } from './badgeService';
 import { ALL_WEAPON_ITEMS, getBoosterPackById, resolveArenaWeaponId } from '../data/gameCatalogData';
+import { computeEqualMapSpawns, MAP_CENTER } from '../utils/battleSpawnLayout';
 
 export type InstructorRewardType = 'booster_pack' | 'gold' | 'skin' | 'weapon';
 
@@ -1969,7 +1970,7 @@ const DEFAULT_EVENT_STATE: BattleEventState = {
   isLobbyOpen: false, // Students do not have access until instructor opens the lobby
   startedAt: null,
   stormRadius: 3600,
-  stormCenter: { x: 2500, y: 2500 },
+  stormCenter: { x: MAP_CENTER, y: MAP_CENTER },
   currentWinner: null
 };
 
@@ -2365,17 +2366,15 @@ export const startBattleRoyale = async (): Promise<void> => {
     }
   }
 
-  // 2. Initialize Arena Players with circular spawn distribution & FULL HP + FULL SHIELDS
-  const lobbyList = Array.from(lobbyMap.values());
-  const count = lobbyList.length || 1;
-  const arenaCenter = 2500;
-  const spawnRadius = 1400;
+  // 2. Initialize Arena Players spread equally across the full 5120x5120 map & FULL HP + FULL SHIELDS
+  const lobbyList = Array.from(lobbyMap.values()).sort((a, b) => a.uid.localeCompare(b.uid));
+  const startedAtIso = new Date().toISOString();
+  const arenaCenter = MAP_CENTER;
+  const spawns = computeEqualMapSpawns(Math.max(1, lobbyList.length), startedAtIso);
   const initializedPlayers: ArenaPlayer[] = [];
 
   lobbyList.forEach((l, idx) => {
-    const angle = (idx / count) * 2 * Math.PI;
-    const x = Math.round(arenaCenter + Math.cos(angle) * spawnRadius);
-    const y = Math.round(arenaCenter + Math.sin(angle) * spawnRadius);
+    const spawn = spawns[idx] || { x: arenaCenter, y: arenaCenter, angle: 0 };
     const resolvedSkin = getFantasySkin(l.avatar || 'cultist');
     const isKnightHero = resolvedSkin.id === 'knight_hero';
     const maxShieldCap = isKnightHero ? 120 : 100;
@@ -2385,9 +2384,9 @@ export const startBattleRoyale = async (): Promise<void> => {
       name: l.name || 'Science Scholar',
       avatar: l.avatar || 'cultist',
       equippedWeapon: l.equippedWeapon || 'bunsen_burner',
-      x,
-      y,
-      angle: angle + Math.PI, // look toward center
+      x: spawn.x,
+      y: spawn.y,
+      angle: spawn.angle,
       hp: 100,
       maxHp: 100,
       shield: maxShieldCap,
@@ -2433,7 +2432,7 @@ export const startBattleRoyale = async (): Promise<void> => {
   const liveState: BattleEventState = {
     status: 'IN_PROGRESS',
     isLobbyOpen: true,
-    startedAt: new Date().toISOString(),
+    startedAt: startedAtIso,
     stormRadius: 3600,
     stormCenter: { x: arenaCenter, y: arenaCenter },
     stormFinalCenter: { x: randomFinalX, y: randomFinalY },
@@ -2550,6 +2549,11 @@ export const declareBattleWinner = async (winner: { uid: string; name: string; a
   } catch (err) {
     console.warn('Transaction fallback in declareBattleWinner:', err);
     try {
+      const existingSnap = await getDoc(stateDoc);
+      const existingData = existingSnap.exists() ? (existingSnap.data() as BattleEventState) : null;
+      if (existingData?.status === 'ENDED') {
+        return;
+      }
       await setDoc(stateDoc, {
         status: 'ENDED',
         isLobbyOpen: false,
